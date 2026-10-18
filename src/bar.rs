@@ -164,22 +164,11 @@ impl Bar {
         let row = m.config.height;
         let mut parts = Vec::new();
 
-        // Workspaces as a grid of square buttons, as many per line as fit, centered.
-        let cell = row;
-        let per_line = ((w - 8) / cell).max(1) as usize;
-        let lines = m.workspaces.len().div_ceil(per_line);
+        // Workspaces stacked in one column, one row each.
         let mut y = 4;
-        for line in 0..lines {
-            let first = line * per_line;
-            let count = per_line.min(m.workspaces.len() - first) as i32;
-            let x0 = (w - per_line as i32 * cell) / 2;
-            for j in 0..count {
-                parts.push((
-                    Rect::new(x0 + j * cell, y, cell, cell),
-                    Part::Workspace(first + j as usize),
-                ));
-            }
-            y += cell;
+        for i in 0..m.workspaces.len() {
+            parts.push((Rect::new(0, y, w, row), Part::Workspace(i)));
+            y += row;
         }
         y += 4;
 
@@ -263,7 +252,12 @@ impl Bar {
             match part {
                 Part::Workspace(i) => {
                     let look = m.workspaces[i];
-                    let pill = inset(r, 3 * s);
+                    // Side bars: full-width rows lined up with the window rows below.
+                    let pill = if vertical {
+                        Rect::new(r.x + 6 * s, r.y + s, r.w - 12 * s, r.h - 2 * s)
+                    } else {
+                        inset(r, 3 * s)
+                    };
                     let label_color = match look {
                         WsLook::Active => {
                             rounded(&mut canvas, pill, p.accent);
@@ -277,18 +271,20 @@ impl Bar {
                         }
                     };
                     let label = (i + 1).to_string();
-                    centered(
-                        &mut canvas,
-                        &label,
-                        Rect::new(r.x, r.y - s, r.w, r.h),
-                        px * 0.9,
-                        label_color,
-                    );
-                    // A dot under workspaces that have windows.
+                    // A dot on workspaces that have windows: under the number on a horizontal
+                    // bar, beside it on a side bar where rows are short.
+                    let label_rect = if vertical { r } else { Rect::new(r.x, r.y - s, r.w, r.h) };
+                    centered(&mut canvas, &label, label_rect, px * 0.9, label_color);
                     if look != WsLook::Empty {
                         let dot = if look == WsLook::Active { p.on_accent } else { p.subtext };
                         let d = 3 * s;
-                        canvas.fill_rounded_rect(r.x + (r.w - d) / 2, pill.y + pill.h - d - 2 * s, d, d, d as f32, dot);
+                        let (dx, dy) = if vertical {
+                            let tw = text.width(&label, px * 0.9) as i32;
+                            (r.x + (r.w + tw) / 2 + 5 * s, r.y + (r.h - d) / 2)
+                        } else {
+                            (r.x + (r.w - d) / 2, pill.y + pill.h - d - 2 * s)
+                        };
+                        canvas.fill_rounded_rect(dx, dy, d, d, d as f32, dot);
                     }
                 }
                 Part::Tab(i) => {
