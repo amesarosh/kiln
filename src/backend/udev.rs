@@ -57,6 +57,8 @@ pub struct UdevData {
     session: LibSeatSession,
     libinput: Libinput,
     gpu: Option<Gpu>,
+    /// From --output: only these connectors are lit. Empty means all of them.
+    only_outputs: Vec<String>,
     cursor: Cursor,
     keyboards: Vec<libinput::Device>,
     /// Pointer devices, kept so input settings can be re-applied on config reload.
@@ -82,7 +84,11 @@ struct Surface {
     redraw_after_vblank: bool,
 }
 
-pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn init(
+    state: &mut State,
+    handle: &LoopHandle<'static, State>,
+    only_outputs: Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // libseat tries seatd before logind. If both run, seatd and logind fight over
     // the GPU and VTs on every switch, which can hang the machine. Prefer logind
     // when it's managing the system, unless the user picked a backend.
@@ -103,6 +109,7 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
         session,
         libinput: libinput.clone(),
         gpu: None,
+        only_outputs,
         cursor: Cursor::new(),
         keyboards: Vec::new(),
         pointers: Vec::new(),
@@ -129,6 +136,17 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
     }
     if udev_data(state).is_none_or(|u| u.gpu.is_none()) {
         return Err("could not initialize the primary GPU".into());
+    }
+    // A typo in --output would otherwise leave every screen dark.
+    if let Some(u) = udev_data(state)
+        && !u.only_outputs.is_empty()
+        && u.gpu.as_ref().is_some_and(|g| g.surfaces.is_empty())
+    {
+        return Err(format!(
+            "none of --output {} matched a connected monitor",
+            u.only_outputs.join(", ")
+        )
+        .into());
     }
 
     handle.insert_source(udev, move |event, _, state| match event {
@@ -171,14 +189,21 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
                     tracing::error!("failed to resume libinput");
                 }
                 if let Some(gpu) = &mut u.gpu {
-                    if let Err(e) = gpu.outputs.activate(false) {
+                    // Whoever had the GPU meanwhile (Xorg, GDM) may have moved monitors to other
+                    // CRTCs. `true` turns everything off first so our old layout doesn't conflict.
+                    if let Err(e) = gpu.outputs.activate(true) {
                         tracing::error!("failed to reactivate GPU: {e}");
                     }
                     for s in gpu.surfaces.values_mut() {
                         s.waiting_vblank = false;
+                        s.redraw_after_vblank = false;
                         s.drm_output.reset_buffers();
                     }
                 }
+            }
+            // Hotplug events were ignored while paused; catch up on monitor changes.
+            if let Some(node) = udev_data(state).and_then(|u| u.gpu.as_ref()).map(|g| g.node) {
+                scan_connectors(state, node);
             }
             state.needs_redraw = true;
         }
@@ -258,9 +283,14 @@ fn device_added(
 
 /// Light up newly connected monitors and drop disconnected ones.
 fn scan_connectors(state: &mut State, node: DrmNode) {
-    let Some(gpu) = udev_data_mut(state).and_then(|u| u.gpu.as_mut()) else {
+    let Some(u) = udev_data_mut(state) else { return };
+    // While paused another program owns the screens and every modeset it does sends a udev
+    // change event. Scanning force-probes each monitor (EDID reads) underneath it, so wait for
+    // resume, which rescans.
+    if !u.session.is_active() {
         return;
-    };
+    }
+    let Some(gpu) = u.gpu.as_mut() else { return };
     if gpu.node != node {
         return;
     }
@@ -287,6 +317,12 @@ fn scan_connectors(state: &mut State, node: DrmNode) {
 
 fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc::Handle) {
     let name = format!("{}-{}", connector.interface().as_str(), connector.interface_id());
+    if let Some(u) = udev_data(state)
+        && !u.only_outputs.is_empty()
+        && !u.only_outputs.iter().any(|n| n.eq_ignore_ascii_case(&name))
+    {
+        return tracing::info!("{name}: skipped (not listed in --output)");
+    }
     let Some(&drm_mode) = connector
         .modes()
         .iter()
@@ -358,7 +394,7 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
         },
     );
     layer_map_for_output(&output).arrange();
-    state.needs_redraw = true;
+    state.add_monitor(output);
 }
 
 fn connector_disconnected(state: &mut State, connector: connector::Info, crtc: crtc::Handle) {
@@ -373,6 +409,7 @@ fn connector_disconnected(state: &mut State, connector: connector::Info, crtc: c
         connector.interface().as_str(),
         connector.interface_id()
     );
+    state.remove_monitor(&surface.output);
     state.space.unmap_output(&surface.output);
     state.display_handle.remove_global::<State>(surface.global);
     state.needs_redraw = true;

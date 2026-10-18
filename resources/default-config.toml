@@ -30,6 +30,22 @@ border_active = "#89b4fa"
 border_inactive = "#313244"
 background = "#11111b"
 
+# The clickable bar: workspace buttons, one tab per window, a layout button
+# and a + button. Click a workspace or tab to switch to it, middle-click a tab
+# to close that window, and scroll over the bar or empty desktop to change
+# workspace.
+[bar]
+enabled = true
+position = "top"         # "top" or "bottom"
+height = 28
+font = "sans"            # fontconfig name, or a path to a .ttf/.otf file
+font_size = 14
+background = "#181825"
+foreground = "#cdd6f4"
+accent = "#89b4fa"       # active workspace and focused window
+dim = "#6c7086"          # empty workspaces
+launcher = "alacritty"   # what the + button runs
+
 [keyboard]
 layout = "us"
 variant = ""
@@ -59,8 +75,13 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 #   toggle-fullscreen
 #   workspace <n>             switch to workspace n
 #   move-to-workspace <n>     send the focused window to workspace n
+#   focus-monitor next|prev   move focus (and the pointer) to another monitor
+#   move-to-monitor next|prev send the focused window to another monitor
 #   reload                    reload this file (it also reloads on save)
 #   quit                      exit the compositor
+#
+# Each monitor has its own set of workspaces; workspace keys act on the
+# focused monitor. Monitors are ordered left to right.
 #
 # Ctrl+Alt+F1..F12 always switch virtual terminals when running from a TTY,
 # and Ctrl+Alt+Backspace always quits, whatever is in [binds].
@@ -110,6 +131,11 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 "Mod+Shift+8" = "move-to-workspace 8"
 "Mod+Shift+9" = "move-to-workspace 9"
 
+"Mod+period" = "focus-monitor next"
+"Mod+comma" = "focus-monitor prev"
+"Mod+Shift+period" = "move-to-monitor next"
+"Mod+Shift+comma" = "move-to-monitor prev"
+
 # Window rules. `app_id` must match exactly; `title` matches if it is contained
 # in the window title. Both are optional, but at least one should be set.
 #
@@ -120,3 +146,4 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 # [[rules]]
 # app_id = "firefox"
 # workspace = 2
+# output = "DP-5"   # open on this monitor (names are in the log)

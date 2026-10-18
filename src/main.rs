@@ -1,4 +1,5 @@
 mod backend;
+mod bar;
 mod config;
 mod cursor;
 mod grabs;
@@ -7,6 +8,7 @@ mod input;
 mod layout;
 mod render;
 mod state;
+mod text;
 mod workspace;
 
 use std::{fs::File, path::PathBuf, sync::Mutex};
@@ -25,6 +27,8 @@ OPTIONS:
     -c, --config <PATH>      Use this config file instead of ~/.config/wayland-time/config.toml
     -e, --exec <CMD>         Run a command once the compositor is ready (repeatable)
     -b, --backend <NAME>     auto (default), winit (nested window) or tty (real hardware)
+    -o, --output <NAME>      tty only: light up just this monitor, e.g. DP-4 (repeatable).
+                             Monitors not listed are switched off. Names are in the log.
         --check-config       Validate the config file and exit
     -h, --help               Show this help
 
@@ -43,6 +47,7 @@ struct Args {
     config: Option<PathBuf>,
     exec: Vec<String>,
     backend: BackendChoice,
+    outputs: Vec<String>,
     check_config: bool,
 }
 
@@ -51,6 +56,7 @@ fn parse_args() -> Result<Args, String> {
         config: None,
         exec: Vec::new(),
         backend: BackendChoice::Auto,
+        outputs: Vec::new(),
         check_config: false,
     };
     let mut it = std::env::args().skip(1);
@@ -66,6 +72,7 @@ fn parse_args() -> Result<Args, String> {
                     _ => return Err("--backend must be auto, winit or tty".into()),
                 }
             }
+            "-o" | "--output" => args.outputs.push(it.next().ok_or("--output needs a monitor name")?),
             "--check-config" => args.check_config = true,
             "-h" | "--help" => {
                 print!("{HELP}");
@@ -162,7 +169,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = if nested {
         backend::winit::init(&mut state, &handle)
     } else {
-        backend::udev::init(&mut state, &handle)
+        backend::udev::init(&mut state, &handle, args.outputs)
     };
     if let Err(e) = result {
         tracing::error!("failed to start {} backend: {e}", if nested { "nested" } else { "tty" });

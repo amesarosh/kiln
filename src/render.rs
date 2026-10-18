@@ -101,7 +101,15 @@ where
             _ => {}
         }
     }
-    let fullscreen = state.ws().fullscreen.is_some();
+    let mon = state.monitor_index(output);
+    let fullscreen = mon.is_some_and(|m| state.monitors[m].ws().fullscreen.is_some());
+
+    // Each monitor has its own bar. Built before taking the layer map lock below, because
+    // bar_rect() locks it too and the lock isn't re-entrant.
+    let bar = mon.and_then(|m| {
+        let rect = state.bar_rect(m)?;
+        Some((rect, state.bar_buffer(m, output.current_scale().integer_scale())?))
+    });
 
     let map = layer_map_for_output(output);
     let push_layers = |out: &mut Vec<OutputElement<R>>, renderer: &mut R, layer: Layer| {
@@ -120,6 +128,15 @@ where
     };
 
     push_layers(&mut out, renderer, Layer::Overlay);
+
+    if let Some((rect, buffer)) = bar {
+        let loc = (rect.loc - output_geo.loc).to_f64().to_physical(scale);
+        match MemoryRenderBufferRenderElement::from_buffer(renderer, loc, &buffer, None, None, None, Kind::Unspecified)
+        {
+            Ok(e) => out.push(OutputElement::Memory(e)),
+            Err(e) => tracing::warn!("bar upload failed: {e:?}"),
+        }
+    }
     if !fullscreen {
         push_layers(&mut out, renderer, Layer::Top);
     }
@@ -130,6 +147,10 @@ where
         let Some(loc) = state.space.element_location(window) else {
             continue;
         };
+        // Windows on other monitors (a floating one may straddle two and is drawn on both).
+        if !state.space.element_bbox(window).is_some_and(|b| b.overlaps(output_geo)) {
+            continue;
+        }
         let geo = window.geometry();
         let render_loc = (loc - geo.loc - output_geo.loc).to_physical_precise_round(scale);
         out.extend(
@@ -198,11 +219,16 @@ fn push_border<R>(
     }
 }
 
-/// Tell clients they can draw their next frame, and do per-frame housekeeping.
+/// Tell clients on this output they can draw their next frame, and do per-frame housekeeping.
 pub fn send_frames(state: &mut State, output: &Output) {
     let time = state.start_time.elapsed();
+    let first_output = state.space.outputs().next() == Some(output);
     for window in state.space.elements() {
-        window.send_frame(output, time, Some(Duration::ZERO), |_, _| Some(output.clone()));
+        // Paced by the monitor they're on. Windows on no monitor (not placed yet) use the first.
+        let outputs = state.space.outputs_for_element(window);
+        if outputs.contains(output) || (outputs.is_empty() && first_output) {
+            window.send_frame(output, time, Some(Duration::ZERO), |_, _| Some(output.clone()));
+        }
     }
     for layer in layer_map_for_output(output).layers() {
         layer.send_frame(output, time, Some(Duration::ZERO), |_, _| Some(output.clone()));

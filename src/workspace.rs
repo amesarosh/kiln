@@ -138,7 +138,31 @@ impl<W: Clone + PartialEq> Workspace<W> {
     }
 }
 
-fn step(cur: usize, n: usize, dir: Dir) -> usize {
+/// Move every window from `from` into the same-numbered workspace of `into` (extras go to the
+/// last one), e.g. when a monitor is unplugged. Placed floating windows are shifted by `offset`.
+pub fn merge_workspaces<W: Clone + PartialEq>(into: &mut [Workspace<W>], from: Vec<Workspace<W>>, offset: (i32, i32)) {
+    let Some(last) = into.len().checked_sub(1) else { return };
+    for (i, ws) in from.into_iter().enumerate() {
+        let target = &mut into[i.min(last)];
+        let focus_before = target.focus.clone();
+        for mut e in ws.entries {
+            if let Some(r) = &mut e.floating
+                && r.w > 0
+            {
+                r.x += offset.0;
+                r.y += offset.1;
+            }
+            target.add(e.window, false, e.floating);
+        }
+        // Keep what the target had focused; otherwise use what was focused on the old monitor.
+        target.focus = focus_before
+            .or(ws.focus)
+            .or_else(|| target.entries.first().map(|e| e.window.clone()));
+    }
+}
+
+/// Index one step from `cur` in a list of `n`, wrapping around.
+pub fn step(cur: usize, n: usize, dir: Dir) -> usize {
     match dir {
         Dir::Next => (cur + 1) % n,
         Dir::Prev => (cur + n - 1) % n,
@@ -221,5 +245,28 @@ mod tests {
         w.fullscreen = Some(2);
         w.remove(&2);
         assert_eq!(w.fullscreen, None);
+    }
+
+    #[test]
+    fn merge_keeps_numbers_and_shifts_floats() {
+        let mut into = vec![ws(&[1]), ws(&[])];
+        let mut b = ws(&[3]);
+        b.add(4, false, Some(Rect::new(10, 10, 100, 100)));
+        b.add(5, false, Some(Rect::new(0, 0, 0, 0)));
+        b.focus = Some(3);
+        let from = vec![ws(&[2]), b, ws(&[6])];
+        merge_workspaces(&mut into, from, (-2560, 0));
+
+        assert_eq!(order(&into[0]), vec![1, 2]);
+        // Workspace 3 doesn't exist on the target, so its window lands on the last one.
+        assert_eq!(order(&into[1]), vec![3, 4, 5, 6]);
+        assert_eq!(into[0].focus, Some(1), "target keeps its focus");
+        assert_eq!(into[1].focus, Some(3), "empty target takes the old focus");
+        assert_eq!(
+            into[1].entry(&4).unwrap().floating,
+            Some(Rect::new(-2550, 10, 100, 100))
+        );
+        // Unplaced floats stay unplaced so they still get centered.
+        assert_eq!(into[1].entry(&5).unwrap().floating, Some(Rect::new(0, 0, 0, 0)));
     }
 }

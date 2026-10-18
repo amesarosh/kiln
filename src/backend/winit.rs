@@ -1,15 +1,23 @@
 //! Nested backend: runs the compositor as a window inside an existing X11 or Wayland session.
+//!
+//! For testing multi-monitor behaviour without hardware, `WAYLAND_TIME_NESTED_OUTPUTS=N` splits
+//! the window into N side-by-side monitors named winit-1..winit-N.
 
 use smithay::{
     backend::{
         egl::EGLDevice,
-        renderer::{ImportDma, damage::OutputDamageTracker, gles::GlesRenderer},
+        renderer::{
+            ImportDma,
+            damage::OutputDamageTracker,
+            element::utils::{Relocate, RelocateRenderElement},
+            gles::GlesRenderer,
+        },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
     desktop::layer_map_for_output,
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::calloop::LoopHandle,
-    utils::Transform,
+    utils::{Physical, Size, Transform},
     wayland::dmabuf::DmabufFeedbackBuilder,
 };
 
@@ -21,8 +29,39 @@ use crate::{
 
 pub struct WinitData {
     backend: WinitGraphicsBackend<GlesRenderer>,
-    output: Output,
+    /// Left to right, splitting the window evenly.
+    outputs: Vec<Output>,
+    /// Covers the whole window; each output's elements are shifted into its slice.
     damage_tracker: OutputDamageTracker,
+}
+
+/// The window is rendered upside down relative to GL, like smithay's winit examples.
+const WINDOW_TRANSFORM: Transform = Transform::Flipped180;
+
+fn nested_output_count() -> usize {
+    std::env::var("WAYLAND_TIME_NESTED_OUTPUTS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+        .clamp(1, 4)
+}
+
+/// Give each output its slice of the window. The last one takes any leftover pixels.
+fn layout_outputs(state: &mut State, outputs: &[Output], window: Size<i32, Physical>) {
+    let n = outputs.len() as i32;
+    let w = window.w / n;
+    for (i, output) in outputs.iter().enumerate() {
+        let i = i as i32;
+        let width = if i == n - 1 { window.w - w * (n - 1) } else { w };
+        let mode = Mode {
+            size: (width, window.h).into(),
+            refresh: 60_000,
+        };
+        output.change_current_state(Some(mode), None, None, Some((i * w, 0).into()));
+        output.set_preferred(mode);
+        state.space.map_output(output, (i * w, 0));
+        layer_map_for_output(output).arrange();
+    }
 }
 
 impl WinitData {
@@ -39,23 +78,34 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
     let (mut backend, winit_loop) = winit::init::<GlesRenderer>()?;
     backend.window().set_title("wayland-time");
 
-    let mode = Mode {
-        size: backend.window_size(),
-        refresh: 60_000,
-    };
-    let output = Output::new(
-        "winit".to_string(),
-        PhysicalProperties {
-            size: (0, 0).into(),
-            subpixel: Subpixel::Unknown,
-            make: "wayland-time".into(),
-            model: "nested".into(),
-        },
-    );
-    let _global = output.create_global::<State>(&state.display_handle);
-    output.change_current_state(Some(mode), Some(Transform::Flipped180), None, Some((0, 0).into()));
-    output.set_preferred(mode);
-    state.space.map_output(&output, (0, 0));
+    let count = nested_output_count();
+    let outputs: Vec<Output> = (1..=count)
+        .map(|i| {
+            let name = if count == 1 {
+                "winit".to_string()
+            } else {
+                format!("winit-{i}")
+            };
+            let output = Output::new(
+                name,
+                PhysicalProperties {
+                    size: (0, 0).into(),
+                    subpixel: Subpixel::Unknown,
+                    make: "wayland-time".into(),
+                    model: "nested".into(),
+                },
+            );
+            // Lives as long as the compositor, so the global handle isn't needed.
+            let _global = output.create_global::<State>(&state.display_handle);
+            output.change_current_state(None, Some(WINDOW_TRANSFORM), None, None);
+            output
+        })
+        .collect();
+    let window_size = backend.window_size();
+    layout_outputs(state, &outputs, window_size);
+    for output in &outputs {
+        state.add_monitor(output.clone());
+    }
 
     // Let GPU clients share buffers with us instead of falling back to software rendering.
     let formats = backend.renderer().dmabuf_formats();
@@ -78,19 +128,21 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
         Err(e) => tracing::warn!("linux-dmabuf disabled: {e}"),
     }
 
-    let damage_tracker = OutputDamageTracker::from_output(&output);
+    let damage_tracker = OutputDamageTracker::new(window_size, 1.0, WINDOW_TRANSFORM);
     state.backend = Some(Backend::Winit(WinitData {
         backend,
-        output,
+        outputs,
         damage_tracker,
     }));
 
     handle.insert_source(winit_loop, |event, _, state| match event {
         WinitEvent::Resized { size, .. } => {
-            if let Some(output) = state.output() {
-                output.change_current_state(Some(Mode { size, refresh: 60_000 }), None, None, None);
-                layer_map_for_output(&output).arrange();
-            }
+            let Some(Backend::Winit(data)) = &mut state.backend else {
+                return;
+            };
+            data.damage_tracker = OutputDamageTracker::new(size, 1.0, WINDOW_TRANSFORM);
+            let outputs = data.outputs.clone();
+            layout_outputs(state, &outputs, size);
             state.arrange();
         }
         WinitEvent::Input(event) => state.process_input_event(event),
@@ -112,7 +164,20 @@ fn render(state: &mut State) {
 
     let rendered = match data.backend.bind() {
         Ok((renderer, mut framebuffer)) => {
-            let elements = render::output_elements(state, renderer, &data.output, CursorDraw::None);
+            // Each output renders its own elements, shifted to its slice of the window.
+            let mut elements = Vec::new();
+            for output in &data.outputs {
+                let offset = state
+                    .space
+                    .output_geometry(output)
+                    .map(|g| g.loc.to_physical(1))
+                    .unwrap_or_default();
+                elements.extend(
+                    render::output_elements(state, renderer, output, CursorDraw::None)
+                        .into_iter()
+                        .map(|e| RelocateRenderElement::from_element(e, offset, Relocate::Relative)),
+                );
+            }
             match data
                 .damage_tracker
                 .render_output(renderer, &mut framebuffer, age, &elements, clear)
@@ -137,7 +202,9 @@ fn render(state: &mut State) {
         tracing::warn!("failed to submit frame: {e}");
     }
 
-    let output = data.output.clone();
+    let outputs = data.outputs.clone();
     state.backend = Some(Backend::Winit(data));
-    render::send_frames(state, &output);
+    for output in &outputs {
+        render::send_frames(state, output);
+    }
 }

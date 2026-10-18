@@ -44,9 +44,9 @@ impl WlrLayerShellHandler for State {
     }
 
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
-        let Some(output) = self.output() else { return };
-        {
-            let mut map = layer_map_for_output(&output);
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        for output in &outputs {
+            let mut map = layer_map_for_output(output);
             let layer = map.layers().find(|l| l.layer_surface() == &surface).cloned();
             if let Some(layer) = layer {
                 map.unmap_layer(&layer);

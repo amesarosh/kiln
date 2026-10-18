@@ -24,6 +24,7 @@ struct RawConfig {
     general: General,
     layout: LayoutConfig,
     decoration: RawDecoration,
+    bar: RawBar,
     keyboard: KeyboardConfig,
     input: InputConfig,
     binds: BTreeMap<String, String>,
@@ -38,6 +39,7 @@ struct PartialConfig {
     general: Option<toml::Table>,
     layout: Option<toml::Table>,
     decoration: Option<toml::Table>,
+    bar: Option<toml::Table>,
     keyboard: Option<toml::Table>,
     input: Option<toml::Table>,
     binds: Option<BTreeMap<String, String>>,
@@ -91,6 +93,28 @@ struct RawDecoration {
     background: String,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BarPosition {
+    Top,
+    Bottom,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBar {
+    enabled: bool,
+    position: BarPosition,
+    height: i32,
+    font: String,
+    font_size: f32,
+    background: String,
+    foreground: String,
+    accent: String,
+    dim: String,
+    launcher: String,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct KeyboardConfig {
@@ -117,6 +141,8 @@ pub struct WindowRule {
     pub title: Option<String>,
     pub floating: Option<bool>,
     pub workspace: Option<usize>,
+    /// Monitor to open on, by connector name (e.g. "DP-5"). Ignored if it isn't connected.
+    pub output: Option<String>,
 }
 
 // ---------- validated config ----------
@@ -131,11 +157,28 @@ pub struct Decoration {
     pub background: Color,
 }
 
+/// The built-in clickable bar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BarConfig {
+    pub enabled: bool,
+    pub position: BarPosition,
+    pub height: i32,
+    pub font: String,
+    pub font_size: f32,
+    pub background: Color,
+    pub foreground: Color,
+    pub accent: Color,
+    pub dim: Color,
+    /// Command run by the bar's + button.
+    pub launcher: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub general: General,
     pub layout: LayoutConfig,
     pub decoration: Decoration,
+    pub bar: BarConfig,
     pub keyboard: KeyboardConfig,
     pub input: InputConfig,
     pub binds: Vec<Bind>,
@@ -212,6 +255,10 @@ pub enum Action {
     ToggleFullscreen,
     Workspace(usize),
     MoveToWorkspace(usize),
+    /// Move keyboard focus (and the pointer) to the next or previous monitor.
+    FocusMonitor(Dir),
+    /// Send the focused window to the next or previous monitor.
+    MoveToMonitor(Dir),
     /// Ctrl+Alt+F1..F12 on the hardware backend; not configurable.
     SwitchVt(i32),
 }
@@ -278,6 +325,7 @@ impl Config {
         merge("general", user.general);
         merge("layout", user.layout);
         merge("decoration", user.decoration);
+        merge("bar", user.bar);
         merge("keyboard", user.keyboard);
         merge("input", user.input);
         if let Some(binds) = user.binds {
@@ -330,6 +378,32 @@ impl Config {
             background: color("background", &raw.decoration.background, &mut problems),
         };
 
+        let bar_color = |name: &str, s: &str, problems: &mut Vec<String>| {
+            parse_color(s).unwrap_or_else(|e| {
+                problems.push(format!("bar.{name}: {e}"));
+                [0.0, 0.0, 0.0, 1.0]
+            })
+        };
+        let rb = &raw.bar;
+        if !(16..=96).contains(&rb.height) {
+            problems.push("bar.height must be between 16 and 96".into());
+        }
+        if !(6.0..=48.0).contains(&rb.font_size) {
+            problems.push("bar.font_size must be between 6 and 48".into());
+        }
+        let bar = BarConfig {
+            enabled: rb.enabled,
+            position: rb.position,
+            height: rb.height,
+            font: rb.font.clone(),
+            font_size: rb.font_size,
+            background: bar_color("background", &rb.background, &mut problems),
+            foreground: bar_color("foreground", &rb.foreground, &mut problems),
+            accent: bar_color("accent", &rb.accent, &mut problems),
+            dim: bar_color("dim", &rb.dim, &mut problems),
+            launcher: rb.launcher.clone(),
+        };
+
         let layout = raw.layout;
         if !(0.05..=0.95).contains(&layout.master_ratio) {
             problems.push("layout.master_ratio must be between 0.05 and 0.95".into());
@@ -359,6 +433,7 @@ impl Config {
             general: raw.general,
             layout,
             decoration,
+            bar,
             keyboard: raw.keyboard,
             input: raw.input,
             binds,
@@ -485,6 +560,8 @@ fn parse_action(s: &str) -> Result<Action, String> {
         "toggle-fullscreen" => Action::ToggleFullscreen,
         "workspace" => Action::Workspace(workspace()?),
         "move-to-workspace" => Action::MoveToWorkspace(workspace()?),
+        "focus-monitor" => Action::FocusMonitor(dir()?),
+        "move-to-monitor" => Action::MoveToMonitor(dir()?),
         other => return Err(format!("unknown action \"{other}\"")),
     })
 }
@@ -607,6 +684,7 @@ mod tests {
             title: None,
             floating: Some(true),
             workspace: None,
+            output: None,
         };
         assert!(r.matches(Some("mpv"), Some("video.mkv")));
         assert!(!r.matches(Some("mpv2"), None));
@@ -615,6 +693,7 @@ mod tests {
             title: Some("Picture".into()),
             floating: None,
             workspace: None,
+            output: None,
         };
         assert!(r.matches(None, Some("Picture-in-Picture")));
     }

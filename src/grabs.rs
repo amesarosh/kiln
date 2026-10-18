@@ -72,11 +72,12 @@ pub fn begin_resize(
 
 /// Make the window floating at its current geometry and return that geometry.
 fn float_window(state: &mut State, window: &Window) -> Option<Rectangle<i32, Logical>> {
-    if state.ws().fullscreen.as_ref() == Some(window) {
+    let ws = state.workspace_of_mut(window)?;
+    if ws.fullscreen.as_ref() == Some(window) {
         return None;
     }
     let geo = state.space.element_geometry(window)?;
-    let entry = state.ws_mut().entry_mut(window)?;
+    let entry = state.workspace_of_mut(window)?.entry_mut(window)?;
     if entry.floating.is_none() {
         entry.floating = Some(Rect::new(geo.loc.x, geo.loc.y, geo.size.w, geo.size.h));
     }
@@ -111,7 +112,11 @@ struct ResizeGrab {
 impl MoveGrab {
     fn on_motion(&mut self, state: &mut State, location: Point<f64, Logical>) {
         let loc = (self.initial.to_f64() + (location - self.start.location)).to_i32_round();
-        if let Some(Some(r)) = state.ws_mut().entry_mut(&self.window).map(|e| e.floating.as_mut()) {
+        if let Some(Some(r)) = state
+            .workspace_of_mut(&self.window)
+            .and_then(|ws| ws.entry_mut(&self.window))
+            .map(|e| e.floating.as_mut())
+        {
             r.x = loc.x;
             r.y = loc.y;
         }
@@ -119,7 +124,10 @@ impl MoveGrab {
         state.needs_redraw = true;
     }
 
-    fn on_release(&mut self, _state: &mut State) {}
+    /// Dropping a window on another monitor moves it there.
+    fn on_release(&mut self, state: &mut State, location: Point<f64, Logical>) {
+        state.adopt_dropped_window(&self.window, location);
+    }
 }
 
 impl ResizeGrab {
@@ -136,7 +144,7 @@ impl ResizeGrab {
         }
     }
 
-    fn on_release(&mut self, _state: &mut State) {
+    fn on_release(&mut self, _state: &mut State, _location: Point<f64, Logical>) {
         if let Some(t) = self.window.toplevel() {
             t.with_pending_state(|s| s.states.unset(xdg_toplevel::State::Resizing));
             t.send_pending_configure();
@@ -172,7 +180,10 @@ macro_rules! impl_grab {
             fn button(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, event: &ButtonEvent) {
                 handle.button(data, event);
                 if handle.current_pressed().is_empty() {
-                    self.on_release(data);
+                    // From the handle: the pointer is locked while a grab runs, so asking
+                    // the seat for its location here would deadlock.
+                    let location = handle.current_location();
+                    self.on_release(data, location);
                     handle.unset_grab(self, data, event.serial, event.time, true);
                 }
             }

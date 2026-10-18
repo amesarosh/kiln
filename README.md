@@ -3,6 +3,8 @@
 A lightweight, fast, configurable tiling Wayland compositor written in Rust, built on [Smithay](https://github.com/Smithay/smithay).
 
 - **Dynamic tiling** (master/stack and monocle), toggleable floating, fullscreen, 1–32 workspaces
+- **Multiple monitors**, each with its own set of workspaces (like dwm), placed left to right
+- **Built-in clickable bar** per monitor: workspaces, one tab per window, layout switcher and a launcher button
 - **One TOML file** for keybinds, gaps, borders, colors, keyboard layout and window rules, **reloaded on save**
 - **Idle costs nothing:** frames are only drawn when something changes, and only damaged regions are repainted
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
@@ -13,7 +15,8 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 
 - **Nested** inside an existing X11 or Wayland session (development setup): working.
 - **TTY / real hardware** (DRM/KMS, libinput, libseat): implemented, needs testing on more machines.
-  Single GPU only; extra monitors light up but tiling happens on the first one.
+  Single GPU only. Monitors are placed left to right in the order they're detected; positions,
+  modes and scale aren't configurable yet.
 
 ## Build and run
 
@@ -28,6 +31,7 @@ On first start it writes a fully commented default config to `~/.config/wayland-
 -c, --config <PATH>    use a different config file
 -e, --exec <CMD>       run a command once ready (repeatable)
 -b, --backend <NAME>   auto (default), winit or tty
+-o, --output <NAME>    tty only: light up just this monitor, e.g. DP-4 (repeatable)
     --check-config     validate the config and exit
 ```
 
@@ -68,13 +72,28 @@ sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
 | `Mod+t` / `Mod+m` / `Mod+space` | tile / monocle / next layout |
 | `Mod+Shift+space` | toggle floating |
 | `Mod+f` | toggle fullscreen |
-| `Mod+1..9` / `Mod+Shift+1..9` | go to / send to workspace |
+| `Mod+1..9` / `Mod+Shift+1..9` | go to / send to workspace (on the focused monitor) |
+| `Mod+.` / `Mod+,` | focus next / previous monitor |
+| `Mod+Shift+.` / `Mod+Shift+,` | send window to next / previous monitor |
 | `Mod+Shift+q` | close window |
 | `Mod+Shift+r` | reload config |
 | `Mod+Shift+e` | quit |
-| `Mod+left drag` / `Mod+right drag` | move / resize (floats the window) |
+| `Mod+left drag` / `Mod+right drag` | move / resize (floats the window); drop on another monitor to move it there |
 
 ## Configuration
+
+### Monitors and the bar
+
+Each monitor has its own workspaces 1–9. Workspace keys, new windows and the launcher act on the
+focused monitor, which follows the mouse (with `focus_follows_mouse`) or the last click.
+When a monitor is unplugged, its windows move to the same-numbered workspaces of the focused one.
+
+Each monitor also gets the built-in bar (`[bar]` in the config). Click a workspace or tab to switch
+to it, middle-click a tab to close that window, click the layout name to cycle layouts, and scroll
+over the bar or empty desktop to change workspace. It works alongside waybar; set
+`bar.enabled = false` to use waybar alone.
+
+### Config file
 
 Any section or key you leave out uses the default, so a config can be as small as:
 
@@ -92,6 +111,11 @@ border_active = "#f38ba8"
 [[rules]]
 app_id = "pavucontrol"
 floating = true
+
+[[rules]]
+app_id = "firefox"
+output = "DP-5"   # monitor names are in the log
+workspace = 2
 ```
 
 If you define `[binds]`, it replaces the default binds entirely. See [`resources/default-config.toml`](resources/default-config.toml) for every option and action.
@@ -102,7 +126,9 @@ A config with errors is rejected as a whole and the last working config stays ac
 | File | Purpose |
 |---|---|
 | `src/main.rs` | CLI, startup, event loop, redraw scheduling |
-| `src/state.rs` | compositor state and window management: arrange, focus, actions, config reload |
+| `src/state.rs` | compositor state and window management: monitors, arrange, focus, actions, config reload |
+| `src/bar.rs` | the built-in bar: layout, painting, hit testing, clicks |
+| `src/text.rs` | CPU text and shape drawing for compositor-drawn UI |
 | `src/layout.rs` | pure tiling math (unit tested); add new layouts here |
 | `src/workspace.rs` | per-workspace window order, focus, floating (unit tested) |
 | `src/config.rs` | TOML parsing, validation, keybind/action parsing (unit tested) |
@@ -117,9 +143,12 @@ A config with errors is rejected as a whole and the last working config stays ac
 
 `cargo test` runs the unit tests.
 
+To try multi-monitor behaviour without extra screens, split the nested window into several fake
+monitors: `WAYLAND_TIME_NESTED_OUTPUTS=2 cargo run -- -b winit`.
+
 ## Roadmap
 
-1. Multiple monitors (workspaces per output) and output config (mode, scale, position, 10-bit), multi-GPU.
+1. Output config (mode, scale, position, 10-bit), multi-GPU.
 2. Session lock (screen locker) and idle handling, which a real session needs.
 3. XWayland for X11-only apps.
 4. IPC socket for status bars and scripting (workspace state, focused window, run actions).

@@ -5,12 +5,13 @@ use smithay::{
     },
     input::{
         keyboard::{FilterResult, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, GrabStartData, MotionEvent, RelativeMotionEvent},
+        pointer::{AxisFrame, ButtonEvent, CursorImageStatus, GrabStartData, MotionEvent, RelativeMotionEvent},
     },
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
 use crate::{
+    bar::{BTN_LEFT, BTN_RIGHT},
     config::{Action, ModKey, Mods, normalize_keysym},
     grabs,
     state::State,
@@ -19,8 +20,6 @@ use crate::{
 /// Relative motion details: (accelerated delta, raw delta, timestamp in µs).
 type Relative = (Point<f64, Logical>, Point<f64, Logical>, u64);
 
-const BTN_LEFT: u32 = 0x110;
-const BTN_RIGHT: u32 = 0x111;
 const XF86_SWITCH_VT_1: u32 = 0x1008_FE01;
 const XF86_SWITCH_VT_12: u32 = 0x1008_FE0C;
 const XKB_BACKSPACE: u32 = 0xFF08;
@@ -40,8 +39,13 @@ impl State {
                 );
             }
             InputEvent::PointerMotionAbsolute { event } => {
-                let Some(output) = self.output() else { return };
-                let Some(geo) = self.space.output_geometry(&output) else {
+                // Tablets and the nested window span all monitors.
+                let Some(geo) = self
+                    .space
+                    .outputs()
+                    .filter_map(|o| self.space.output_geometry(o))
+                    .reduce(|a, b| a.merge(b))
+                else {
                     return;
                 };
                 let pos = event.position_transformed(geo.size) + geo.loc.to_f64();
@@ -104,20 +108,24 @@ impl State {
         }
     }
 
-    fn on_pointer_moved(
-        &mut self,
-        pos: Point<f64, Logical>,
-        time: u32,
-        relative: Option<Relative>,
-    ) {
+    fn on_pointer_moved(&mut self, pos: Point<f64, Logical>, time: u32, relative: Option<Relative>) {
         let pointer = self.seat.get_pointer().unwrap();
         let under = self.surface_under(pos);
         let serial = SERIAL_COUNTER.next_serial();
         // The hardware backend draws the pointer, so moving it is a visible change.
         self.needs_redraw |= self.draws_cursor();
+        self.bar_hover(pos);
+        if self.over_bar(pos) && !pointer.is_grabbed() {
+            // Clients don't reset the pointer when it leaves them, so show the normal arrow here.
+            self.cursor_status = CursorImageStatus::default_named();
+        }
 
+        if self.config.general.focus_follows_mouse && !pointer.is_grabbed() && self.focused_layer.is_none() {
+            self.focus_monitor_at(pos);
+        }
         if self.config.general.focus_follows_mouse
             && !pointer.is_grabbed()
+            && !self.over_bar(pos)
             && self.layer_under(pos).is_none()
             && let Some(window) = self.space.element_under(pos).map(|(w, _)| w.clone())
             && self.ws().focus.as_ref() != Some(&window)
@@ -156,7 +164,24 @@ impl State {
         let button_state = event.state();
         let pos = pointer.current_location();
 
+        // Bar clicks are handled here and never reach clients, press or release.
+        if button_state == ButtonState::Pressed && !pointer.is_grabbed() && self.over_bar(pos) {
+            self.bar.held_buttons.push(button);
+            if let Some((mon, part)) = self.bar_part_at(pos) {
+                self.bar_click(mon, part, button);
+            }
+            return;
+        }
+        if button_state == ButtonState::Released
+            && let Some(i) = self.bar.held_buttons.iter().position(|b| *b == button)
+        {
+            self.bar.held_buttons.swap_remove(i);
+            return;
+        }
+
         if button_state == ButtonState::Pressed && !pointer.is_grabbed() {
+            // Clicking anywhere on a monitor focuses it, even empty desktop.
+            self.focus_monitor_at(pos);
             let mods = self.keyboard().modifier_state();
             let window = match self.layer_under(pos) {
                 Some(_) => None,
@@ -209,6 +234,16 @@ impl State {
                 .amount(axis)
                 .unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0)
         };
+        let pointer = self.seat.get_pointer().unwrap();
+        let pos = pointer.current_location();
+        if !pointer.is_grabbed() {
+            let vertical = amount(Axis::Vertical);
+            if vertical != 0.0
+                && self.bar_scroll(pos, source, Axis::Vertical, vertical, event.amount_v120(Axis::Vertical))
+            {
+                return;
+            }
+        }
         let mut frame = AxisFrame::new(event.time_msec()).source(source);
         for axis in [Axis::Horizontal, Axis::Vertical] {
             let value = amount(axis);
@@ -222,7 +257,6 @@ impl State {
                 frame = frame.stop(axis);
             }
         }
-        let pointer = self.seat.get_pointer().unwrap();
         pointer.axis(self, frame);
         pointer.frame(self);
     }
@@ -235,22 +269,27 @@ impl State {
         }
     }
 
+    /// Keep the pointer on a monitor. Monitors of different heights leave gaps in their
+    /// bounding box, so clamp to the nearest monitor rather than the box.
     fn clamp_to_output(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
-        // Bounding box of all monitors, so the pointer can cross between them.
-        let Some(geo) = self
+        let rects: Vec<_> = self
             .space
             .outputs()
             .filter_map(|o| self.space.output_geometry(o))
-            .reduce(|a, b| a.merge(b))
-        else {
-            return pos;
-        };
-        let max_x = (geo.loc.x + geo.size.w - 1) as f64;
-        let max_y = (geo.loc.y + geo.size.h - 1) as f64;
-        (
-            pos.x.clamp(geo.loc.x as f64, max_x),
-            pos.y.clamp(geo.loc.y as f64, max_y),
-        )
-            .into()
+            .collect();
+        rects
+            .iter()
+            .map(|geo| clamp_into(pos, geo.to_f64()))
+            .min_by(|a, b| {
+                let d = |p: &Point<f64, Logical>| (p.x - pos.x).powi(2) + (p.y - pos.y).powi(2);
+                d(a).total_cmp(&d(b))
+            })
+            .unwrap_or(pos)
     }
+}
+
+fn clamp_into(pos: Point<f64, Logical>, geo: smithay::utils::Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    let max_x = geo.loc.x + geo.size.w - 1.0;
+    let max_y = geo.loc.y + geo.size.h - 1.0;
+    (pos.x.clamp(geo.loc.x, max_x), pos.y.clamp(geo.loc.y, max_y)).into()
 }

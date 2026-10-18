@@ -112,9 +112,9 @@ impl XdgShellHandler for State {
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
         let window = self.window_for_surface(surface.wl_surface());
-        match window {
-            Some(w) if self.ws().contains(&w) => {
-                self.ws_mut().fullscreen = Some(w);
+        match window.and_then(|w| Some((self.monitor_showing(&w)?, w))) {
+            Some((mon, w)) => {
+                self.monitors[mon].ws_mut().fullscreen = Some(w);
                 self.arrange();
             }
             // Protocol requires a configure in reply even when we decline.
@@ -128,8 +128,11 @@ impl XdgShellHandler for State {
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         let window = self.window_for_surface(surface.wl_surface());
-        if window.is_some() && self.ws().fullscreen == window {
-            self.ws_mut().fullscreen = None;
+        let ws = window.as_ref().and_then(|w| self.workspace_of_mut(w));
+        if let Some(ws) = ws
+            && ws.fullscreen == window
+        {
+            ws.fullscreen = None;
             self.arrange();
         } else if surface.is_initial_configure_sent() {
             surface.send_configure();
@@ -157,24 +160,34 @@ impl State {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
         };
-        let Some(output) = self.output() else { return };
-        let Some(output_geo) = self.space.output_geometry(&output) else {
-            return;
-        };
-
-        // Parent may be a window or a layer surface (e.g. a bar's menu).
-        let parent_loc = if let Some(window) = self.window_for_surface(&root) {
-            match self.space.element_geometry(&window) {
-                Some(g) => g.loc,
-                None => return,
-            }
-        } else {
-            let map = layer_map_for_output(&output);
-            let Some(layer) = map.layer_for_surface(&root, WindowSurfaceType::TOPLEVEL) else {
+        // Parent may be a window or a layer surface (e.g. a bar's menu). Keep the popup on the
+        // parent's monitor.
+        let (output, parent_loc) = if let Some(window) = self.window_for_surface(&root) {
+            let Some(g) = self.space.element_geometry(&window) else {
                 return;
             };
-            let Some(geo) = map.layer_geometry(layer) else { return };
-            geo.loc + output_geo.loc
+            let Some(output) = self
+                .monitor_showing(&window)
+                .map(|m| self.monitors[m].output.clone())
+                .or_else(|| self.output())
+            else {
+                return;
+            };
+            (output, g.loc)
+        } else {
+            let found = self.space.outputs().find_map(|o| {
+                let map = layer_map_for_output(o);
+                let layer = map.layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)?;
+                Some((o.clone(), map.layer_geometry(layer)?.loc))
+            });
+            let Some((output, loc)) = found else { return };
+            let Some(geo) = self.space.output_geometry(&output) else {
+                return;
+            };
+            (output, loc + geo.loc)
+        };
+        let Some(output_geo) = self.space.output_geometry(&output) else {
+            return;
         };
 
         let mut target = output_geo;
