@@ -125,6 +125,15 @@ struct RawDecoration {
 pub enum BarPosition {
     Top,
     Bottom,
+    Left,
+    Right,
+}
+
+impl BarPosition {
+    /// Left and right bars run down the side of the monitor.
+    pub fn vertical(self) -> bool {
+        matches!(self, Self::Left | Self::Right)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,6 +142,7 @@ struct RawBar {
     enabled: bool,
     position: BarPosition,
     height: i32,
+    width: i32,
     font: Option<String>,
     font_size: Option<f32>,
     background: Option<String>,
@@ -185,6 +195,8 @@ struct RawOutput {
     scale: Option<f64>,
     position: Option<[i32; 2]>,
     transform: Option<String>,
+    /// Where this monitor's bar goes, overriding `[bar] position`; "none" hides it.
+    bar: Option<String>,
 }
 
 fn yes() -> bool {
@@ -237,12 +249,30 @@ pub struct Decoration {
     pub background: Color,
 }
 
+impl BarConfig {
+    /// Where the bar goes on the monitor with this connector name, or `None` for no bar.
+    pub fn position_for(&self, output: &str) -> Option<BarPosition> {
+        if !self.enabled {
+            return None;
+        }
+        match self.per_output.iter().find(|(n, _)| n.eq_ignore_ascii_case(output)) {
+            Some((_, p)) => *p,
+            None => Some(self.position),
+        }
+    }
+}
+
 /// The built-in clickable bar.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BarConfig {
     pub enabled: bool,
     pub position: BarPosition,
+    /// Thickness of a top or bottom bar, and the row height of a side bar.
     pub height: i32,
+    /// Thickness of a left or right bar.
+    pub width: i32,
+    /// Per-monitor positions from `[[outputs]]`, by name; `None` means no bar there.
+    pub per_output: Vec<(String, Option<BarPosition>)>,
     pub font: String,
     pub font_size: f32,
     pub palette: Palette,
@@ -534,10 +564,34 @@ impl Config {
         if rb.font_size.is_some_and(|f| !(6.0..=48.0).contains(&f)) {
             problems.push("bar.font_size must be between 6 and 48".into());
         }
+        if !(40..=800).contains(&rb.width) {
+            problems.push("bar.width must be between 40 and 800".into());
+        }
+        let per_output = raw
+            .outputs
+            .iter()
+            .filter_map(|o| {
+                let pos = o.bar.as_deref()?;
+                let parsed = match pos {
+                    "none" => Ok(None),
+                    "top" => Ok(Some(BarPosition::Top)),
+                    "bottom" => Ok(Some(BarPosition::Bottom)),
+                    "left" => Ok(Some(BarPosition::Left)),
+                    "right" => Ok(Some(BarPosition::Right)),
+                    other => Err(format!(
+                        "outputs \"{}\": bar: \"{other}\" is not top, bottom, left, right or none",
+                        o.name
+                    )),
+                };
+                parsed.map_err(|e| problems.push(e)).ok().map(|p| (o.name.clone(), p))
+            })
+            .collect();
         let bar = BarConfig {
             enabled: rb.enabled,
             position: rb.position,
             height: rb.height,
+            width: rb.width,
+            per_output,
             font: rb.font.clone().unwrap_or_else(|| theme.font.clone()),
             font_size: rb.font_size.unwrap_or(theme.font_size),
             palette: palette(
@@ -971,6 +1025,18 @@ mod tests {
         // Older per-section keys still work.
         let c = Config::parse_user("[decoration]\nborder_active = \"#00ff00\"\n").unwrap();
         assert_eq!(c.decoration.border_active, [0.0, 1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn bar_position_per_output() {
+        let c = Config::parse_user(
+            "[bar]\nposition = \"top\"\n[[outputs]]\nname = \"DP-4\"\nbar = \"left\"\n[[outputs]]\nname = \"DP-5\"\nbar = \"none\"\n",
+        )
+        .unwrap();
+        assert_eq!(c.bar.position_for("dp-4"), Some(BarPosition::Left));
+        assert_eq!(c.bar.position_for("DP-5"), None);
+        assert_eq!(c.bar.position_for("HDMI-A-5"), Some(BarPosition::Top));
+        assert!(Config::parse_user("[[outputs]]\nname = \"DP-4\"\nbar = \"middle\"\n").is_err());
     }
 
     #[test]

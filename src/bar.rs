@@ -19,7 +19,7 @@ use smithay::{
 
 use crate::{
     config::{Action, BarConfig, BarPosition, Color, LayoutChoice},
-    layout::LayoutKind,
+    layout::{LayoutKind, Rect},
     state::{State, toplevel_ids},
     text::{Canvas, Text},
 };
@@ -53,8 +53,10 @@ enum WsLook {
 /// Everything the bar's pixels depend on. If this is unchanged, the old image is reused.
 #[derive(Debug, Clone, PartialEq)]
 struct Model {
-    width: i32,
+    /// Logical size of the bar.
+    size: (i32, i32),
     scale: i32,
+    position: BarPosition,
     config: BarConfig,
     workspaces: Vec<WsLook>,
     /// (title, focused)
@@ -105,30 +107,67 @@ impl Bar {
         }
     }
 
-    /// Positions of every part, in logical pixels from the bar's left edge: (x, width, part).
-    fn layout(&self, text: &Text, m: &Model) -> Vec<(i32, i32, Part)> {
-        let h = m.config.height;
+    /// Where every part goes, in logical pixels from the bar's top-left corner.
+    fn layout(&self, text: &Text, m: &Model) -> Vec<(Rect, Part)> {
+        if m.position.vertical() {
+            Self::layout_vertical(m)
+        } else {
+            Self::layout_horizontal(text, m)
+        }
+    }
+
+    /// Left to right: workspaces, window tabs, layout button, launcher.
+    fn layout_horizontal(text: &Text, m: &Model) -> Vec<(Rect, Part)> {
+        let (width, h) = m.size;
         let mut parts = Vec::new();
 
         let mut x = 0;
         for i in 0..m.workspaces.len() {
-            parts.push((x, h, Part::Workspace(i)));
+            parts.push((Rect::new(x, 0, h, h), Part::Workspace(i)));
             x += h;
         }
 
-        let plus_x = m.width - h;
-        parts.push((plus_x, h, Part::Launcher));
+        let plus_x = width - h;
+        parts.push((Rect::new(plus_x, 0, h, h), Part::Launcher));
         let layout_w = text.width("monocle", m.config.font_size).ceil() as i32 + 24;
         let layout_x = plus_x - layout_w;
-        parts.push((layout_x, layout_w, Part::Layout));
+        parts.push((Rect::new(layout_x, 0, layout_w, h), Part::Layout));
 
         let (x0, x1) = (x + 8, layout_x - 8);
         let n = m.tabs.len() as i32;
         if n > 0 && x1 > x0 {
             let w = ((x1 - x0) / n).min(MAX_TAB_WIDTH);
             for i in 0..n {
-                parts.push((x0 + i * w, (w - 4).max(1), Part::Tab(i as usize)));
+                parts.push((Rect::new(x0 + i * w, 0, (w - 4).max(1), h), Part::Tab(i as usize)));
             }
+        }
+        parts
+    }
+
+    /// Top to bottom: workspaces, one row per window, and the layout button and launcher
+    /// sharing the bottom row.
+    fn layout_vertical(m: &Model) -> Vec<(Rect, Part)> {
+        let (w, height) = m.size;
+        let row = m.config.height;
+        let mut parts = Vec::new();
+
+        let mut y = 0;
+        for i in 0..m.workspaces.len() {
+            parts.push((Rect::new(0, y, w, row), Part::Workspace(i)));
+            y += row;
+        }
+
+        let bottom = height - row;
+        parts.push((Rect::new(w - row, bottom, row, row), Part::Launcher));
+        parts.push((Rect::new(0, bottom, w - row, row), Part::Layout));
+
+        y += 8;
+        for i in 0..m.tabs.len() {
+            if y + row > bottom - 8 {
+                break;
+            }
+            parts.push((Rect::new(0, y, w, row), Part::Tab(i)));
+            y += row + 2;
         }
         parts
     }
@@ -147,89 +186,120 @@ impl Bar {
 
     fn paint_canvas(&self, text: &Text, m: &Model) -> Canvas {
         let c = &m.config;
-        let s = m.scale;
         let p = &c.palette;
+        let s = m.scale;
+        let vertical = m.position.vertical();
         let px = c.font_size * s as f32;
-        let h = c.height * s;
-        let mut canvas = Canvas::new(m.width * s, h, p.surface);
+        let (bw, bh) = (m.size.0 * s, m.size.1 * s);
+        let mut canvas = Canvas::new(bw, bh, p.surface);
 
         // A hairline between the bar and the windows.
-        let edge_y = if c.position == BarPosition::Top { h - s } else { 0 };
-        canvas.fill_rect(0, edge_y, canvas.w, s, p.separator);
+        match m.position {
+            BarPosition::Top => canvas.fill_rect(0, bh - s, bw, s, p.separator),
+            BarPosition::Bottom => canvas.fill_rect(0, 0, bw, s, p.separator),
+            BarPosition::Left => canvas.fill_rect(bw - s, 0, s, bh, p.separator),
+            BarPosition::Right => canvas.fill_rect(0, 0, s, bh, p.separator),
+        }
 
-        let centered = |canvas: &mut Canvas, label: &str, x: i32, w: i32, size: f32, color: Color| {
+        let centered = |canvas: &mut Canvas, label: &str, r: Rect, size: f32, color: Color| {
             let tw = text.width(label, size);
-            let tx = x as f32 + (w as f32 - tw) / 2.0;
-            let baseline = text.centered_baseline(0.0, h as f32, size);
-            text.draw(canvas, label, size, (tx, baseline), color, (x, x + w));
+            let tx = r.x as f32 + (r.w as f32 - tw) / 2.0;
+            let baseline = text.centered_baseline(r.y as f32, r.h as f32, size);
+            text.draw(canvas, label, size, (tx, baseline), color, (r.x, r.x + r.w));
         };
+        // Highlights leave a margin across the bar and a small gap between neighbours.
+        let (gap, margin) = (2 * s, 4 * s);
+        let pill = |r: Rect| {
+            if vertical {
+                Rect::new(r.x + margin, r.y + gap / 2, r.w - 2 * margin, r.h - gap)
+            } else {
+                Rect::new(r.x + gap, r.y + margin, r.w - 2 * gap, r.h - 2 * margin)
+            }
+        };
+        let fill = |canvas: &mut Canvas, r: Rect, color: Color| canvas.fill_rect(r.x, r.y, r.w, r.h, color);
 
-        for (x, w, part) in self.layout(text, m) {
-            let (x, w) = (x * s, w * s);
+        for (r, part) in self.layout(text, m) {
+            let r = Rect::new(r.x * s, r.y * s, r.w * s, r.h * s);
             let hovered = m.hover == Some(part);
-            let inset = 4 * s;
             match part {
                 Part::Workspace(i) => {
                     let look = m.workspaces[i];
                     let label_color = match look {
                         WsLook::Active => {
-                            canvas.fill_rect(x + 2 * s, inset, w - 4 * s, h - 2 * inset, p.accent);
+                            fill(&mut canvas, pill(r), p.accent);
                             p.on_accent
                         }
                         WsLook::Occupied | WsLook::Empty => {
                             if hovered {
-                                canvas.fill_rect(x + 2 * s, inset, w - 4 * s, h - 2 * inset, p.hover);
+                                fill(&mut canvas, pill(r), p.hover);
                             }
                             if look == WsLook::Occupied { p.text } else { p.subtext }
                         }
                     };
-                    centered(&mut canvas, &(i + 1).to_string(), x, w, px, label_color);
-                    // A small mark under workspaces that have windows.
+                    centered(&mut canvas, &(i + 1).to_string(), r, px, label_color);
+                    // A small mark on workspaces that have windows: under the number on a
+                    // horizontal bar, beside it on a vertical one.
                     if look != WsLook::Empty {
                         let mark = if look == WsLook::Active { p.on_accent } else { p.text };
-                        canvas.fill_rect(x + w / 2 - 4 * s, h - inset - 3 * s, 8 * s, s.max(2), mark);
+                        let tw = text.width(&(i + 1).to_string(), px) as i32;
+                        if vertical {
+                            let x = r.x + (r.w + tw) / 2 + 4 * s;
+                            canvas.fill_rect(x, r.y + r.h / 2 - s, 3 * s, s.max(2), mark);
+                        } else {
+                            canvas.fill_rect(r.x + r.w / 2 - 4 * s, r.y + r.h - margin - 3 * s, 8 * s, s.max(2), mark);
+                        }
                     }
                 }
                 Part::Tab(i) => {
                     let (title, focused) = &m.tabs[i];
-                    let fill = match (focused, hovered) {
+                    let bg = match (focused, hovered) {
                         (true, _) => p.selected,
                         (false, true) => p.hover,
                         (false, false) => p.raised,
                     };
-                    canvas.fill_rect(x, inset, w, h - 2 * inset, fill);
+                    let area = if vertical {
+                        Rect::new(r.x + margin, r.y, r.w - 2 * margin, r.h)
+                    } else {
+                        Rect::new(r.x, r.y + margin, r.w, r.h - 2 * margin)
+                    };
+                    fill(&mut canvas, area, bg);
                     if *focused {
-                        let underline = if m.active_monitor { p.accent } else { p.accent_inactive };
-                        canvas.fill_rect(x, h - inset - 2 * s, w, 2 * s, underline);
+                        let mark = if m.active_monitor { p.accent } else { p.accent_inactive };
+                        // An underline on a horizontal bar, a stripe on the left of a vertical one.
+                        if vertical {
+                            canvas.fill_rect(area.x, area.y, 2 * s, area.h, mark);
+                        } else {
+                            canvas.fill_rect(area.x, area.y + area.h - 2 * s, area.w, 2 * s, mark);
+                        }
                     }
                     let pad = 8 * s;
-                    let label = text.fit(title, px, (w - 2 * pad) as f32);
+                    let label = text.fit(title, px, (area.w - 2 * pad) as f32);
                     let color = if *focused { p.text } else { p.muted };
-                    let baseline = text.centered_baseline(0.0, h as f32, px);
+                    let baseline = text.centered_baseline(r.y as f32, r.h as f32, px);
                     text.draw(
                         &mut canvas,
                         &label,
                         px,
-                        ((x + pad) as f32, baseline),
+                        ((area.x + pad) as f32, baseline),
                         color,
-                        (x, x + w - pad / 2),
+                        (area.x, area.x + area.w - pad / 2),
                     );
                 }
                 Part::Layout => {
                     if hovered {
-                        canvas.fill_rect(x, inset, w, h - 2 * inset, p.hover);
+                        fill(&mut canvas, pill(r), p.hover);
                     }
                     let name = match m.layout {
                         LayoutKind::Tile => "tile",
                         LayoutKind::Monocle => "monocle",
                     };
-                    centered(&mut canvas, name, x, w, px, if hovered { p.text } else { p.muted });
+                    centered(&mut canvas, name, r, px, if hovered { p.text } else { p.muted });
                 }
                 Part::Launcher => {
                     if hovered {
-                        canvas.fill_rect(x, inset, w, h - 2 * inset, p.hover);
+                        fill(&mut canvas, pill(r), p.hover);
                     }
-                    centered(&mut canvas, "+", x, w, px * 1.4, p.text);
+                    centered(&mut canvas, "+", r, px * 1.4, p.text);
                 }
             }
         }
@@ -262,19 +332,27 @@ impl State {
         Some(zone)
     }
 
+    /// Where a monitor's bar goes, or `None` if it has none.
+    pub fn bar_position(&self, mon: usize) -> Option<BarPosition> {
+        self.bar.text.as_ref()?;
+        self.config.bar.position_for(&self.monitors.get(mon)?.output.name())
+    }
+
     /// Where a monitor's bar sits, whether or not it's currently hidden by a fullscreen window.
     pub fn bar_reserved(&self, mon: usize) -> Option<Rectangle<i32, Logical>> {
         let cfg = &self.config.bar;
-        if !cfg.enabled || self.bar.text.is_none() {
-            return None;
-        }
+        let position = self.bar_position(mon)?;
         let zone = self.layer_zone(mon)?;
-        let h = cfg.height.min(zone.size.h);
-        let y = match cfg.position {
-            BarPosition::Top => zone.loc.y,
-            BarPosition::Bottom => zone.loc.y + zone.size.h - h,
+        let (loc, size) = (zone.loc, zone.size);
+        let h = cfg.height.min(size.h);
+        let w = cfg.width.min(size.w);
+        let rect = match position {
+            BarPosition::Top => Rectangle::new(loc, (size.w, h).into()),
+            BarPosition::Bottom => Rectangle::new((loc.x, loc.y + size.h - h).into(), (size.w, h).into()),
+            BarPosition::Left => Rectangle::new(loc, (w, size.h).into()),
+            BarPosition::Right => Rectangle::new((loc.x + size.w - w, loc.y).into(), (w, size.h).into()),
         };
-        Some(Rectangle::new((zone.loc.x, y).into(), (zone.size.w, h).into()))
+        Some(rect)
     }
 
     /// A monitor's bar rectangle when it's visible.
@@ -286,10 +364,18 @@ impl State {
     /// Area for windows on a monitor: what other panels leave, minus the bar.
     pub fn work_area(&self, mon: usize) -> Option<Rectangle<i32, Logical>> {
         let mut zone = self.layer_zone(mon)?;
-        if let Some(bar) = self.bar_reserved(mon) {
-            zone.size.h -= bar.size.h;
-            if self.config.bar.position == BarPosition::Top {
-                zone.loc.y += bar.size.h;
+        if let (Some(bar), Some(position)) = (self.bar_reserved(mon), self.bar_position(mon)) {
+            match position {
+                BarPosition::Top => {
+                    zone.loc.y += bar.size.h;
+                    zone.size.h -= bar.size.h;
+                }
+                BarPosition::Bottom => zone.size.h -= bar.size.h,
+                BarPosition::Left => {
+                    zone.loc.x += bar.size.w;
+                    zone.size.w -= bar.size.w;
+                }
+                BarPosition::Right => zone.size.w -= bar.size.w,
             }
         }
         Some(zone)
@@ -310,7 +396,7 @@ impl State {
                 .is_none_or(|l| matches!(l.layer(), Layer::Background | Layer::Bottom))
     }
 
-    fn bar_model(&self, mon: usize, width: i32, scale: i32) -> Model {
+    fn bar_model(&self, mon: usize, size: (i32, i32), scale: i32) -> Model {
         let m = &self.monitors[mon];
         let ws = m.ws();
         let workspaces = m
@@ -337,8 +423,9 @@ impl State {
             .collect();
         let name = m.output.name();
         Model {
-            width,
+            size,
             scale,
+            position: self.bar_position(mon).unwrap_or(BarPosition::Top),
             config: self.config.bar.clone(),
             workspaces,
             tabs,
@@ -352,7 +439,7 @@ impl State {
     pub fn bar_buffer(&self, mon: usize, scale: i32) -> Option<MemoryRenderBuffer> {
         let rect = self.bar_rect(mon)?;
         let text = self.bar.text.as_ref()?;
-        let model = self.bar_model(mon, rect.size.w, scale.max(1));
+        let model = self.bar_model(mon, (rect.size.w, rect.size.h), scale.max(1));
         let name = self.monitors[mon].output.name();
         let mut cached = self.bar.cached.borrow_mut();
         if let Some((m, buffer)) = cached.get(&name)
@@ -373,13 +460,13 @@ impl State {
             return None;
         }
         let text = self.bar.text.as_ref()?;
-        let x = (pos.x - rect.loc.x as f64) as i32;
-        let model = self.bar_model(mon, rect.size.w, 1);
+        let (x, y) = ((pos.x - rect.loc.x as f64) as i32, (pos.y - rect.loc.y as f64) as i32);
+        let model = self.bar_model(mon, (rect.size.w, rect.size.h), 1);
         self.bar
             .layout(text, &model)
             .into_iter()
-            .find(|(px, w, _)| x >= *px && x < px + w)
-            .map(|(_, _, part)| (mon, part))
+            .find(|(r, _)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
+            .map(|(_, part)| (mon, part))
     }
 
     /// Update which part the pointer is over; repaint if it changed.
@@ -459,10 +546,11 @@ mod tests {
     use super::*;
     use crate::config::Config;
 
-    fn model(width: i32, tabs: &[(&str, bool)], hover: Option<Part>) -> Model {
+    fn model(size: (i32, i32), position: BarPosition, tabs: &[(&str, bool)], hover: Option<Part>) -> Model {
         Model {
-            width,
+            size,
             scale: 1,
+            position,
             config: Config::default().bar,
             workspaces: vec![
                 WsLook::Occupied,
@@ -478,18 +566,42 @@ mod tests {
         }
     }
 
+    fn overlaps(a: &Rect, b: &Rect) -> bool {
+        a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+    }
+
     #[test]
     fn layout_parts_do_not_overlap() {
         let Some(text) = Text::load("sans") else { return };
         let bar = Bar::new(&Config::default().bar);
-        let m = model(1200, &[("one", true), ("two", false), ("three", false)], None);
-        let mut parts = bar.layout(&text, &m);
-        parts.sort_by_key(|p| p.0);
-        for pair in parts.windows(2) {
-            assert!(pair[0].0 + pair[0].1 <= pair[1].0, "{pair:?}");
+        let tabs = [("one", true), ("two", false), ("three", false)];
+        for (size, position) in [
+            ((1200, 28), BarPosition::Top),
+            ((180, 1400), BarPosition::Left),
+            ((180, 1400), BarPosition::Right),
+        ] {
+            let parts = bar.layout(&text, &model(size, position, &tabs, None));
+            for (i, (a, pa)) in parts.iter().enumerate() {
+                assert!(
+                    a.x >= 0 && a.y >= 0 && a.x + a.w <= size.0 && a.y + a.h <= size.1,
+                    "{pa:?} {a:?}"
+                );
+                for (b, pb) in &parts[i + 1..] {
+                    assert!(!overlaps(a, b), "{position:?}: {pa:?} {a:?} overlaps {pb:?} {b:?}");
+                }
+            }
+            assert_eq!(parts.iter().filter(|(_, p)| matches!(p, Part::Tab(_))).count(), 3);
         }
-        assert_eq!(parts.last().unwrap().2, Part::Launcher);
-        assert!(parts.iter().all(|(x, w, _)| *x >= 0 && x + w <= 1200));
+    }
+
+    #[test]
+    fn vertical_bar_drops_tabs_that_do_not_fit() {
+        let Some(text) = Text::load("sans") else { return };
+        let bar = Bar::new(&Config::default().bar);
+        let tabs: Vec<(&str, bool)> = (0..50).map(|_| ("w", false)).collect();
+        let parts = bar.layout(&text, &model((180, 600), BarPosition::Left, &tabs, None));
+        let shown = parts.iter().filter(|(_, p)| matches!(p, Part::Tab(_))).count();
+        assert!(shown > 0 && shown < 50, "{shown}");
     }
 
     #[test]
@@ -510,8 +622,15 @@ mod tests {
         };
         let text = Text::load("sans").expect("font");
         let bar = Bar::new(&Config::default().bar);
+        let vertical = std::env::var_os("BAR_PREVIEW_VERTICAL").is_some();
+        let (size, position) = if vertical {
+            ((180, 700), BarPosition::Left)
+        } else {
+            ((1400, 28), BarPosition::Top)
+        };
         let m = model(
-            1400,
+            size,
+            position,
             &[
                 ("uaio@host: ~/git/wayland-time", true),
                 ("second terminal", false),
