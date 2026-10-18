@@ -21,7 +21,7 @@ use crate::{
     config::{Action, BarConfig, BarPosition, Color, LayoutChoice},
     layout::LayoutKind,
     state::{State, toplevel_ids},
-    text::{Canvas, Text, mix},
+    text::{Canvas, Text},
 };
 
 pub const BTN_LEFT: u32 = 0x110;
@@ -148,15 +148,14 @@ impl Bar {
     fn paint_canvas(&self, text: &Text, m: &Model) -> Canvas {
         let c = &m.config;
         let s = m.scale;
-        let (bg, fg, accent, dim) = (c.background, c.foreground, c.accent, c.dim);
-        let hover_bg = mix(bg, fg, 0.10);
+        let p = &c.palette;
         let px = c.font_size * s as f32;
         let h = c.height * s;
-        let mut canvas = Canvas::new(m.width * s, h, bg);
+        let mut canvas = Canvas::new(m.width * s, h, p.surface);
 
         // A hairline between the bar and the windows.
         let edge_y = if c.position == BarPosition::Top { h - s } else { 0 };
-        canvas.fill_rect(0, edge_y, canvas.w, s, mix(bg, fg, 0.08));
+        canvas.fill_rect(0, edge_y, canvas.w, s, p.separator);
 
         let centered = |canvas: &mut Canvas, label: &str, x: i32, w: i32, size: f32, color: Color| {
             let tw = text.width(label, size);
@@ -174,38 +173,38 @@ impl Bar {
                     let look = m.workspaces[i];
                     let label_color = match look {
                         WsLook::Active => {
-                            canvas.fill_rect(x + 2 * s, inset, w - 4 * s, h - 2 * inset, accent);
-                            bg
+                            canvas.fill_rect(x + 2 * s, inset, w - 4 * s, h - 2 * inset, p.accent);
+                            p.on_accent
                         }
                         WsLook::Occupied | WsLook::Empty => {
                             if hovered {
-                                canvas.fill_rect(x + 2 * s, inset, w - 4 * s, h - 2 * inset, hover_bg);
+                                canvas.fill_rect(x + 2 * s, inset, w - 4 * s, h - 2 * inset, p.hover);
                             }
-                            if look == WsLook::Occupied { fg } else { dim }
+                            if look == WsLook::Occupied { p.text } else { p.subtext }
                         }
                     };
                     centered(&mut canvas, &(i + 1).to_string(), x, w, px, label_color);
                     // A small mark under workspaces that have windows.
                     if look != WsLook::Empty {
-                        let mark = if look == WsLook::Active { bg } else { fg };
+                        let mark = if look == WsLook::Active { p.on_accent } else { p.text };
                         canvas.fill_rect(x + w / 2 - 4 * s, h - inset - 3 * s, 8 * s, s.max(2), mark);
                     }
                 }
                 Part::Tab(i) => {
                     let (title, focused) = &m.tabs[i];
                     let fill = match (focused, hovered) {
-                        (true, _) => mix(bg, fg, 0.16),
-                        (false, true) => hover_bg,
-                        (false, false) => mix(bg, fg, 0.05),
+                        (true, _) => p.selected,
+                        (false, true) => p.hover,
+                        (false, false) => p.raised,
                     };
                     canvas.fill_rect(x, inset, w, h - 2 * inset, fill);
                     if *focused {
-                        let underline = if m.active_monitor { accent } else { mix(accent, bg, 0.6) };
+                        let underline = if m.active_monitor { p.accent } else { p.accent_inactive };
                         canvas.fill_rect(x, h - inset - 2 * s, w, 2 * s, underline);
                     }
                     let pad = 8 * s;
                     let label = text.fit(title, px, (w - 2 * pad) as f32);
-                    let color = if *focused { fg } else { mix(fg, dim, 0.45) };
+                    let color = if *focused { p.text } else { p.muted };
                     let baseline = text.centered_baseline(0.0, h as f32, px);
                     text.draw(
                         &mut canvas,
@@ -218,26 +217,19 @@ impl Bar {
                 }
                 Part::Layout => {
                     if hovered {
-                        canvas.fill_rect(x, inset, w, h - 2 * inset, hover_bg);
+                        canvas.fill_rect(x, inset, w, h - 2 * inset, p.hover);
                     }
                     let name = match m.layout {
                         LayoutKind::Tile => "tile",
                         LayoutKind::Monocle => "monocle",
                     };
-                    centered(
-                        &mut canvas,
-                        name,
-                        x,
-                        w,
-                        px,
-                        if hovered { fg } else { mix(fg, dim, 0.3) },
-                    );
+                    centered(&mut canvas, name, x, w, px, if hovered { p.text } else { p.muted });
                 }
                 Part::Launcher => {
                     if hovered {
-                        canvas.fill_rect(x, inset, w, h - 2 * inset, hover_bg);
+                        canvas.fill_rect(x, inset, w, h - 2 * inset, p.hover);
                     }
-                    centered(&mut canvas, "+", x, w, px * 1.4, fg);
+                    centered(&mut canvas, "+", x, w, px * 1.4, p.text);
                 }
             }
         }

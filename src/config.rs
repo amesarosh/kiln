@@ -15,7 +15,10 @@ use smithay::{
     utils::Transform,
 };
 
-use crate::layout::{LayoutKind, Params};
+use crate::{
+    layout::{LayoutKind, Params},
+    theme::{self, ColorDefs, Palette, Theme},
+};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../resources/default-config.toml");
 
@@ -25,6 +28,7 @@ pub const DEFAULT_CONFIG: &str = include_str!("../resources/default-config.toml"
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     general: General,
+    theme: RawTheme,
     layout: LayoutConfig,
     decoration: RawDecoration,
     bar: RawBar,
@@ -42,6 +46,7 @@ struct RawConfig {
 #[serde(deny_unknown_fields)]
 struct PartialConfig {
     general: Option<toml::Table>,
+    theme: Option<toml::Table>,
     layout: Option<toml::Table>,
     decoration: Option<toml::Table>,
     bar: Option<toml::Table>,
@@ -76,6 +81,8 @@ pub struct General {
     pub focus_follows_mouse: bool,
     pub new_window: NewWindow,
     pub autostart: Vec<String>,
+    /// Seconds without input before monitors turn off; 0 never.
+    pub monitors_off_after: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -92,11 +99,23 @@ pub struct LayoutConfig {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawTheme {
+    font: String,
+    font_size: f32,
+    colors: ColorDefs,
+}
+
+/// Every component section can carry a `colors` table that overrides theme colors for it alone.
+/// The older single-color keys still work and are treated as such overrides.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawDecoration {
     border_width: i32,
-    border_active: String,
-    border_inactive: String,
-    background: String,
+    border_active: Option<String>,
+    border_inactive: Option<String>,
+    background: Option<String>,
+    #[serde(default)]
+    colors: ColorDefs,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -112,13 +131,15 @@ struct RawBar {
     enabled: bool,
     position: BarPosition,
     height: i32,
-    font: String,
-    font_size: f32,
-    background: String,
-    foreground: String,
-    accent: String,
-    dim: String,
+    font: Option<String>,
+    font_size: Option<f32>,
+    background: Option<String>,
+    foreground: Option<String>,
+    accent: Option<String>,
+    dim: Option<String>,
     launcher: String,
+    #[serde(default)]
+    colors: ColorDefs,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -222,10 +243,7 @@ pub struct BarConfig {
     pub height: i32,
     pub font: String,
     pub font_size: f32,
-    pub background: Color,
-    pub foreground: Color,
-    pub accent: Color,
-    pub dim: Color,
+    pub palette: Palette,
     /// Command run by the bar's + button.
     pub launcher: String,
 }
@@ -233,6 +251,7 @@ pub struct BarConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub general: General,
+    pub theme: Theme,
     pub layout: LayoutConfig,
     pub decoration: Decoration,
     pub bar: BarConfig,
@@ -331,6 +350,8 @@ pub enum Action {
     MoveToMonitor(Dir),
     /// Ctrl+Alt+F1..F12 on the hardware backend; not configurable.
     SwitchVt(i32),
+    /// Turn every monitor off until the next key press, click or pointer movement.
+    PowerOffMonitors,
 }
 
 #[derive(Debug)]
@@ -389,10 +410,11 @@ impl Config {
 
         let mut merge = |name: &str, over: Option<toml::Table>| {
             if let (Some(over), Some(toml::Value::Table(dst))) = (over, base.get_mut(name)) {
-                dst.extend(over);
+                merge_tables(dst, over);
             }
         };
         merge("general", user.general);
+        merge("theme", user.theme);
         merge("layout", user.layout);
         merge("decoration", user.decoration);
         merge("bar", user.bar);
@@ -441,42 +463,92 @@ impl Config {
             }
         }
 
-        let color = |name: &str, s: &str, problems: &mut Vec<String>| {
-            parse_color(s).unwrap_or_else(|e| {
-                problems.push(format!("decoration.{name}: {e}"));
-                [0.0, 0.0, 0.0, 1.0]
-            })
+        let rt = &raw.theme;
+        if !(6.0..=48.0).contains(&rt.font_size) {
+            problems.push("theme.font_size must be between 6 and 48".into());
+        }
+        // Resolve the theme first. If it's broken, report that once and build the components on
+        // the default theme, so their own errors still show up but the theme's don't repeat.
+        let theme_palette = theme::resolve(&rt.colors, &ColorDefs::new(), "theme.colors");
+        let base_defs = match &theme_palette {
+            Ok(_) => rt.colors.clone(),
+            Err(e) => {
+                problems.extend(e.iter().cloned());
+                let defaults: RawConfig = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
+                defaults.theme.colors
+            }
         };
-        let decoration = Decoration {
-            border_width: raw.decoration.border_width.max(0),
-            border_active: color("border_active", &raw.decoration.border_active, &mut problems),
-            border_inactive: color("border_inactive", &raw.decoration.border_inactive, &mut problems),
-            background: color("background", &raw.decoration.background, &mut problems),
+        let fallback = || theme::resolve(&base_defs, &ColorDefs::new(), "").expect("default theme resolves");
+        // `legacy` maps older keys to the theme color they now override: (key, color, value).
+        let palette =
+            |legacy: &[(&str, &str, &Option<String>)], colors: &ColorDefs, scope: &str, problems: &mut Vec<String>| {
+                let mut overrides: ColorDefs = legacy
+                    .iter()
+                    .filter_map(|(_, role, v)| v.as_ref().map(|v| (role.to_string(), v.clone())))
+                    .collect();
+                overrides.extend(colors.clone());
+                theme::resolve(&base_defs, &overrides, scope).unwrap_or_else(|e| {
+                    // Name the key the user actually wrote.
+                    problems.extend(e.into_iter().map(|mut msg| {
+                        for (key, role, v) in legacy {
+                            if v.is_some() && !colors.contains_key(*role) {
+                                msg = msg.replace(&format!("{scope}: {role} = "), &format!("{scope}.{key} = "));
+                            }
+                        }
+                        msg
+                    }));
+                    fallback()
+                })
+            };
+
+        let theme = Theme {
+            font: rt.font.clone(),
+            font_size: rt.font_size,
+            palette: theme_palette.unwrap_or_else(|_| fallback()),
         };
 
-        let bar_color = |name: &str, s: &str, problems: &mut Vec<String>| {
-            parse_color(s).unwrap_or_else(|e| {
-                problems.push(format!("bar.{name}: {e}"));
-                [0.0, 0.0, 0.0, 1.0]
-            })
+        let rd = &raw.decoration;
+        let deco = palette(
+            &[
+                ("border_active", "border_focused", &rd.border_active),
+                ("border_inactive", "border", &rd.border_inactive),
+                ("background", "base", &rd.background),
+            ],
+            &rd.colors,
+            "decoration",
+            &mut problems,
+        );
+        let decoration = Decoration {
+            border_width: rd.border_width.max(0),
+            border_active: deco.border_focused,
+            border_inactive: deco.border,
+            background: deco.base,
         };
+
         let rb = &raw.bar;
         if !(16..=96).contains(&rb.height) {
             problems.push("bar.height must be between 16 and 96".into());
         }
-        if !(6.0..=48.0).contains(&rb.font_size) {
+        if rb.font_size.is_some_and(|f| !(6.0..=48.0).contains(&f)) {
             problems.push("bar.font_size must be between 6 and 48".into());
         }
         let bar = BarConfig {
             enabled: rb.enabled,
             position: rb.position,
             height: rb.height,
-            font: rb.font.clone(),
-            font_size: rb.font_size,
-            background: bar_color("background", &rb.background, &mut problems),
-            foreground: bar_color("foreground", &rb.foreground, &mut problems),
-            accent: bar_color("accent", &rb.accent, &mut problems),
-            dim: bar_color("dim", &rb.dim, &mut problems),
+            font: rb.font.clone().unwrap_or_else(|| theme.font.clone()),
+            font_size: rb.font_size.unwrap_or(theme.font_size),
+            palette: palette(
+                &[
+                    ("background", "surface", &rb.background),
+                    ("foreground", "text", &rb.foreground),
+                    ("accent", "accent", &rb.accent),
+                    ("dim", "subtext", &rb.dim),
+                ],
+                &rb.colors,
+                "bar",
+                &mut problems,
+            ),
             launcher: rb.launcher.clone(),
         };
 
@@ -537,6 +609,7 @@ impl Config {
 
         Ok(Self {
             general: raw.general,
+            theme,
             layout,
             decoration,
             bar,
@@ -685,6 +758,7 @@ fn parse_action(s: &str) -> Result<Action, String> {
         "move-to-workspace" => Action::MoveToWorkspace(workspace()?),
         "focus-monitor" => Action::FocusMonitor(dir()?),
         "move-to-monitor" => Action::MoveToMonitor(dir()?),
+        "power-off-monitors" => Action::PowerOffMonitors,
         other => return Err(format!("unknown action \"{other}\"")),
     })
 }
@@ -730,20 +804,16 @@ fn parse_transform(s: &str) -> Result<Transform, String> {
     })
 }
 
-/// "#rgb", "#rrggbb", or "#rrggbbaa"
-fn parse_color(s: &str) -> Result<Color, String> {
-    let hex = s
-        .strip_prefix('#')
-        .ok_or_else(|| format!("\"{s}\" should start with #"))?;
-    let expanded: String = match hex.len() {
-        3 => hex.chars().flat_map(|c| [c, c]).chain("ff".chars()).collect(),
-        6 => format!("{hex}ff"),
-        8 => hex.to_string(),
-        _ => return Err(format!("\"{s}\" is not #rgb, #rrggbb or #rrggbbaa")),
-    };
-    let v = u32::from_str_radix(&expanded, 16).map_err(|_| format!("\"{s}\" is not valid hex"))?;
-    let c = |shift: u32| ((v >> shift) & 0xff) as f32 / 255.0;
-    Ok([c(24), c(16), c(8), c(0)])
+/// Copy `over` into `dst`, merging nested tables key by key instead of replacing them.
+fn merge_tables(dst: &mut toml::Table, over: toml::Table) {
+    for (k, v) in over {
+        match (dst.get_mut(&k), v) {
+            (Some(toml::Value::Table(d)), toml::Value::Table(o)) => merge_tables(d, o),
+            (_, v) => {
+                dst.insert(k, v);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -780,7 +850,7 @@ mod tests {
         .0;
         assert!(e.contains("unknown key"), "{e}");
         assert!(e.contains("unknown action"), "{e}");
-        assert!(e.contains("background"), "{e}");
+        assert!(e.contains("decoration.background = \"red\""), "{e}");
     }
 
     #[test]
@@ -830,6 +900,7 @@ mod tests {
         );
         assert_eq!(parse_action("master-ratio -0.05").unwrap(), Action::MasterRatio(-0.05));
         assert_eq!(parse_action("workspace 3").unwrap(), Action::Workspace(3));
+        assert_eq!(parse_action("power-off-monitors").unwrap(), Action::PowerOffMonitors);
         assert!(parse_action("workspace 0").is_err());
         assert!(parse_action("focus up").is_err());
         assert!(parse_action("spawn").is_err());
@@ -851,9 +922,18 @@ mod tests {
                 refresh: Some(143.9)
             })
         );
-        assert_eq!((dp.scale, dp.position, dp.transform), (1.5, Some((0, 0)), Transform::_90));
+        assert_eq!(
+            (dp.scale, dp.position, dp.transform),
+            (1.5, Some((0, 0)), Transform::_90)
+        );
         assert!(!c.output("HDMI-A-1").enabled);
-        assert_eq!(c.output("eDP-1"), OutputConfig { name: "eDP-1".into(), ..Default::default() });
+        assert_eq!(
+            c.output("eDP-1"),
+            OutputConfig {
+                name: "eDP-1".into(),
+                ..Default::default()
+            }
+        );
         assert_eq!(parse_mode("1920x1080").unwrap().refresh, None);
         assert!(parse_mode("1920").is_err());
         assert!(parse_mode("1920x1080@0").is_err());
@@ -863,15 +943,38 @@ mod tests {
         )
         .unwrap_err()
         .0;
-        assert!(e.contains("scale") && e.contains("transform") && e.contains("twice"), "{e}");
+        assert!(
+            e.contains("scale") && e.contains("transform") && e.contains("twice"),
+            "{e}"
+        );
     }
 
     #[test]
-    fn colors() {
-        assert_eq!(parse_color("#ff0000").unwrap(), [1.0, 0.0, 0.0, 1.0]);
-        assert_eq!(parse_color("#fff").unwrap(), [1.0, 1.0, 1.0, 1.0]);
-        assert_eq!(parse_color("#00000080").unwrap()[3], 128.0 / 255.0);
-        assert!(parse_color("ff0000").is_err());
+    fn theme_flows_into_components() {
+        let c = Config::parse_user("[theme.colors]\naccent = \"#ff0000\"\n").unwrap();
+        assert_eq!(c.theme.palette.accent, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(c.bar.palette.accent, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(c.decoration.border_active, [1.0, 0.0, 0.0, 1.0]);
+        // Only accent changed; the rest of the default palette is kept.
+        assert_eq!(c.theme.palette.text, Config::default().theme.palette.text);
+    }
+
+    #[test]
+    fn component_overrides() {
+        let c = Config::parse_user("[bar.colors]\nsurface = \"#ffffff\"\n[bar]\nfont_size = 20\n").unwrap();
+        assert_eq!(c.bar.palette.surface, [1.0; 4]);
+        assert_ne!(c.theme.palette.surface, [1.0; 4]);
+        assert_eq!(c.bar.font_size, 20.0);
+        assert_eq!(c.bar.font, c.theme.font);
+        // Older per-section keys still work.
+        let c = Config::parse_user("[decoration]\nborder_active = \"#00ff00\"\n").unwrap();
+        assert_eq!(c.decoration.border_active, [0.0, 1.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn theme_errors_reported_once() {
+        let e = Config::parse_user("[theme.colors]\naccent = \"nope\"\n").unwrap_err().0;
+        assert_eq!(e.lines().count(), 1, "{e}");
     }
 
     #[test]

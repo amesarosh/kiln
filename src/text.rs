@@ -170,11 +170,6 @@ impl Canvas {
     }
 }
 
-/// Linear mix between two colors; `t = 0` is `a`, `t = 1` is `b`.
-pub fn mix(a: Color, b: Color, t: f32) -> Color {
-    std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

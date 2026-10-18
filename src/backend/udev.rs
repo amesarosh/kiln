@@ -410,11 +410,7 @@ pub fn apply_output_config(state: &mut State) {
         return; // resume rescans
     }
     let Some(gpu) = &u.gpu else { return };
-    let lit: Vec<(crtc::Handle, String)> = gpu
-        .surfaces
-        .iter()
-        .map(|(crtc, s)| (*crtc, s.output.name()))
-        .collect();
+    let lit: Vec<(crtc::Handle, String)> = gpu.surfaces.iter().map(|(crtc, s)| (*crtc, s.output.name())).collect();
     let dark: Vec<(connector::Info, crtc::Handle)> = gpu
         .scanner
         .crtcs()
@@ -450,7 +446,12 @@ pub fn apply_output_config(state: &mut State) {
                 &DrmOutputRenderElements::default(),
             ) {
                 Ok(()) => {
-                    tracing::info!("{name}: mode {}x{}@{}", wl.size.w, wl.size.h, wl.refresh as f32 / 1000.0);
+                    tracing::info!(
+                        "{name}: mode {}x{}@{}",
+                        wl.size.w,
+                        wl.size.h,
+                        wl.refresh as f32 / 1000.0
+                    );
                     surface.mode = mode;
                     surface.output.set_preferred(wl);
                     surface.output.change_current_state(Some(wl), None, None, None);
@@ -606,15 +607,41 @@ fn apply_input_config(device: &mut libinput::Device, config: &crate::config::Inp
     }
 }
 
+/// Turn a monitor off (DPMS) or on. Off, the CRTC is disabled and nothing is rendered for it;
+/// the next queued frame turns it back on.
+pub fn set_power(state: &mut State, output: &Output, on: bool) {
+    let Some(u) = udev_data_mut(state) else { return };
+    let active = u.session.is_active();
+    let Some(gpu) = &mut u.gpu else { return };
+    let Some(surface) = gpu.surfaces.values_mut().find(|s| &s.output == output) else {
+        return;
+    };
+    surface.waiting_vblank = false;
+    surface.redraw_after_vblank = false;
+    surface.lock_frame_queued = false;
+    if on {
+        // Everything has to be redrawn: the screen lost what it showed.
+        surface.drm_output.reset_buffers();
+    } else if active && let Err(e) = surface.drm_output.with_compositor(|c| c.clear()) {
+        tracing::warn!("could not turn off {}: {e}", output.name());
+    }
+    state.needs_redraw = true;
+}
+
 /// Render every output that isn't already waiting for its vblank.
 pub fn render_all(state: &mut State) {
+    let powered_off = state.powered_off.clone();
     let Some(u) = udev_data_mut(state) else { return };
     if !u.session.is_active() {
         return;
     }
     let Some(gpu) = &mut u.gpu else { return };
     let mut ready = Vec::new();
-    for (crtc, s) in gpu.surfaces.iter_mut() {
+    for (crtc, s) in gpu
+        .surfaces
+        .iter_mut()
+        .filter(|(_, s)| !powered_off.contains(&s.output))
+    {
         if s.waiting_vblank {
             s.redraw_after_vblank = true;
         } else {
@@ -648,6 +675,13 @@ fn frame_finished(state: &mut State, crtc: crtc::Handle) {
 }
 
 fn render_surface(state: &mut State, crtc: crtc::Handle) {
+    let off = udev_data(state)
+        .and_then(|u| u.gpu.as_ref())
+        .and_then(|g| g.surfaces.get(&crtc))
+        .is_some_and(|s| !state.monitor_powered(&s.output));
+    if off {
+        return;
+    }
     // Taken out of `state` so the renderer can borrow mutably while elements borrow `state`.
     let Some(Backend::Udev(mut u)) = state.backend.take() else {
         return;

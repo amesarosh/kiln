@@ -10,7 +10,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
 - Runs nested for development or **on real hardware from a TTY**, with hardware cursor planes, direct scanout and GPU buffer sharing (linux-dmabuf)
 - Server-side decorations requested by default, so apps don't draw title bars; clipboard and primary selection supported
-- **Screen locking** (swaylock, hyprlock) and idle handling (swayidle), with video players able to keep the screen awake
+- **Screen locking** (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 
 ## Status
 
@@ -57,7 +57,7 @@ sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
 
 ## Default keys
 
-`Mod` is **Alt when nested** (so the host desktop doesn't steal Super) and **Super on hardware**. Set `general.mod` to override.
+`Mod` is **Alt when nested** (so the host desktop doesn't steal Super) and **Super on hardware**. Set `general.mod` to override. A bare `"Mod"` bind fires when you tap Mod by itself.
 `Ctrl+Alt+F1..F12` always switch consoles on hardware.
 
 | Keys | Action |
@@ -134,8 +134,8 @@ autostart = ["waybar", "swaybg -i ~/wall.png"]
 gaps_inner = 10
 smart_gaps = true
 
-[decoration]
-border_active = "#f38ba8"
+[theme.colors]
+accent = "#f38ba8"   # focused border, active workspace, tab underline...
 
 [[rules]]
 app_id = "pavucontrol"
@@ -146,6 +146,12 @@ app_id = "firefox"
 output = "DP-5"   # monitor names are in the log
 workspace = 2
 ```
+
+Everything the compositor draws (the bar, window borders, the lock screen) takes its font and
+colors from `[theme]`. Colors are named once in `[theme.colors]` and referred to by name, and
+shades like `hover = "mix(surface, text, 0.1)"` are built from them, so changing `surface` or
+`accent` updates every part that uses it. A section can override colors for itself alone with
+its own table, e.g. `[bar.colors]`.
 
 If you define `[binds]`, it replaces the default binds entirely. See [`resources/default-config.toml`](resources/default-config.toml) for every option and action.
 A config with errors is rejected as a whole and the last working config stays active; all problems are logged at once.
@@ -169,8 +175,13 @@ Ctrl+Alt+F1..F12 still switch VTs. If the locker crashes, the screen stays locke
 red. To recover, switch to another VT, log in, and start a new locker there:
 `WAYLAND_DISPLAY=wayland-1 swaylock` (the socket name is in the log).
 
+To turn monitors off when idle, set `monitors_off_after` (seconds) under `[general]`, or bind
+the `power-off-monitors` action. Any key press, click or pointer movement turns them back on.
+Tools like `wlopm` can also switch them through the standard output power protocol, e.g. from
+swayidle: `timeout 600 'wlopm --off \*' resume 'wlopm --on \*'`.
+
 Apps like video players can ask to keep the screen awake. That only counts while their window
-is on screen. Turning monitors off when idle isn't supported yet.
+is on screen.
 
 ## Code map
 
@@ -183,12 +194,14 @@ is on screen. Turning monitors off when idle isn't supported yet.
 | `src/layout.rs` | pure tiling math (unit tested); add new layouts here |
 | `src/workspace.rs` | per-workspace window order, focus, floating (unit tested) |
 | `src/config.rs` | TOML parsing, validation, keybind/action parsing (unit tested) |
+| `src/theme.rs` | shared font and color palette; resolves color names and `mix(...)` |
 | `src/input.rs` | keyboard binds, pointer focus, Mod+drag |
 | `src/grabs.rs` | interactive move/resize |
 | `src/render.rs` | builds the frame: layers, windows, borders, lock screen |
 | `src/handlers/` | Wayland protocol handlers (xdg-shell, layer-shell, decorations, seat, clipboard, viewporter, fractional scale) |
 | `src/handlers/lock.rs` | screen locking: lock state, lock surfaces, who may unlock |
 | `src/handlers/idle.rs` | idle notifications and idle inhibit |
+| `src/handlers/output_power.rs` | turning monitors off and on (DPMS), idle power-off timer |
 | `src/backend/winit.rs` | nested backend |
 | `src/backend/udev.rs` | hardware backend: DRM/KMS outputs, libinput, session/VT handling |
 | `src/backend/mod.rs` | backend switch, linux-dmabuf (GPU buffer sharing) |
@@ -202,8 +215,7 @@ monitors: `WAYLAND_TIME_NESTED_OUTPUTS=2 cargo run -- -b winit`.
 ## Roadmap
 
 1. 10-bit output, multi-GPU.
-2. Turn monitors off when idle (DPMS), e.g. via wlr-output-power-management for swayidle.
-3. XWayland for X11-only apps.
-4. IPC socket for status bars and scripting (workspace state, focused window, run actions).
-5. More protocols: xdg-activation, screencopy (screenshots/screen sharing), presentation-time.
-6. Small optional animations (window open/close, workspace switch).
+2. XWayland for X11-only apps.
+3. IPC socket for status bars and scripting (workspace state, focused window, run actions).
+4. More protocols: xdg-activation, screencopy (screenshots/screen sharing), presentation-time.
+5. Small optional animations (window open/close, workspace switch).

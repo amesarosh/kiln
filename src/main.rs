@@ -9,6 +9,7 @@ mod layout;
 mod render;
 mod state;
 mod text;
+mod theme;
 mod workspace;
 
 use std::{fs::File, path::PathBuf, sync::Mutex};
@@ -178,6 +179,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("listening on WAYLAND_DISPLAY={}", state.socket_name.to_string_lossy());
 
     state.watch_config();
+    state.arm_idle_power_off();
     state.run_autostart();
     for cmd in &args.exec {
         state.spawn(cmd);

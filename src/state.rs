@@ -108,6 +108,16 @@ pub struct State {
     pub lock_surfaces: Vec<(Output, LockSurface)>,
     /// Surfaces asking to keep the screen awake (video players).
     pub idle_inhibitors: Vec<WlSurface>,
+    /// Monitors turned off (power saving) until input or a client turns them back on.
+    pub powered_off: Vec<Output>,
+    /// wlr-output-power-management controls handed to clients.
+    pub output_powers: Vec<(
+        smithay::reexports::wayland_protocols_wlr::output_power_management::v1::server::zwlr_output_power_v1::ZwlrOutputPowerV1,
+        Output,
+    )>,
+    /// When the last input happened, for `monitors_off_after`.
+    pub last_activity: Instant,
+    pub idle_power_timer: Option<smithay::reexports::calloop::RegistrationToken>,
     /// Damage-tracking ids for the lock screen fill: [normal, locker died].
     pub lock_fill_ids: [Id; 2],
 
@@ -164,6 +174,7 @@ impl State {
         let idle_inhibit_state = IdleInhibitManagerState::new::<Self>(&dh);
         let viewporter_state = ViewporterState::new::<Self>(&dh);
         let fractional_scale_state = FractionalScaleManagerState::new::<Self>(&dh);
+        Self::create_output_power_global(&dh);
 
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&dh, "seat0");
@@ -213,6 +224,10 @@ impl State {
             lock_surfaces: Vec::new(),
             idle_inhibitors: Vec::new(),
             lock_fill_ids: [Id::new(), Id::new()],
+            powered_off: Vec::new(),
+            last_activity: Instant::now(),
+            idle_power_timer: None,
+            output_powers: Vec::new(),
             config,
             bar,
             config_path,
@@ -343,6 +358,7 @@ impl State {
         let old_loc = old.output.current_location();
         tracing::info!("monitor {} removed", output.name());
         self.bar.forget_output(&output.name());
+        self.forget_monitor_power(output);
 
         if self.monitors.is_empty() {
             self.active_mon = 0;
@@ -757,7 +773,12 @@ impl State {
                 let surface = self
                     .output()
                     .and_then(|o| self.lock_surface(&o).cloned())
-                    .or_else(|| self.lock_surfaces.iter().find(|(_, s)| s.alive()).map(|(_, s)| s.clone()))
+                    .or_else(|| {
+                        self.lock_surfaces
+                            .iter()
+                            .find(|(_, s)| s.alive())
+                            .map(|(_, s)| s.clone())
+                    })
                     .map(|s| s.wl_surface().clone());
                 keyboard.set_focus(self, surface, serial);
             }
@@ -972,6 +993,7 @@ impl State {
             Action::FocusMonitor(dir) => self.focus_monitor(dir),
             Action::MoveToMonitor(dir) => self.move_to_monitor(dir),
             Action::SwitchVt(vt) => self.switch_vt(vt),
+            Action::PowerOffMonitors => self.set_all_monitors_power(false),
         }
     }
 
@@ -1093,7 +1115,11 @@ impl State {
             self.bar.reconfigure(&config.bar);
         }
         let outputs_changed = config.outputs != self.config.outputs;
+        let idle_changed = config.general.monitors_off_after != self.config.general.monitors_off_after;
         self.config = config;
+        if idle_changed {
+            self.arm_idle_power_off();
+        }
         if outputs_changed {
             self.apply_output_config();
         }
@@ -1281,7 +1307,11 @@ fn xdg_data_dirs() -> String {
     let mut dirs: Vec<String> = if inherited.is_empty() {
         vec!["/usr/local/share".into(), "/usr/share".into()]
     } else {
-        inherited.split(':').filter(|d| !d.is_empty()).map(String::from).collect()
+        inherited
+            .split(':')
+            .filter(|d| !d.is_empty())
+            .map(String::from)
+            .collect()
     };
     let mut extra = vec![
         "/var/lib/flatpak/exports/share".to_string(),

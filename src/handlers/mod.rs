@@ -2,6 +2,7 @@ mod compositor;
 mod idle;
 mod layer_shell;
 pub mod lock;
+mod output_power;
 mod xdg_shell;
 
 use smithay::{
@@ -86,7 +87,9 @@ impl FractionalScaleHandler for State {
         let Some(scale) = self.output().map(|o| o.current_scale().fractional_scale()) else {
             return;
         };
-        with_states(&surface, |s| with_fractional_scale(s, |fs| fs.set_preferred_scale(scale)));
+        with_states(&surface, |s| {
+            with_fractional_scale(s, |fs| fs.set_preferred_scale(scale))
+        });
     }
 }
 delegate_fractional_scale!(State);

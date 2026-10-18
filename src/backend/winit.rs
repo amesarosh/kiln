@@ -7,9 +7,8 @@ use smithay::{
     backend::{
         egl::EGLDevice,
         renderer::{
-            ImportDma,
+            ImportDma, Renderer,
             damage::OutputDamageTracker,
-            Renderer,
             element::{
                 Element, Id, Kind, RenderElement, UnderlyingStorage,
                 utils::{Relocate, RelocateRenderElement},
@@ -79,7 +78,9 @@ fn layout_outputs(state: &mut State, outputs: &[Output], window: Size<i32, Physi
 
 /// Re-apply output scales after a config reload.
 pub fn apply_output_config(state: &mut State) {
-    let Some(Backend::Winit(data)) = &state.backend else { return };
+    let Some(Backend::Winit(data)) = &state.backend else {
+        return;
+    };
     let (outputs, size) = (data.outputs.clone(), data.backend.window_size());
     let offsets = layout_outputs(state, &outputs, size);
     if let Some(Backend::Winit(data)) = &mut state.backend {
@@ -255,7 +256,9 @@ fn render(state: &mut State) {
                 elements.extend(
                     render::output_elements(state, renderer, output, CursorDraw::None)
                         .into_iter()
-                        .map(|e| RelocateRenderElement::from_element(AtScale { inner: e, scale }, offset, Relocate::Relative)),
+                        .map(|e| {
+                            RelocateRenderElement::from_element(AtScale { inner: e, scale }, offset, Relocate::Relative)
+                        }),
                 );
             }
             match data
@@ -289,6 +292,9 @@ fn render(state: &mut State) {
         if locked {
             state.lock_frame_shown(output);
         }
-        render::send_frames(state, output);
+        // Like on hardware, apps on a turned-off monitor get no frame callbacks.
+        if state.monitor_powered(output) {
+            render::send_frames(state, output);
+        }
     }
 }

@@ -19,8 +19,8 @@ use smithay::{
     },
     utils::SERIAL_COUNTER,
     wayland::session_lock::{
-        ExtLockSurfaceUserData, LockSurface, SessionLockHandler, SessionLockManagerGlobalData,
-        SessionLockManagerState, SessionLockState, SessionLocker,
+        ExtLockSurfaceUserData, LockSurface, SessionLockHandler, SessionLockManagerGlobalData, SessionLockManagerState,
+        SessionLockState, SessionLocker,
     },
 };
 
@@ -32,8 +32,13 @@ pub enum LockState {
     Unlocked,
     /// A locker asked to lock. Nothing but lock surfaces is drawn already; the locker is told
     /// the session is locked once every monitor in `waiting` has shown such a frame.
-    Locking { locker: SessionLocker, waiting: Vec<Output> },
-    Locked { lock: ExtSessionLockV1 },
+    Locking {
+        locker: SessionLocker,
+        waiting: Vec<Output>,
+    },
+    Locked {
+        lock: ExtSessionLockV1,
+    },
 }
 
 impl LockState {
@@ -77,7 +82,8 @@ impl State {
         let LockState::Locking { waiting, .. } = &mut self.lock else {
             return;
         };
-        waiting.retain(|o| self.monitors.iter().any(|m| &m.output == o));
+        // Monitors that are gone or turned off show nothing, so there's nothing to wait for.
+        waiting.retain(|o| self.monitors.iter().any(|m| &m.output == o) && !self.powered_off.contains(o));
         if !waiting.is_empty() && self.session_active() {
             return;
         }

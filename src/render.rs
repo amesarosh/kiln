@@ -102,6 +102,11 @@ where
             _ => {}
         }
     }
+    // A turned-off monitor (only drawn when nested; on hardware it isn't rendered at all).
+    if !state.monitor_powered(output) {
+        push_fill(output, &state.lock_fill_ids[0], [0.0, 0.0, 0.0, 1.0], &mut out);
+        return out;
+    }
     if state.is_locked() {
         push_lock(state, renderer, output, scale, &mut out);
         return out;
@@ -199,13 +204,22 @@ where
         );
         return;
     }
+    let (id, color) = if state.locker_dead() {
+        (&state.lock_fill_ids[1], state.config.theme.palette.lock_failed)
+    } else {
+        (&state.lock_fill_ids[0], state.config.theme.palette.locked)
+    };
+    push_fill(output, id, color, out);
+}
+
+/// Cover the whole output with one color.
+fn push_fill<R>(output: &Output, id: &Id, color: Color, out: &mut Vec<OutputElement<R>>)
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Clone + Texture + 'static,
+{
     let size = output.current_mode().map(|m| m.size).unwrap_or_default();
     let size = output.current_transform().transform_size(size);
-    let (id, color) = if state.locker_dead() {
-        (&state.lock_fill_ids[1], [0.35, 0.0, 0.0, 1.0])
-    } else {
-        (&state.lock_fill_ids[0], [0.0, 0.0, 0.0, 1.0])
-    };
     out.push(OutputElement::Solid(SolidColorRenderElement::new(
         id.clone(),
         Rectangle::from_size(size),
@@ -303,15 +317,11 @@ pub fn send_frames(state: &mut State, output: &Output) {
 /// The monitor showing most of a window.
 fn main_output(state: &State, window: &Window) -> Option<Output> {
     let geo = state.space.element_geometry(window)?;
-    state
-        .space
-        .outputs_for_element(window)
-        .into_iter()
-        .max_by_key(|o| {
-            state
-                .space
-                .output_geometry(o)
-                .and_then(|g| g.intersection(geo))
-                .map_or(0, |r| r.size.w as i64 * r.size.h as i64)
-        })
+    state.space.outputs_for_element(window).into_iter().max_by_key(|o| {
+        state
+            .space
+            .output_geometry(o)
+            .and_then(|g| g.intersection(geo))
+            .map_or(0, |r| r.size.w as i64 * r.size.h as i64)
+    })
 }

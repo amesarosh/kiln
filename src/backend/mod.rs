@@ -49,6 +49,13 @@ impl State {
         }
     }
 
+    /// Turn a monitor's display off or back on. Nested, the window slice just goes black.
+    pub fn backend_set_power(&mut self, output: &smithay::output::Output, on: bool) {
+        if let Some(Backend::Udev(_)) = &self.backend {
+            udev::set_power(self, output, on);
+        }
+    }
+
     pub fn switch_vt(&mut self, vt: i32) {
         if let Some(Backend::Udev(u)) = &mut self.backend {
             u.switch_vt(vt);

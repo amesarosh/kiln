@@ -30,6 +30,17 @@ impl State {
         // Any input resets the idle timers (swayidle and friends).
         let seat = self.seat.clone();
         self.idle_notifier.notify_activity(&seat);
+        // Deliberate input turns monitors back on. Key and button releases don't count, or
+        // letting go of the keys of a power-off bind would wake them straight away.
+        let wakes = match &event {
+            InputEvent::Keyboard { event } => event.state() == KeyState::Pressed,
+            InputEvent::PointerButton { event } => event.state() == ButtonState::Pressed,
+            InputEvent::PointerMotion { .. }
+            | InputEvent::PointerMotionAbsolute { .. }
+            | InputEvent::PointerAxis { .. } => true,
+            _ => false,
+        };
+        self.note_activity(wakes);
         match event {
             InputEvent::Keyboard { event } => self.on_key::<I>(event),
             InputEvent::PointerMotion { event } => {
@@ -138,7 +149,15 @@ impl State {
         // The hardware backend draws the pointer, so moving it is a visible change.
         self.needs_redraw |= self.draws_cursor();
         if self.is_locked() {
-            pointer.motion(self, under, &MotionEvent { location: pos, serial, time });
+            pointer.motion(
+                self,
+                under,
+                &MotionEvent {
+                    location: pos,
+                    serial,
+                    time,
+                },
+            );
             pointer.frame(self);
             return;
         }
