@@ -3,6 +3,7 @@ mod idle;
 mod layer_shell;
 pub mod lock;
 mod output_power;
+pub mod screencopy;
 mod xdg_shell;
 pub mod xwayland;
 

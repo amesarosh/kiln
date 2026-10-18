@@ -129,6 +129,10 @@ pub struct State {
         smithay::reexports::wayland_protocols_wlr::output_power_management::v1::server::zwlr_output_power_v1::ZwlrOutputPowerV1,
         Output,
     )>,
+    /// Screencopy frames waiting for the screen to change.
+    pub screencopy_pending: Vec<crate::handlers::screencopy::PendingCopy>,
+    /// Which screencopy clients have seen each output's latest contents.
+    pub screencopy_watch: Vec<crate::handlers::screencopy::DamageWatch>,
     /// When the last input happened, for `monitors_off_after`.
     pub last_activity: Instant,
     pub idle_power_timer: Option<smithay::reexports::calloop::RegistrationToken>,
@@ -190,6 +194,7 @@ impl State {
         let fractional_scale_state = FractionalScaleManagerState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         Self::create_output_power_global(&dh);
+        Self::create_screencopy_global(&dh);
 
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&dh, "seat0");
@@ -248,6 +253,8 @@ impl State {
             last_activity: Instant::now(),
             idle_power_timer: None,
             output_powers: Vec::new(),
+            screencopy_pending: Vec::new(),
+            screencopy_watch: Vec::new(),
             config,
             bar,
             config_path,
@@ -383,6 +390,7 @@ impl State {
         tracing::info!("monitor {} removed", output.name());
         self.bar.forget_output(&output.name());
         self.forget_monitor_power(output);
+        self.forget_screencopy_output(output);
 
         if self.monitors.is_empty() {
             self.active_mon = 0;
@@ -1236,7 +1244,9 @@ impl State {
             }
             // An old DISPLAY (say, from an earlier X session) would point at the wrong screen.
             None => {
-                let _ = Command::new("systemctl").args(["--user", "unset-environment", "DISPLAY"]).status();
+                let _ = Command::new("systemctl")
+                    .args(["--user", "unset-environment", "DISPLAY"])
+                    .status();
             }
         }
         // Wait for it, so autostart programs see the new values.

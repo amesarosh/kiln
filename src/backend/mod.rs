@@ -8,7 +8,9 @@ use smithay::{
     wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
 };
 
-use crate::state::State;
+use smithay::backend::renderer::gles::GlesRenderer;
+
+use crate::{render::OutputElement, state::State};
 
 pub enum Backend {
     /// A window inside another desktop.
@@ -24,6 +26,21 @@ impl State {
             Some(Backend::Winit(w)) => w.request_redraw(),
             Some(Backend::Udev(_)) => udev::render_all(self),
             None => {}
+        }
+    }
+
+    /// Build `output`'s scene and hand it to `f` with the renderer, for drawing offscreen
+    /// (screenshots). None when there's no GPU to draw with, e.g. while on another VT.
+    pub fn capture_output<T>(
+        &mut self,
+        output: &smithay::output::Output,
+        with_cursor: bool,
+        f: impl FnOnce(&mut GlesRenderer, &[OutputElement<GlesRenderer>]) -> T,
+    ) -> Option<T> {
+        match &self.backend {
+            Some(Backend::Winit(_)) => winit::capture(self, output, f),
+            Some(Backend::Udev(_)) => udev::capture(self, output, with_cursor, f),
+            None => None,
         }
     }
 

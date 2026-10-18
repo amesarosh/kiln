@@ -693,17 +693,10 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
         .map(|s| s.output.clone());
 
     let mut lock_shown = false;
+    let mut damaged = false;
     if let (Some(output), Some(gpu)) = (&output, u.gpu.as_mut()) {
-        let themed = match &state.cursor_status {
-            CursorImageStatus::Named(icon) => Some(u.cursor.get(*icon, output.current_scale().integer_scale())),
-            CursorImageStatus::Surface(_) => None,
-            CursorImageStatus::Hidden => None,
-        };
-        let cursor = match (&state.cursor_status, &themed) {
-            (_, Some((buffer, hotspot))) => CursorDraw::Themed(buffer, *hotspot),
-            (CursorImageStatus::Surface(_), _) => CursorDraw::Surface,
-            _ => CursorDraw::None,
-        };
+        let themed = themed_cursor(state, &mut u.cursor, output);
+        let cursor = cursor_draw(state, &themed);
         let locked = state.is_locked();
         let elements = render::output_elements(state, &mut gpu.renderer, output, cursor);
         let clear = state.config.decoration.background;
@@ -716,6 +709,7 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
                 // Only flip when the frame differs; an idle screen stays untouched.
                 Ok(result) if !result.is_empty => match surface.drm_output.queue_frame(()) {
                     Ok(()) => {
+                        damaged = true;
                         surface.waiting_vblank = true;
                         surface.lock_frame_queued = locked;
                     }
@@ -730,11 +724,66 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
 
     state.backend = Some(Backend::Udev(u));
     if let Some(output) = output {
+        if damaged {
+            state.screencopy_output_damaged(&output);
+        }
         if lock_shown {
             state.lock_frame_shown(&output);
         }
         render::send_frames(state, &output);
     }
+}
+
+type ThemedCursor = Option<(
+    smithay::backend::renderer::element::memory::MemoryRenderBuffer,
+    smithay::utils::Point<i32, smithay::utils::Logical>,
+)>;
+
+/// The themed cursor image for `output`, when the pointer shows a named cursor.
+fn themed_cursor(state: &State, cursor: &mut Cursor, output: &Output) -> ThemedCursor {
+    match &state.cursor_status {
+        CursorImageStatus::Named(icon) => Some(cursor.get(*icon, output.current_scale().integer_scale())),
+        _ => None,
+    }
+}
+
+fn cursor_draw<'a>(state: &State, themed: &'a ThemedCursor) -> CursorDraw<'a> {
+    match (&state.cursor_status, themed) {
+        (_, Some((buffer, hotspot))) => CursorDraw::Themed(buffer, *hotspot),
+        (CursorImageStatus::Surface(_), _) => CursorDraw::Surface,
+        _ => CursorDraw::None,
+    }
+}
+
+/// See [`State::capture_output`].
+pub fn capture<T>(
+    state: &mut State,
+    output: &Output,
+    with_cursor: bool,
+    f: impl FnOnce(&mut GlesRenderer, &[OutputElement<GlesRenderer>]) -> T,
+) -> Option<T> {
+    let Some(Backend::Udev(mut u)) = state.backend.take() else {
+        return None;
+    };
+    let mut result = None;
+    if u.session.is_active()
+        && let Some(gpu) = u.gpu.as_mut()
+    {
+        let themed = if with_cursor {
+            themed_cursor(state, &mut u.cursor, output)
+        } else {
+            None
+        };
+        let cursor = if with_cursor {
+            cursor_draw(state, &themed)
+        } else {
+            CursorDraw::None
+        };
+        let elements = render::output_elements(state, &mut gpu.renderer, output, cursor);
+        result = Some(f(&mut gpu.renderer, &elements));
+    }
+    state.backend = Some(Backend::Udev(u));
+    result
 }
 
 impl UdevData {

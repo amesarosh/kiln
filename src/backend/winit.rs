@@ -26,7 +26,7 @@ use smithay::{
 
 use super::Backend;
 use crate::{
-    render::{self, CursorDraw},
+    render::{self, CursorDraw, OutputElement},
     state::State,
 };
 
@@ -239,6 +239,22 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
     Ok(())
 }
 
+/// See [`State::capture_output`]. The host draws the pointer, so there's no cursor to add.
+pub fn capture<T>(
+    state: &mut State,
+    output: &Output,
+    f: impl FnOnce(&mut GlesRenderer, &[OutputElement<GlesRenderer>]) -> T,
+) -> Option<T> {
+    let Some(Backend::Winit(mut data)) = state.backend.take() else {
+        return None;
+    };
+    let renderer = data.renderer();
+    let elements = render::output_elements(state, renderer, output, CursorDraw::None);
+    let result = f(renderer, &elements);
+    state.backend = Some(Backend::Winit(data));
+    Some(result)
+}
+
 fn render(state: &mut State) {
     // Taken out of `state` so the renderer can borrow mutably while elements borrow `state`.
     let Some(Backend::Winit(mut data)) = state.backend.take() else {
@@ -279,14 +295,19 @@ fn render(state: &mut State) {
     };
 
     // Nothing changed on screen means nothing to swap; avoids burning GPU while idle.
-    if let Some(damage) = rendered
-        && let Err(e) = data.backend.submit(Some(&damage))
+    if let Some(damage) = &rendered
+        && let Err(e) = data.backend.submit(Some(damage))
     {
         tracing::warn!("failed to submit frame: {e}");
     }
 
     let outputs = data.outputs.clone();
     state.backend = Some(Backend::Winit(data));
+    if rendered.is_some() {
+        for output in &outputs {
+            state.screencopy_output_damaged(output);
+        }
+    }
     let locked = state.is_locked();
     for output in &outputs {
         if locked {
