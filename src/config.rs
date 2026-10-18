@@ -97,6 +97,19 @@ pub struct LayoutConfig {
     pub gaps_outer: i32,
     pub smart_gaps: bool,
     pub workspaces: usize,
+    /// Per-monitor default layouts from `[[outputs]]`, by name.
+    #[serde(skip)]
+    pub per_output: Vec<(String, LayoutKind)>,
+}
+
+impl LayoutConfig {
+    /// The layout new and reset workspaces start with on the monitor with this name.
+    pub fn default_for(&self, output: &str) -> LayoutKind {
+        self.per_output
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(output))
+            .map_or(self.default, |(_, l)| *l)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -197,6 +210,8 @@ struct RawOutput {
     transform: Option<String>,
     /// Where this monitor's bar goes, overriding `[bar] position`; "none" hides it.
     bar: Option<String>,
+    /// This monitor's default layout, overriding `[layout] default`.
+    layout: Option<LayoutKind>,
 }
 
 fn yes() -> bool {
@@ -608,7 +623,12 @@ impl Config {
             launcher: rb.launcher.clone(),
         };
 
-        let layout = raw.layout;
+        let mut layout = raw.layout;
+        layout.per_output = raw
+            .outputs
+            .iter()
+            .filter_map(|o| Some((o.name.clone(), o.layout?)))
+            .collect();
         if !(0.05..=0.95).contains(&layout.master_ratio) {
             problems.push("layout.master_ratio must be between 0.05 and 0.95".into());
         }
@@ -1037,6 +1057,13 @@ mod tests {
         assert_eq!(c.bar.position_for("DP-5"), None);
         assert_eq!(c.bar.position_for("HDMI-A-5"), Some(BarPosition::Top));
         assert!(Config::parse_user("[[outputs]]\nname = \"DP-4\"\nbar = \"middle\"\n").is_err());
+    }
+
+    #[test]
+    fn layout_per_output() {
+        let c = Config::parse_user("[[outputs]]\nname = \"DP-4\"\nlayout = \"monocle\"\n").unwrap();
+        assert_eq!(c.layout.default_for("dp-4"), LayoutKind::Monocle);
+        assert_eq!(c.layout.default_for("DP-5"), LayoutKind::Tile);
     }
 
     #[test]

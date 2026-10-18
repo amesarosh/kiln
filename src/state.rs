@@ -350,7 +350,7 @@ impl State {
 
     /// A monitor was connected and mapped into the space.
     pub fn add_monitor(&mut self, output: Output) {
-        let workspaces = if self.monitors.is_empty() {
+        let mut workspaces = if self.monitors.is_empty() {
             // The first monitor takes over windows kept while none was connected.
             let mut ws = std::mem::replace(&mut self.parked, make_workspaces(&self.config));
             let loc = output.current_location();
@@ -359,6 +359,10 @@ impl State {
         } else {
             make_workspaces(&self.config)
         };
+        let layout = self.config.layout.default_for(&output.name());
+        for ws in &mut workspaces {
+            ws.layout = layout;
+        }
         tracing::info!("monitor {} added", output.name());
         self.monitors.push(Monitor {
             output,
@@ -1179,6 +1183,12 @@ impl State {
             ws.layout = config.layout.default;
             ws.master_ratio = config.layout.master_ratio;
             ws.master_count = config.layout.master_count;
+        }
+        for m in &mut self.monitors {
+            let layout = config.layout.default_for(&m.output.name());
+            for ws in &mut m.workspaces {
+                ws.layout = layout;
+            }
         }
 
         if config.bar != self.config.bar {

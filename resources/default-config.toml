@@ -203,6 +203,7 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 # position = [0, 0]        # in scaled pixels; unset monitors go to the right of set ones
 # transform = "normal"     # "90", "180", "270", "flipped", "flipped-90", ... (counter-clockwise)
 # bar = "left"            # this monitor's bar: "top", "bottom", "left", "right" or "none"
+# layout = "monocle"       # this monitor's default layout, instead of [layout] default
 #
 # [[outputs]]
 # name = "HDMI-A-1"
