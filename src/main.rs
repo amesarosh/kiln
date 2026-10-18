@@ -12,6 +12,7 @@ mod layout;
 mod menu;
 mod render;
 mod state;
+mod switcher;
 mod text;
 mod theme;
 mod workspace;
@@ -198,6 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.needs_redraw = false;
             state.schedule_redraw();
         }
+        state.track_focus_history();
         state.refresh_foreign_toplevels();
         let _ = state.display_handle.flush_clients();
     })?;

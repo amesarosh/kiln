@@ -125,6 +125,8 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 #   focus-monitor next|prev   move focus (and the pointer) to another monitor
 #   move-to-monitor next|prev send the focused window to another monitor
 #   power-off-monitors        turn monitors off until the next input
+#   window-switcher next|prev pick a window from a list of all of them, most
+#                             recent first; let go of the modifier to switch
 #   reload                    reload this file (it also reloads on save)
 #   quit                      exit the compositor
 #
@@ -150,6 +152,9 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 "Shift+Print" = "spawn grim"
 # Clipboard history: pick an old entry and copy it again (see autostart above).
 "Mod+v" = "spawn cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
+# Hold Alt, press Tab to move through your windows, let go to switch.
+"Alt+Tab" = "window-switcher next"
+"Alt+Shift+Tab" = "window-switcher prev"
 
 "Mod+j" = "focus next"
 "Mod+k" = "focus prev"

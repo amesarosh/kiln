@@ -136,6 +136,10 @@ pub struct State {
     pub foreign_toplevels: crate::handlers::foreign_toplevel::ForeignToplevels,
     /// Copies of the clipboard, kept after the app that copied closes.
     pub clipboard: crate::clipboard::Keeper,
+    /// The Alt+Tab switcher, while open.
+    pub switcher: Option<crate::switcher::Switcher>,
+    /// Windows by when they last had focus, most recent first.
+    pub focus_history: Vec<Window>,
     /// The open pop-up menu, if any.
     pub menu: Option<crate::menu::Menu>,
     /// The theme font, loaded for menus; reloaded when `[theme] font` changes.
@@ -281,6 +285,8 @@ impl State {
             clipboard: Default::default(),
             foreign_toplevels,
             menu: None,
+            switcher: None,
+            focus_history: Vec::new(),
             ui_text: None,
             screencopy_pending: Vec::new(),
             screencopy_watch: Vec::new(),
@@ -422,6 +428,9 @@ impl State {
         self.forget_screencopy_output(output);
         if self.menu.as_ref().is_some_and(|m| &m.output == output) {
             self.menu = None;
+        }
+        if self.switcher.as_ref().is_some_and(|s| s.on_output(output)) {
+            self.switcher = None;
         }
 
         if self.monitors.is_empty() {
@@ -976,8 +985,8 @@ impl State {
             )
             .map(|(s, p)| (s, (p + output_loc).to_f64()));
         }
-        // The compositor's own menu is above everything.
-        if self.over_menu(pos) {
+        // The compositor's own menu and switcher are above everything.
+        if self.over_menu(pos) || self.over_switcher(pos) {
             return None;
         }
         // Before taking the layer map lock: over_bar() locks it too, and the lock isn't re-entrant.
@@ -1040,6 +1049,9 @@ impl State {
 
     pub fn run_action(&mut self, action: Action) {
         self.close_menu();
+        if !matches!(action, Action::WindowSwitcher(_)) {
+            self.switcher_cancel();
+        }
         match action {
             Action::Spawn(cmd) => self.spawn(&cmd),
             Action::Close => {
@@ -1115,6 +1127,7 @@ impl State {
             Action::MoveToMonitor(dir) => self.move_to_monitor(dir),
             Action::SwitchVt(vt) => self.switch_vt(vt),
             Action::PowerOffMonitors => self.set_all_monitors_power(false),
+            Action::WindowSwitcher(dir) => self.window_switcher(dir),
         }
     }
 
@@ -1204,6 +1217,7 @@ impl State {
     fn apply_config(&mut self, config: Config) {
         // Painted from the old theme; reopening shows the new one.
         self.close_menu();
+        self.switcher_cancel();
         if config.keyboard != self.config.keyboard {
             let kb = &config.keyboard;
             let keyboard = self.keyboard();

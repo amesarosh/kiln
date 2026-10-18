@@ -406,6 +406,8 @@ pub enum Action {
     SwitchVt(i32),
     /// Turn every monitor off until the next key press, click or pointer movement.
     PowerOffMonitors,
+    /// Alt+Tab: open the window switcher, or move through it while open.
+    WindowSwitcher(Dir),
 }
 
 #[derive(Debug)]
@@ -792,6 +794,8 @@ pub fn normalize_keysym(k: Keysym) -> Keysym {
     // Latin capitals A-Z share keysym values with ASCII.
     match k.raw() {
         r @ 0x41..=0x5a => Keysym::new(r + 0x20),
+        // Shift+Tab, as some layouts report it, so "Alt+Shift+Tab" matches.
+        0xfe20 => Keysym::new(0xff09),
         _ => k,
     }
 }
@@ -849,6 +853,7 @@ fn parse_action(s: &str) -> Result<Action, String> {
         "focus-monitor" => Action::FocusMonitor(dir()?),
         "move-to-monitor" => Action::MoveToMonitor(dir()?),
         "power-off-monitors" => Action::PowerOffMonitors,
+        "window-switcher" => Action::WindowSwitcher(dir()?),
         other => return Err(format!("unknown action \"{other}\"")),
     })
 }
@@ -991,6 +996,10 @@ mod tests {
         assert_eq!(parse_action("master-ratio -0.05").unwrap(), Action::MasterRatio(-0.05));
         assert_eq!(parse_action("workspace 3").unwrap(), Action::Workspace(3));
         assert_eq!(parse_action("power-off-monitors").unwrap(), Action::PowerOffMonitors);
+        assert_eq!(
+            parse_action("window-switcher prev").unwrap(),
+            Action::WindowSwitcher(Dir::Prev)
+        );
         assert!(parse_action("workspace 0").is_err());
         assert!(parse_action("focus up").is_err());
         assert!(parse_action("spawn").is_err());

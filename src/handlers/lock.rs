@@ -147,6 +147,7 @@ impl SessionLockHandler for State {
         let waiting = self.monitors.iter().map(|m| m.output.clone()).collect();
         // A menu open over the desktop mustn't survive into the lock screen.
         self.menu = None;
+        self.switcher = None;
         self.lock = LockState::Locking { locker, waiting };
         self.lock_changed();
         self.confirm_lock_if_ready();

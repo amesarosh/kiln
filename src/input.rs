@@ -95,6 +95,7 @@ impl State {
 
         let mut mod_tapped = false;
         let mut menu_key = None;
+        let mut switcher_key = None;
         let action =
             self.keyboard()
                 .input::<Option<Action>, _>(self, code, key_state, serial, time, |state, mods, handle| {
@@ -135,6 +136,20 @@ impl State {
                         state.suppressed_keys.push(code);
                         return FilterResult::Intercept(Some(Action::Quit));
                     }
+                    // The switcher takes its keys whatever modifiers are held (Alt is, usually).
+                    if state.switcher.is_some()
+                        && let Some(k) = menu_key_for(raw)
+                    {
+                        state.suppressed_keys.push(code);
+                        // Shift+Tab goes back up.
+                        let k = if raw == smithay::input::keyboard::keysyms::KEY_Tab && mods.shift {
+                            MenuKey::Up
+                        } else {
+                            k
+                        };
+                        switcher_key = Some(k);
+                        return FilterResult::Intercept(None);
+                    }
                     // An open menu takes the keys it knows; the rest work as usual.
                     if state.menu.is_some()
                         && !(mods.ctrl || mods.alt || mods.logo)
@@ -166,6 +181,11 @@ impl State {
         if let Some(k) = menu_key {
             self.menu_key(k);
         }
+        if let Some(k) = switcher_key {
+            self.switcher_key(k);
+        }
+        // Letting go of Alt (or whatever opened it) switches.
+        self.switcher_check_release();
         if mod_tapped && let Some(bind) = self.config.binds.iter().find(|b| b.key.is_none()) {
             self.run_action(bind.action.clone());
         }
@@ -192,13 +212,14 @@ impl State {
         }
         self.bar_hover(pos);
         self.menu_motion(pos);
-        if (self.over_bar(pos) || self.over_menu(pos)) && !pointer.is_grabbed() {
+        self.switcher_motion(pos);
+        if (self.over_bar(pos) || self.over_menu(pos) || self.over_switcher(pos)) && !pointer.is_grabbed() {
             // Clients don't reset the pointer when it leaves them, so show the normal arrow here.
             self.cursor_status = CursorImageStatus::default_named();
         }
 
         // While a menu is open, hovering doesn't move focus away from what it's for.
-        let follow = self.config.general.focus_follows_mouse && self.menu.is_none();
+        let follow = self.config.general.focus_follows_mouse && self.menu.is_none() && self.switcher.is_none();
         if follow && !pointer.is_grabbed() && self.focused_layer.is_none() {
             self.focus_monitor_at(pos);
         }
@@ -268,6 +289,13 @@ impl State {
                 },
             );
             pointer.frame(self);
+            return;
+        }
+
+        // While the switcher is open, a click picks a row or cancels; nothing else gets it.
+        if self.switcher.is_some() && !pointer.is_grabbed() && button_state == ButtonState::Pressed {
+            self.bar.held_buttons.push(button);
+            self.switcher_press(pos);
             return;
         }
 

@@ -346,14 +346,7 @@ impl State {
     /// Right-click on a window's tab: open its menu at the pointer.
     pub fn open_window_menu(&mut self, window: Window, pos: Point<f64, Logical>) {
         let Some(mon) = self.monitor_of(&window) else { return };
-        if self
-            .ui_text
-            .as_ref()
-            .is_none_or(|(font, _)| *font != self.config.theme.font)
-        {
-            let font = self.config.theme.font.clone();
-            self.ui_text = Text::load(&font).map(|t| (font, t));
-        }
+        self.load_ui_text();
         let Some((_, text)) = &self.ui_text else { return };
 
         let m = &self.monitors[mon];
@@ -431,6 +424,18 @@ impl State {
         }
         self.menu = Some(menu);
         self.needs_redraw = true;
+    }
+
+    /// Load the theme font for menus and the switcher, or reload it if the theme changed.
+    pub fn load_ui_text(&mut self) {
+        if self
+            .ui_text
+            .as_ref()
+            .is_none_or(|(font, _)| *font != self.config.theme.font)
+        {
+            let font = self.config.theme.font.clone();
+            self.ui_text = Text::load(&font).map(|t| (font, t));
+        }
     }
 
     pub fn close_menu(&mut self) {

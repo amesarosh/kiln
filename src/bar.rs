@@ -111,6 +111,11 @@ impl Bar {
         self.cached.borrow_mut().clear();
     }
 
+    /// An app's icon at `px` pixels, from the icon theme.
+    pub fn icon(&self, app_id: &str, px: u32) -> Option<std::rc::Rc<crate::icons::Icon>> {
+        self.icons.borrow_mut().get(app_id, px)
+    }
+
     /// Drop the cached image of a monitor that went away.
     pub fn forget_output(&mut self, name: &str) {
         self.cached.borrow_mut().remove(name);

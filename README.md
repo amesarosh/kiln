@@ -83,6 +83,7 @@ sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
 | `Mod+Shift+r` | reload config |
 | `Mod+Escape` | lock the screen (swaylock) |
 | `Print` / `Shift+Print` | screenshot a region to the clipboard / all monitors to a file (grim, slurp, wl-copy) |
+| `Alt+Tab` / `Alt+Shift+Tab` | window switcher: all windows, most recent first; let go of Alt to switch (Escape cancels) |
 | `Mod+v` | pick from clipboard history (cliphist and fuzzel; start `wl-paste --watch cliphist store` in autostart) |
 | `Mod+Shift+e` | quit |
 | `Mod+left drag` / `Mod+right drag` | move / resize (floats the window); drop on another monitor to move it there |
