@@ -139,6 +139,10 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 "Mod+Shift+e" = "quit"
 "Mod+Shift+r" = "reload"
 "Mod+Escape" = "spawn swaylock"
+# Screenshots: pick a region and copy it, or save every monitor to a file
+# (in your Pictures folder). Needs grim, slurp and wl-clipboard.
+"Print" = 'spawn grim -g "$(slurp)" - | wl-copy'
+"Shift+Print" = "spawn grim"
 
 "Mod+j" = "focus next"
 "Mod+k" = "focus prev"
