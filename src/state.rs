@@ -1311,7 +1311,10 @@ impl State {
         }
         // Wait for it, so autostart programs see the new values.
         match command.args(&vars).stdin(Stdio::null()).status() {
-            Ok(s) if s.success() => tracing::info!("exported {} to systemd/D-Bus", vars.join(", ")),
+            Ok(s) if s.success() => {
+                tracing::info!("exported {} to systemd/D-Bus", vars.join(", "));
+                restart_portals();
+            }
             Ok(s) => tracing::warn!("dbus-update-activation-environment exited with {s}"),
             Err(e) => tracing::warn!("could not run dbus-update-activation-environment: {e}"),
         }
@@ -1536,4 +1539,26 @@ pub fn xdg_data_dirs() -> String {
         }
     }
     dirs.join(":")
+}
+
+/// Portals that were already running (say, from an earlier login) keep the environment
+/// they started with, so a stale XDG_CURRENT_DESKTOP means no screen sharing. Restart the
+/// ones that are running; ones that aren't will start later with the new values.
+/// --no-block: a slow portal must not hold up startup.
+fn restart_portals() {
+    let result = Command::new("systemctl")
+        .args(["--user", "--no-block", "try-restart"])
+        .args([
+            "xdg-desktop-portal.service",
+            "xdg-desktop-portal-wlr.service",
+            "xdg-desktop-portal-gtk.service",
+            "xdg-desktop-portal-gnome.service",
+        ])
+        .stdin(Stdio::null())
+        .status();
+    match result {
+        Ok(s) if s.success() => tracing::info!("restarted running desktop portals"),
+        Ok(s) => tracing::warn!("restarting desktop portals: systemctl exited with {s}"),
+        Err(e) => tracing::warn!("could not restart desktop portals: {e}"),
+    }
 }
