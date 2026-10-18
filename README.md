@@ -10,6 +10,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
 - Runs nested for development or **on real hardware from a TTY**, with hardware cursor planes, direct scanout and GPU buffer sharing (linux-dmabuf)
 - Server-side decorations requested by default, so apps don't draw title bars; clipboard and primary selection supported
+- **Screen locking** (swaylock, hyprlock) and idle handling (swayidle), with video players able to keep the screen awake
 
 ## Status
 
@@ -76,6 +77,7 @@ sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
 | `Mod+Shift+.` / `Mod+Shift+,` | send window to next / previous monitor |
 | `Mod+Shift+q` | close window |
 | `Mod+Shift+r` | reload config |
+| `Mod+Escape` | lock the screen (swaylock) |
 | `Mod+Shift+e` | quit |
 | `Mod+left drag` / `Mod+right drag` | move / resize (floats the window); drop on another monitor to move it there |
 
@@ -115,8 +117,9 @@ enabled = false
 ```
 
 Positions are in scaled pixels, so a 2560-wide monitor at scale 1.5 is 1707 wide. Monitors
-without a `position` are placed left to right after the ones that have one. Apps are asked to
-draw at the scale rounded up, and the compositor shrinks them for fractional scales. Nested, only
+without a `position` are placed left to right after the ones that have one. Apps that support
+fractional scaling draw at the exact scale. Others draw at the scale rounded up and the
+compositor shrinks them. Nested, only
 `scale` applies (the fake monitors are named `winit` or `winit-1`, `winit-2`…).
 
 ### Config file
@@ -147,6 +150,28 @@ workspace = 2
 If you define `[binds]`, it replaces the default binds entirely. See [`resources/default-config.toml`](resources/default-config.toml) for every option and action.
 A config with errors is rejected as a whole and the last working config stays active; all problems are logged at once.
 
+### Screen lock and idle
+
+Any locker that uses the standard lock protocol works, such as `swaylock` or `hyprlock`. Bind
+one to a key, and use `swayidle` to lock after a while and before suspend:
+
+```toml
+[general]
+autostart = ["swayidle -w timeout 300 'swaylock -f' before-sleep 'swaylock -f'"]
+
+[binds]
+"Mod+Escape" = "spawn swaylock"
+```
+
+While locked, only the locker is drawn and every key goes to it. No binds work, including
+Ctrl+Alt+Backspace (quitting would drop you into the shell that started the compositor), but
+Ctrl+Alt+F1..F12 still switch VTs. If the locker crashes, the screen stays locked and turns dark
+red. To recover, switch to another VT, log in, and start a new locker there:
+`WAYLAND_DISPLAY=wayland-1 swaylock` (the socket name is in the log).
+
+Apps like video players can ask to keep the screen awake. That only counts while their window
+is on screen. Turning monitors off when idle isn't supported yet.
+
 ## Code map
 
 | File | Purpose |
@@ -160,8 +185,10 @@ A config with errors is rejected as a whole and the last working config stays ac
 | `src/config.rs` | TOML parsing, validation, keybind/action parsing (unit tested) |
 | `src/input.rs` | keyboard binds, pointer focus, Mod+drag |
 | `src/grabs.rs` | interactive move/resize |
-| `src/render.rs` | builds the frame: layers, windows, borders |
-| `src/handlers/` | Wayland protocol handlers (xdg-shell, layer-shell, decorations, seat, clipboard) |
+| `src/render.rs` | builds the frame: layers, windows, borders, lock screen |
+| `src/handlers/` | Wayland protocol handlers (xdg-shell, layer-shell, decorations, seat, clipboard, viewporter, fractional scale) |
+| `src/handlers/lock.rs` | screen locking: lock state, lock surfaces, who may unlock |
+| `src/handlers/idle.rs` | idle notifications and idle inhibit |
 | `src/backend/winit.rs` | nested backend |
 | `src/backend/udev.rs` | hardware backend: DRM/KMS outputs, libinput, session/VT handling |
 | `src/backend/mod.rs` | backend switch, linux-dmabuf (GPU buffer sharing) |
@@ -175,8 +202,8 @@ monitors: `WAYLAND_TIME_NESTED_OUTPUTS=2 cargo run -- -b winit`.
 ## Roadmap
 
 1. 10-bit output, multi-GPU.
-2. Session lock (screen locker) and idle handling, which a real session needs.
+2. Turn monitors off when idle (DPMS), e.g. via wlr-output-power-management for swayidle.
 3. XWayland for X11-only apps.
 4. IPC socket for status bars and scripting (workspace state, focused window, run actions).
-5. More protocols: xdg-activation, fractional scale, viewporter, idle-inhibit, screencopy (screenshots/screen sharing), presentation-time.
+5. More protocols: xdg-activation, screencopy (screenshots/screen sharing), presentation-time.
 6. Small optional animations (window open/close, workspace switch).

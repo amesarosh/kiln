@@ -7,6 +7,7 @@ use std::{
 };
 
 use smithay::{
+    backend::renderer::element::Id,
     desktop::{LayerSurface, PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output},
     input::{
         Seat, SeatState,
@@ -27,14 +28,19 @@ use smithay::{
     wayland::{
         compositor::{CompositorClientState, CompositorState, with_states},
         dmabuf::{DmabufGlobal, DmabufState},
+        fractional_scale::FractionalScaleManagerState,
+        idle_inhibit::IdleInhibitManagerState,
+        idle_notify::IdleNotifierState,
         output::OutputManagerState,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
+        session_lock::{LockSurface, SessionLockManagerState},
         shell::{
             wlr_layer::{KeyboardInteractivity, Layer, WlrLayerShellState},
             xdg::{XdgShellState, XdgToplevelSurfaceData, decoration::XdgDecorationState},
         },
         shm::ShmState,
         socket::ListeningSocketSource,
+        viewporter::ViewporterState,
     },
 };
 
@@ -42,6 +48,7 @@ use crate::{
     backend::Backend,
     bar::Bar,
     config::{Action, Config, LayoutChoice, ModKey, NewWindow},
+    handlers::lock::LockState,
     layout::{self, Rect},
     workspace::{Workspace, merge_workspaces, step},
 };
@@ -86,6 +93,23 @@ pub struct State {
     pub data_device_state: DataDeviceState,
     pub primary_selection_state: PrimarySelectionState,
     pub seat: Seat<State>,
+    pub session_lock_state: SessionLockManagerState,
+    pub idle_notifier: IdleNotifierState<State>,
+    #[allow(dead_code)]
+    pub idle_inhibit_state: IdleInhibitManagerState,
+    #[allow(dead_code)]
+    pub viewporter_state: ViewporterState,
+    #[allow(dead_code)]
+    pub fractional_scale_state: FractionalScaleManagerState,
+
+    /// Screen lock: while locked only lock surfaces are drawn and get input.
+    pub lock: LockState,
+    /// One lock surface per monitor, from the locker.
+    pub lock_surfaces: Vec<(Output, LockSurface)>,
+    /// Surfaces asking to keep the screen awake (video players).
+    pub idle_inhibitors: Vec<WlSurface>,
+    /// Damage-tracking ids for the lock screen fill: [normal, locker died].
+    pub lock_fill_ids: [Id; 2],
 
     pub config: Config,
     pub bar: Bar,
@@ -107,6 +131,8 @@ pub struct State {
 
     /// Keys whose press triggered a bind; their release is hidden from clients.
     pub suppressed_keys: Vec<Keycode>,
+    /// Mod key pressed on its own; a bare `"Mod"` bind fires if it's released before anything else.
+    pub mod_tap: Option<Keycode>,
     pub backend: Option<Backend>,
     pub cursor_status: CursorImageStatus,
     pub dmabuf_state: DmabufState,
@@ -133,6 +159,11 @@ impl State {
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let primary_selection_state = PrimarySelectionState::new::<Self>(&dh);
+        let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
+        let idle_notifier = IdleNotifierState::new(&dh, loop_handle.clone());
+        let idle_inhibit_state = IdleInhibitManagerState::new::<Self>(&dh);
+        let viewporter_state = ViewporterState::new::<Self>(&dh);
+        let fractional_scale_state = FractionalScaleManagerState::new::<Self>(&dh);
 
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&dh, "seat0");
@@ -173,6 +204,15 @@ impl State {
             data_device_state,
             primary_selection_state,
             seat,
+            session_lock_state,
+            idle_notifier,
+            idle_inhibit_state,
+            viewporter_state,
+            fractional_scale_state,
+            lock: LockState::Unlocked,
+            lock_surfaces: Vec::new(),
+            idle_inhibitors: Vec::new(),
+            lock_fill_ids: [Id::new(), Id::new()],
             config,
             bar,
             config_path,
@@ -183,6 +223,7 @@ impl State {
             pending_windows: Vec::new(),
             focused_layer: None,
             suppressed_keys: Vec::new(),
+            mod_tap: None,
             backend: None,
             cursor_status: CursorImageStatus::default_named(),
             dmabuf_state: DmabufState::new(),
@@ -319,6 +360,8 @@ impl State {
         self.focused_layer = None;
         self.arrange();
         self.refocus();
+        // A lock waiting on this monitor's frame shouldn't wait forever.
+        self.confirm_lock_if_ready();
     }
 
     /// Move a monitor to a new spot in the global space, carrying its floating windows along.
@@ -371,28 +414,40 @@ impl State {
         }
         self.sort_monitors();
         // The pointer may now be off every monitor.
-        let pointer = self.seat.get_pointer().unwrap();
-        let pos = pointer.current_location();
+        let pos = self.seat.get_pointer().unwrap().current_location();
         if self.monitor_at(pos).is_none()
             && let Some(geo) = self.output().and_then(|o| self.space.output_geometry(&o))
         {
             let center = geo.to_f64().loc + geo.to_f64().size.downscale(2.0).to_point();
-            let under = self.surface_under(center);
-            let time = self.start_time.elapsed().as_millis() as u32;
-            pointer.motion(
-                self,
-                under,
-                &smithay::input::pointer::MotionEvent {
-                    location: center,
-                    serial: SERIAL_COUNTER.next_serial(),
-                    time,
-                },
-            );
-            pointer.frame(self);
+            self.move_pointer(center);
         }
+        self.configure_lock_surfaces();
         self.arrange();
         self.refocus();
         self.needs_redraw = true;
+    }
+
+    /// Put the pointer at `pos` and tell whatever surface is now under it.
+    pub fn move_pointer(&mut self, pos: Point<f64, Logical>) {
+        let pointer = self.seat.get_pointer().unwrap();
+        let under = self.surface_under(pos);
+        let time = self.start_time.elapsed().as_millis() as u32;
+        pointer.motion(
+            self,
+            under,
+            &smithay::input::pointer::MotionEvent {
+                location: pos,
+                serial: SERIAL_COUNTER.next_serial(),
+                time,
+            },
+        );
+        pointer.frame(self);
+    }
+
+    /// What's under the pointer changed without it moving (e.g. the screen locked).
+    pub fn refresh_pointer_focus(&mut self) {
+        let pos = self.seat.get_pointer().unwrap().current_location();
+        self.move_pointer(pos);
     }
 
     /// Keep monitors ordered left to right (then top to bottom), so next/prev are spatial.
@@ -428,19 +483,7 @@ impl State {
         let Some(rect) = target else { return };
         let rect = rect.to_f64();
         let center = rect.loc + rect.size.downscale(2.0).to_point();
-        let pointer = self.seat.get_pointer().unwrap();
-        let under = self.surface_under(center);
-        let time = self.start_time.elapsed().as_millis() as u32;
-        pointer.motion(
-            self,
-            under,
-            &smithay::input::pointer::MotionEvent {
-                location: center,
-                serial: SERIAL_COUNTER.next_serial(),
-                time,
-            },
-        );
-        pointer.frame(self);
+        self.move_pointer(center);
         self.needs_redraw = true;
     }
 
@@ -625,6 +668,7 @@ impl State {
         for mon in 0..self.monitors.len() {
             self.arrange_monitor(mon);
         }
+        self.update_idle_inhibit();
     }
 
     fn arrange_monitor(&mut self, mon: usize) {
@@ -703,6 +747,23 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         let keyboard = self.keyboard();
 
+        // While locked the keyboard goes to the lock surface on the focused monitor, or any.
+        if self.is_locked() {
+            let current = keyboard.current_focus();
+            let keep = current
+                .as_ref()
+                .is_some_and(|f| self.lock_surfaces.iter().any(|(_, s)| s.alive() && s.wl_surface() == f));
+            if !keep {
+                let surface = self
+                    .output()
+                    .and_then(|o| self.lock_surface(&o).cloned())
+                    .or_else(|| self.lock_surfaces.iter().find(|(_, s)| s.alive()).map(|(_, s)| s.clone()))
+                    .map(|s| s.wl_surface().clone());
+                keyboard.set_focus(self, surface, serial);
+            }
+            return;
+        }
+
         // An exclusive layer (launcher, lock screen) always wins.
         if let Some(surface) = self.exclusive_layer() {
             self.focused_layer = Some(surface.clone());
@@ -768,7 +829,7 @@ impl State {
     }
 
     pub fn focus_layer(&mut self, layer: &LayerSurface) {
-        if layer.can_receive_keyboard_focus() {
+        if layer.can_receive_keyboard_focus() && !self.is_locked() {
             let surface = layer.wl_surface().clone();
             self.focused_layer = Some(surface.clone());
             self.keyboard()
@@ -783,6 +844,16 @@ impl State {
         let mon = self.monitor_at(pos)?;
         let output = &self.monitors[mon].output;
         let output_loc = self.space.output_geometry(output)?.loc;
+        if self.is_locked() {
+            let surface = self.lock_surface(output)?.wl_surface();
+            return smithay::desktop::utils::under_from_surface_tree(
+                surface,
+                pos - output_loc.to_f64(),
+                (0, 0),
+                WindowSurfaceType::ALL,
+            )
+            .map(|(s, p)| (s, (p + output_loc).to_f64()));
+        }
         // Before taking the layer map lock: over_bar() locks it too, and the lock isn't re-entrant.
         let on_bar = self.over_bar(pos);
         let map = layer_map_for_output(output);
@@ -947,6 +1018,7 @@ impl State {
             .env("WAYLAND_DISPLAY", &self.socket_name)
             .env("XDG_SESSION_TYPE", "wayland")
             .env("XDG_CURRENT_DESKTOP", "wayland-time")
+            .env("XDG_DATA_DIRS", xdg_data_dirs())
             .env_remove("DISPLAY")
             .stdin(Stdio::null())
             .spawn();
@@ -1200,4 +1272,29 @@ pub struct ClientState {
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+}
+
+/// `$XDG_DATA_DIRS` for spawned clients, so launchers find Flatpak and Snap apps.
+/// Starts from the inherited value (or the spec default) and appends any missing dirs.
+fn xdg_data_dirs() -> String {
+    let inherited = std::env::var("XDG_DATA_DIRS").unwrap_or_default();
+    let mut dirs: Vec<String> = if inherited.is_empty() {
+        vec!["/usr/local/share".into(), "/usr/share".into()]
+    } else {
+        inherited.split(':').filter(|d| !d.is_empty()).map(String::from).collect()
+    };
+    let mut extra = vec![
+        "/var/lib/flatpak/exports/share".to_string(),
+        "/var/lib/snapd/desktop".to_string(),
+    ];
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = home.to_string_lossy();
+        extra.insert(0, format!("{home}/.local/share/flatpak/exports/share"));
+    }
+    for dir in extra {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs.join(":")
 }

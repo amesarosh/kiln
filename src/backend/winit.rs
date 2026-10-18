@@ -284,7 +284,11 @@ fn render(state: &mut State) {
 
     let outputs = data.outputs.clone();
     state.backend = Some(Backend::Winit(data));
+    let locked = state.is_locked();
     for output in &outputs {
+        if locked {
+            state.lock_frame_shown(output);
+        }
         render::send_frames(state, output);
     }
 }

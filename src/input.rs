@@ -4,7 +4,7 @@ use smithay::{
         KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
     },
     input::{
-        keyboard::{FilterResult, ModifiersState},
+        keyboard::{FilterResult, Keysym, ModifiersState},
         pointer::{AxisFrame, ButtonEvent, CursorImageStatus, GrabStartData, MotionEvent, RelativeMotionEvent},
     },
     utils::{Logical, Point, SERIAL_COUNTER},
@@ -27,6 +27,9 @@ const XKB_TERMINATE_SERVER: u32 = 0xFED5;
 
 impl State {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        // Any input resets the idle timers (swayidle and friends).
+        let seat = self.seat.clone();
+        self.idle_notifier.notify_activity(&seat);
         match event {
             InputEvent::Keyboard { event } => self.on_key::<I>(event),
             InputEvent::PointerMotion { event } => {
@@ -63,23 +66,36 @@ impl State {
         let code = event.key_code();
         let key_state = event.state();
 
+        let mut mod_tapped = false;
         let action =
             self.keyboard()
                 .input::<Option<Action>, _>(self, code, key_state, serial, time, |state, mods, handle| {
                     // Swallow the release of any key whose press triggered a bind.
                     if key_state == KeyState::Released {
+                        // Still forwarded, so clients don't think Mod is stuck down.
+                        if state.mod_tap == Some(code) {
+                            state.mod_tap = None;
+                            mod_tapped = true;
+                        }
                         if let Some(i) = state.suppressed_keys.iter().position(|k| *k == code) {
                             state.suppressed_keys.swap_remove(i);
                             return FilterResult::Intercept(None);
                         }
                         return FilterResult::Forward;
                     }
+                    // Any other press cancels a pending Mod tap; a lone Mod press starts one.
+                    state.mod_tap = None;
                     // Ctrl+Alt+Fn produces XF86Switch_VT_n; always handled so you can't get stuck.
                     let modified = handle.modified_sym().raw();
                     if (XF86_SWITCH_VT_1..=XF86_SWITCH_VT_12).contains(&modified) {
                         state.suppressed_keys.push(code);
                         let vt = (modified - XF86_SWITCH_VT_1 + 1) as i32;
                         return FilterResult::Intercept(Some(Action::SwitchVt(vt)));
+                    }
+                    // Locked: every key goes to the locker. No binds, not even quit, which
+                    // would drop back to the shell that started us.
+                    if state.is_locked() {
+                        return FilterResult::Forward;
                     }
                     // Match on the unshifted, layout-independent sym so "Mod+Shift+1" works.
                     let Some(sym) = handle.raw_latin_sym_or_raw_current_sym() else {
@@ -94,6 +110,10 @@ impl State {
                     let sym = normalize_keysym(sym);
                     let pressed = Mods::from_state(mods);
                     let mod_key = state.mod_key();
+                    if is_mod_sym(sym, mod_key) && pressed == Mods::only_mod(mod_key) {
+                        state.mod_tap = Some(code);
+                        return FilterResult::Forward;
+                    }
                     match state.config.binds.iter().find(|b| b.matches(pressed, sym, mod_key)) {
                         Some(bind) => {
                             state.suppressed_keys.push(code);
@@ -106,6 +126,9 @@ impl State {
         if let Some(Some(action)) = action {
             self.run_action(action);
         }
+        if mod_tapped && let Some(bind) = self.config.binds.iter().find(|b| b.key.is_none()) {
+            self.run_action(bind.action.clone());
+        }
     }
 
     fn on_pointer_moved(&mut self, pos: Point<f64, Logical>, time: u32, relative: Option<Relative>) {
@@ -114,6 +137,11 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         // The hardware backend draws the pointer, so moving it is a visible change.
         self.needs_redraw |= self.draws_cursor();
+        if self.is_locked() {
+            pointer.motion(self, under, &MotionEvent { location: pos, serial, time });
+            pointer.frame(self);
+            return;
+        }
         self.bar_hover(pos);
         if self.over_bar(pos) && !pointer.is_grabbed() {
             // Clients don't reset the pointer when it leaves them, so show the normal arrow here.
@@ -163,6 +191,34 @@ impl State {
         let button = event.button_code();
         let button_state = event.state();
         let pos = pointer.current_location();
+        // Mod+click (move/resize) shouldn't count as a Mod tap.
+        if button_state == ButtonState::Pressed {
+            self.mod_tap = None;
+        }
+
+        if self.is_locked() {
+            // Clicking a monitor's lock surface gives it the keyboard.
+            if button_state == ButtonState::Pressed
+                && let Some(mon) = self.monitor_at(pos)
+            {
+                self.active_mon = mon;
+                let output = self.monitors[mon].output.clone();
+                if let Some(surface) = self.lock_surface(&output).map(|s| s.wl_surface().clone()) {
+                    self.keyboard().set_focus(self, Some(surface), serial);
+                }
+            }
+            pointer.button(
+                self,
+                &ButtonEvent {
+                    button,
+                    state: button_state,
+                    serial,
+                    time: event.time_msec(),
+                },
+            );
+            pointer.frame(self);
+            return;
+        }
 
         // Bar clicks are handled here and never reach clients, press or release.
         if button_state == ButtonState::Pressed && !pointer.is_grabbed() && self.over_bar(pos) {
@@ -236,7 +292,7 @@ impl State {
         };
         let pointer = self.seat.get_pointer().unwrap();
         let pos = pointer.current_location();
-        if !pointer.is_grabbed() {
+        if !pointer.is_grabbed() && !self.is_locked() {
             let vertical = amount(Axis::Vertical);
             if vertical != 0.0
                 && self.bar_scroll(pos, source, Axis::Vertical, vertical, event.amount_v120(Axis::Vertical))
@@ -285,6 +341,15 @@ impl State {
                 d(a).total_cmp(&d(b))
             })
             .unwrap_or(pos)
+    }
+}
+
+/// Whether `sym` is one of the physical keys for `mod_key` (left or right).
+fn is_mod_sym(sym: Keysym, mod_key: ModKey) -> bool {
+    match mod_key {
+        ModKey::Super | ModKey::Auto => matches!(sym, Keysym::Super_L | Keysym::Super_R),
+        ModKey::Alt => matches!(sym, Keysym::Alt_L | Keysym::Alt_R | Keysym::Meta_L | Keysym::Meta_R),
+        ModKey::Ctrl => matches!(sym, Keysym::Control_L | Keysym::Control_R),
     }
 }
 

@@ -88,6 +88,8 @@ struct Surface {
     waiting_vblank: bool,
     /// Something changed while waiting; render again right after vblank.
     redraw_after_vblank: bool,
+    /// The queued frame was rendered while locked; once it's on screen the lock can be confirmed.
+    lock_frame_queued: bool,
 }
 
 pub fn init(
@@ -187,6 +189,8 @@ pub fn init(
                     gpu.outputs.pause();
                 }
             }
+            // Nothing is on screen now, so a pending lock is safe to confirm.
+            state.confirm_lock_if_ready();
         }
         SessionEvent::ActivateSession => {
             tracing::info!("session resumed");
@@ -203,6 +207,7 @@ pub fn init(
                     for s in gpu.surfaces.values_mut() {
                         s.waiting_vblank = false;
                         s.redraw_after_vblank = false;
+                        s.lock_frame_queued = false;
                         s.drm_output.reset_buffers();
                     }
                 }
@@ -545,6 +550,7 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
             global,
             waiting_vblank: false,
             redraw_after_vblank: false,
+            lock_frame_queued: false,
         },
     );
     layer_map_for_output(&output).arrange();
@@ -631,7 +637,12 @@ fn frame_finished(state: &mut State, crtc: crtc::Handle) {
         tracing::warn!("frame submit error: {e}");
     }
     surface.waiting_vblank = false;
-    if std::mem::take(&mut surface.redraw_after_vblank) {
+    let redraw = std::mem::take(&mut surface.redraw_after_vblank);
+    if std::mem::take(&mut surface.lock_frame_queued) {
+        let output = surface.output.clone();
+        state.lock_frame_shown(&output);
+    }
+    if redraw {
         render_surface(state, crtc);
     }
 }
@@ -647,6 +658,7 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
         .and_then(|gpu| gpu.surfaces.get(&crtc))
         .map(|s| s.output.clone());
 
+    let mut lock_shown = false;
     if let (Some(output), Some(gpu)) = (&output, u.gpu.as_mut()) {
         let themed = match &state.cursor_status {
             CursorImageStatus::Named(icon) => Some(u.cursor.get(*icon, output.current_scale().integer_scale())),
@@ -658,6 +670,7 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
             (CursorImageStatus::Surface(_), _) => CursorDraw::Surface,
             _ => CursorDraw::None,
         };
+        let locked = state.is_locked();
         let elements = render::output_elements(state, &mut gpu.renderer, output, cursor);
         let clear = state.config.decoration.background;
 
@@ -668,10 +681,14 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
             {
                 // Only flip when the frame differs; an idle screen stays untouched.
                 Ok(result) if !result.is_empty => match surface.drm_output.queue_frame(()) {
-                    Ok(()) => surface.waiting_vblank = true,
+                    Ok(()) => {
+                        surface.waiting_vblank = true;
+                        surface.lock_frame_queued = locked;
+                    }
                     Err(e) => tracing::warn!("failed to queue frame: {e}"),
                 },
-                Ok(_) => {}
+                // Nothing changed, so the screen already shows the locked frame.
+                Ok(_) => lock_shown = locked,
                 Err(e) => tracing::warn!("render failed: {e:?}"),
             }
         }
@@ -679,11 +696,18 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
 
     state.backend = Some(Backend::Udev(u));
     if let Some(output) = output {
+        if lock_shown {
+            state.lock_frame_shown(&output);
+        }
         render::send_frames(state, &output);
     }
 }
 
 impl UdevData {
+    pub fn session_active(&self) -> bool {
+        self.session.is_active()
+    }
+
     pub fn switch_vt(&mut self, vt: i32) {
         if let Err(e) = self.session.change_vt(vt) {
             tracing::warn!("failed to switch to VT {vt}: {e}");

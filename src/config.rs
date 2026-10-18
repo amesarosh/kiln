@@ -252,6 +252,17 @@ pub struct Mods {
 }
 
 impl Mods {
+    /// The state with only `mod_key` held.
+    pub fn only_mod(mod_key: ModKey) -> Self {
+        let mut m = Self::default();
+        match mod_key {
+            ModKey::Super | ModKey::Auto => m.logo = true,
+            ModKey::Alt => m.alt = true,
+            ModKey::Ctrl => m.ctrl = true,
+        }
+        m
+    }
+
     pub fn from_state(m: &ModifiersState) -> Self {
         Self {
             logo: m.logo,
@@ -267,7 +278,8 @@ pub struct Bind {
     /// `Mod` is kept symbolic so the same config works nested and on hardware.
     pub uses_mod: bool,
     pub mods: Mods,
-    pub key: Keysym,
+    /// `None` is a bare `"Mod"` bind: it fires when Mod is tapped on its own.
+    pub key: Option<Keysym>,
     pub action: Action,
 }
 
@@ -281,7 +293,7 @@ impl Bind {
                 ModKey::Ctrl => want.ctrl = true,
             }
         }
-        want == pressed && key == self.key
+        want == pressed && self.key == Some(key)
     }
 }
 
@@ -573,8 +585,12 @@ impl WindowRule {
     }
 }
 
-/// "Mod+Shift+Return" -> (uses Mod, explicit modifiers, keysym)
-fn parse_combo(s: &str) -> Result<(bool, Mods, Keysym), String> {
+/// "Mod+Shift+Return" -> (uses Mod, explicit modifiers, keysym).
+/// A bare "Mod" has no key: it means "tap Mod by itself".
+fn parse_combo(s: &str) -> Result<(bool, Mods, Option<Keysym>), String> {
+    if s.trim().eq_ignore_ascii_case("mod") {
+        return Ok((true, Mods::default(), None));
+    }
     let mut parts: Vec<&str> = s.split('+').map(str::trim).collect();
     // Allow binding the plus key itself: "Mod+plus" is preferred, but "Mod++" also works.
     if s.ends_with("++") {
@@ -605,7 +621,7 @@ fn parse_combo(s: &str) -> Result<(bool, Mods, Keysym), String> {
     if key.raw() == 0 {
         return Err(format!("unknown key \"{key_name}\""));
     }
-    Ok((uses_mod, mods, normalize_keysym(key)))
+    Ok((uses_mod, mods, Some(normalize_keysym(key))))
 }
 
 /// Compare letters case-insensitively so "Mod+Shift+q" works whether or not Shift changes the sym.
@@ -776,10 +792,12 @@ mod tests {
     fn combos() {
         let (m, mods, key) = parse_combo("Mod+Shift+Return").unwrap();
         assert!(m && mods.shift && !mods.alt);
-        assert_eq!(key, Keysym::Return);
+        assert_eq!(key, Some(Keysym::Return));
         let (_, _, key) = parse_combo("Mod+Q").unwrap();
-        assert_eq!(key, Keysym::q);
+        assert_eq!(key, Some(Keysym::q));
         assert!(parse_combo("Mod+Hyper+a").is_err());
+        assert_eq!(parse_combo("Mod").unwrap(), (true, Mods::default(), None));
+        assert!(parse_combo("Super").is_err());
     }
 
     #[test]

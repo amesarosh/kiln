@@ -27,6 +27,14 @@ impl State {
         }
     }
 
+    /// Whether our VT is in front. Nested, always.
+    pub fn session_active(&self) -> bool {
+        match &self.backend {
+            Some(Backend::Udev(u)) => u.session_active(),
+            _ => true,
+        }
+    }
+
     /// Whether the compositor draws the pointer itself (the nested backend uses the host cursor).
     pub fn draws_cursor(&self) -> bool {
         matches!(self.backend, Some(Backend::Udev(_)))

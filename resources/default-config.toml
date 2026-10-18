@@ -12,7 +12,9 @@ mod = "auto"
 focus_follows_mouse = true
 # Where new tiled windows go: "master" (becomes the main window) or "stack".
 new_window = "master"
-# Commands run once at startup, through `sh -c`.
+# Commands run once at startup, through `sh -c`. To lock after 5 minutes idle
+# and before suspend:
+#   autostart = ["swayidle -w timeout 300 'swaylock -f' before-sleep 'swaylock -f'"]
 autostart = []
 
 [layout]
@@ -84,7 +86,8 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 # focused monitor. Monitors are ordered left to right.
 #
 # Ctrl+Alt+F1..F12 always switch virtual terminals when running from a TTY,
-# and Ctrl+Alt+Backspace always quits, whatever is in [binds].
+# and Ctrl+Alt+Backspace always quits, whatever is in [binds]. While the screen
+# is locked, every other key goes to the locker, and quitting is disabled.
 #
 # Mouse: Mod+left-drag moves a window (and floats it), Mod+right-drag resizes it.
 # If you define a [binds] table, it replaces all of these defaults.
@@ -94,6 +97,7 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 "Mod+Shift+q" = "close"
 "Mod+Shift+e" = "quit"
 "Mod+Shift+r" = "reload"
+"Mod+Escape" = "spawn swaylock"
 
 "Mod+j" = "focus next"
 "Mod+k" = "focus prev"

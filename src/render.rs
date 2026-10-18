@@ -12,7 +12,7 @@ use smithay::{
             solid::SolidColorRenderElement,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
         },
-        utils::CommitCounter,
+        utils::{CommitCounter, with_renderer_surface_state},
     },
     desktop::{Window, layer_map_for_output},
     input::pointer::{CursorImageAttributes, CursorImageStatus},
@@ -20,6 +20,7 @@ use smithay::{
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     utils::{Logical, Physical, Point, Rectangle, Scale, Transform},
     wayland::compositor::{SurfaceData, send_surface_state, with_states},
+    wayland::fractional_scale::with_fractional_scale,
     wayland::shell::wlr_layer::Layer,
 };
 
@@ -101,6 +102,11 @@ where
             _ => {}
         }
     }
+    if state.is_locked() {
+        push_lock(state, renderer, output, scale, &mut out);
+        return out;
+    }
+
     let mon = state.monitor_index(output);
     let fullscreen = mon.is_some_and(|m| state.monitors[m].ws().fullscreen.is_some());
 
@@ -176,6 +182,39 @@ where
     out
 }
 
+/// The lock screen: the locker's surface, or a plain fill until it has drawn one. The fill is
+/// red when the locker died, so it's clear why the screen won't unlock.
+fn push_lock<R>(state: &State, renderer: &mut R, output: &Output, scale: Scale<f64>, out: &mut Vec<OutputElement<R>>)
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Clone + Texture + 'static,
+{
+    if let Some(surface) = state.lock_surface(output)
+        && with_renderer_surface_state(surface.wl_surface(), |s| s.buffer().is_some()).unwrap_or(false)
+    {
+        out.extend(
+            render_elements_from_surface_tree(renderer, surface.wl_surface(), (0, 0), scale, 1.0, Kind::Unspecified)
+                .into_iter()
+                .map(OutputElement::Surface),
+        );
+        return;
+    }
+    let size = output.current_mode().map(|m| m.size).unwrap_or_default();
+    let size = output.current_transform().transform_size(size);
+    let (id, color) = if state.locker_dead() {
+        (&state.lock_fill_ids[1], [0.35, 0.0, 0.0, 1.0])
+    } else {
+        (&state.lock_fill_ids[0], [0.0, 0.0, 0.0, 1.0])
+    };
+    out.push(OutputElement::Solid(SolidColorRenderElement::new(
+        id.clone(),
+        Rectangle::from_size(size),
+        CommitCounter::default(),
+        color,
+        Kind::Unspecified,
+    )));
+}
+
 fn push_border<R>(
     out: &mut Vec<OutputElement<R>>,
     window: &Window,
@@ -223,9 +262,14 @@ fn push_border<R>(
 pub fn send_frames(state: &mut State, output: &Output) {
     let time = state.start_time.elapsed();
     let first_output = state.space.outputs().next() == Some(output);
-    // Apps on this monitor render at its scale (rounded up; we downscale for fractions).
+    // Apps on this monitor render at its scale: the exact one if they support fractional scale,
+    // otherwise rounded up and we shrink their buffers.
     let buffer_scale = output.current_scale().integer_scale();
-    let hint = |surface: &WlSurface, data: &SurfaceData| send_surface_state(surface, data, buffer_scale, Transform::Normal);
+    let fractional = output.current_scale().fractional_scale();
+    let hint = |surface: &WlSurface, data: &SurfaceData| {
+        send_surface_state(surface, data, buffer_scale, Transform::Normal);
+        with_fractional_scale(data, |fs| fs.set_preferred_scale(fractional));
+    };
     for window in state.space.elements() {
         // Paced by the monitor they're on. Windows on no monitor (not placed yet) use the first.
         let outputs = state.space.outputs_for_element(window);
@@ -235,6 +279,13 @@ pub fn send_frames(state: &mut State, output: &Output) {
         if main_output(state, window).as_ref() == Some(output) {
             window.with_surfaces(hint);
         }
+    }
+    if let Some(surface) = state.lock_surface(output) {
+        let surface = surface.wl_surface();
+        smithay::desktop::utils::send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
+            Some(output.clone())
+        });
+        smithay::desktop::utils::with_surfaces_surface_tree(surface, hint);
     }
     for layer in layer_map_for_output(output).layers() {
         layer.send_frame(output, time, Some(Duration::ZERO), |_, _| Some(output.clone()));
