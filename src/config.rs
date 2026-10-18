@@ -117,6 +117,8 @@ impl LayoutConfig {
 struct RawTheme {
     font: String,
     font_size: f32,
+    radius: f32,
+    icon_theme: String,
     colors: ColorDefs,
 }
 
@@ -291,6 +293,9 @@ pub struct BarConfig {
     pub font: String,
     pub font_size: f32,
     pub palette: Palette,
+    /// From `[theme]`, so the bar repaints when they change.
+    pub radius: f32,
+    pub icon_theme: String,
     /// Command run by the bar's + button.
     pub launcher: String,
 }
@@ -548,9 +553,14 @@ impl Config {
                 })
             };
 
+        if !(0.0..=24.0).contains(&rt.radius) {
+            problems.push("theme.radius must be between 0 and 24".into());
+        }
         let theme = Theme {
             font: rt.font.clone(),
             font_size: rt.font_size,
+            radius: rt.radius,
+            icon_theme: rt.icon_theme.clone(),
             palette: theme_palette.unwrap_or_else(|_| fallback()),
         };
 
@@ -609,6 +619,8 @@ impl Config {
             per_output,
             font: rb.font.clone().unwrap_or_else(|| theme.font.clone()),
             font_size: rb.font_size.unwrap_or(theme.font_size),
+            radius: theme.radius,
+            icon_theme: theme.icon_theme.clone(),
             palette: palette(
                 &[
                     ("background", "surface", &rb.background),

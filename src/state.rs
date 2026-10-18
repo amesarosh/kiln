@@ -1408,7 +1408,7 @@ impl ClientData for ClientState {
 
 /// `$XDG_DATA_DIRS` for spawned clients, so launchers find Flatpak and Snap apps.
 /// Starts from the inherited value (or the spec default) and appends any missing dirs.
-fn xdg_data_dirs() -> String {
+pub fn xdg_data_dirs() -> String {
     let inherited = std::env::var("XDG_DATA_DIRS").unwrap_or_default();
     let mut dirs: Vec<String> = if inherited.is_empty() {
         vec!["/usr/local/share".into(), "/usr/share".into()]

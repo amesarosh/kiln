@@ -4,7 +4,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 
 - **Dynamic tiling** (master/stack and monocle), toggleable floating, fullscreen, 1–32 workspaces
 - **Multiple monitors**, each with its own set of workspaces (like dwm), placed left to right
-- **Built-in clickable bar** per monitor: workspaces, one tab per window, layout switcher and a launcher button
+- **Built-in clickable bar** per monitor (top, bottom, left or right): workspaces, one tab per window with its app icon, layout switcher and a launcher button
 - **One TOML file** for keybinds, gaps, borders, colors, keyboard layout and window rules, **reloaded on save**
 - **Idle costs nothing:** frames are only drawn when something changes, and only damaged regions are repainted
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
@@ -199,6 +199,7 @@ is on screen.
 | `src/theme.rs` | shared font and color palette; resolves color names and `mix(...)` |
 | `src/handlers/xwayland.rs` | Xwayland: starting it, managing X11 windows, sharing the clipboard with X11 |
 | `src/focus.rs` | keyboard focus target: a Wayland surface or an X11 window |
+| `src/icons.rs` | app icons for the bar: .desktop lookup, icon theme search, PNG/SVG loading |
 | `src/input.rs` | keyboard binds, pointer focus, Mod+drag |
 | `src/grabs.rs` | interactive move/resize |
 | `src/render.rs` | builds the frame: layers, windows, borders, lock screen |

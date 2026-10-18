@@ -160,6 +160,50 @@ impl Canvas {
         }
     }
 
+    /// A rectangle with rounded, anti-aliased corners. `r` is clamped to fit.
+    pub fn fill_rounded_rect(&mut self, x: i32, y: i32, w: i32, h: i32, r: f32, color: Color) {
+        if w <= 0 || h <= 0 {
+            return;
+        }
+        let r = r.clamp(0.0, w.min(h) as f32 / 2.0);
+        let (x0, y0) = (x as f32 + r, y as f32 + r);
+        let (x1, y1) = ((x + w) as f32 - r, (y + h) as f32 - r);
+        for yy in y.max(0)..(y + h).min(self.h) {
+            for xx in x.max(0)..(x + w).min(self.w) {
+                let (px, py) = (xx as f32 + 0.5, yy as f32 + 0.5);
+                // Distance outside the inner rectangle; only corners have any.
+                let dx = (x0 - px).max(px - x1).max(0.0);
+                let dy = (y0 - py).max(py - y1).max(0.0);
+                let coverage = if r > 0.0 {
+                    (r - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                if coverage > 0.0 {
+                    self.blend(xx, yy, color, coverage);
+                }
+            }
+        }
+    }
+
+    /// Draw a square premultiplied-RGBA image with its top-left corner at (x, y).
+    pub fn draw_image(&mut self, x: i32, y: i32, size: u32, rgba: &[u8]) {
+        for (i, p) in rgba.chunks_exact(4).enumerate() {
+            let a = p[3] as f32 / 255.0;
+            if a <= 0.0 {
+                continue;
+            }
+            let (ix, iy) = ((i as u32 % size) as i32, (i as u32 / size) as i32);
+            let straight = [
+                p[0] as f32 / 255.0 / a,
+                p[1] as f32 / 255.0 / a,
+                p[2] as f32 / 255.0 / a,
+                1.0,
+            ];
+            self.blend(x + ix, y + iy, straight, a);
+        }
+    }
+
     /// Bytes for `Fourcc::Abgr8888` (R, G, B, A in memory), premultiplied as the renderer expects.
     pub fn to_premultiplied_rgba(&self) -> Vec<u8> {
         let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;

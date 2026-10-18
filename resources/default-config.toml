@@ -28,6 +28,8 @@ xwayland = true
 [theme]
 font = "sans"     # fontconfig name, or a path to a .ttf/.otf file
 font_size = 14
+radius = 6           # corner rounding of buttons, tabs and menus (0 = square)
+icon_theme = "auto"  # icon theme for app icons; "auto" uses your GTK/GNOME setting
 
 # Colors are named here and every part of the UI refers to them by name, so
 # changing one changes it everywhere. A value can be:

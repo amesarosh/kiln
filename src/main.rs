@@ -5,6 +5,7 @@ mod cursor;
 mod focus;
 mod grabs;
 mod handlers;
+mod icons;
 mod input;
 mod layout;
 mod render;

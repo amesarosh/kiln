@@ -19,6 +19,7 @@ use smithay::{
 
 use crate::{
     config::{Action, BarConfig, BarPosition, Color, LayoutChoice},
+    icons::Icons,
     layout::{LayoutKind, Rect},
     state::{State, toplevel_ids},
     text::{Canvas, Text},
@@ -59,17 +60,26 @@ struct Model {
     position: BarPosition,
     config: BarConfig,
     workspaces: Vec<WsLook>,
-    /// (title, focused)
-    tabs: Vec<(String, bool)>,
+    tabs: Vec<Tab>,
     layout: LayoutKind,
     hover: Option<Part>,
     /// This monitor has keyboard focus; otherwise the focused tab is drawn dimmer.
     active_monitor: bool,
 }
 
+/// One window in the bar's list.
+#[derive(Debug, Clone, PartialEq)]
+struct Tab {
+    title: String,
+    /// For finding the icon.
+    app_id: String,
+    focused: bool,
+}
+
 pub struct Bar {
     text: Option<Text>,
     font: String,
+    icons: RefCell<Icons>,
     /// Last painted image per output name.
     cached: RefCell<HashMap<String, (Model, MemoryRenderBuffer)>>,
     /// The part under the pointer, and the output it's on.
@@ -84,6 +94,7 @@ impl Bar {
         Self {
             text: config.enabled.then(|| Text::load(&config.font)).flatten(),
             font: config.font.clone(),
+            icons: RefCell::new(Icons::new(&config.icon_theme)),
             cached: RefCell::new(HashMap::new()),
             hover: None,
             held_buttons: Vec::new(),
@@ -92,6 +103,7 @@ impl Bar {
     }
 
     pub fn reconfigure(&mut self, config: &BarConfig) {
+        self.icons = RefCell::new(Icons::new(&config.icon_theme));
         if config.enabled && (self.text.is_none() || self.font != config.font) {
             self.text = Text::load(&config.font);
             self.font = config.font.clone();
@@ -108,16 +120,16 @@ impl Bar {
     }
 
     /// Where every part goes, in logical pixels from the bar's top-left corner.
-    fn layout(&self, text: &Text, m: &Model) -> Vec<(Rect, Part)> {
+    fn layout(&self, m: &Model) -> Vec<(Rect, Part)> {
         if m.position.vertical() {
             Self::layout_vertical(m)
         } else {
-            Self::layout_horizontal(text, m)
+            Self::layout_horizontal(m)
         }
     }
 
     /// Left to right: workspaces, window tabs, layout button, launcher.
-    fn layout_horizontal(text: &Text, m: &Model) -> Vec<(Rect, Part)> {
+    fn layout_horizontal(m: &Model) -> Vec<(Rect, Part)> {
         let (width, h) = m.size;
         let mut parts = Vec::new();
 
@@ -129,11 +141,12 @@ impl Bar {
 
         let plus_x = width - h;
         parts.push((Rect::new(plus_x, 0, h, h), Part::Launcher));
-        let layout_w = text.width("monocle", m.config.font_size).ceil() as i32 + 24;
+        let layout_w = h + 8;
         let layout_x = plus_x - layout_w;
         parts.push((Rect::new(layout_x, 0, layout_w, h), Part::Layout));
 
-        let (x0, x1) = (x + 8, layout_x - 8);
+        // Room for the divider after the workspaces.
+        let (x0, x1) = (x + 10, layout_x - 6);
         let n = m.tabs.len() as i32;
         if n > 0 && x1 > x0 {
             let w = ((x1 - x0) / n).min(MAX_TAB_WIDTH);
@@ -151,17 +164,30 @@ impl Bar {
         let row = m.config.height;
         let mut parts = Vec::new();
 
-        let mut y = 0;
-        for i in 0..m.workspaces.len() {
-            parts.push((Rect::new(0, y, w, row), Part::Workspace(i)));
-            y += row;
+        // Workspaces as a grid of square buttons, as many per line as fit, centered.
+        let cell = row;
+        let per_line = ((w - 8) / cell).max(1) as usize;
+        let lines = m.workspaces.len().div_ceil(per_line);
+        let mut y = 4;
+        for line in 0..lines {
+            let first = line * per_line;
+            let count = per_line.min(m.workspaces.len() - first) as i32;
+            let x0 = (w - per_line as i32 * cell) / 2;
+            for j in 0..count {
+                parts.push((
+                    Rect::new(x0 + j * cell, y, cell, cell),
+                    Part::Workspace(first + j as usize),
+                ));
+            }
+            y += cell;
         }
+        y += 4;
 
         let bottom = height - row;
         parts.push((Rect::new(w - row, bottom, row, row), Part::Launcher));
         parts.push((Rect::new(0, bottom, w - row, row), Part::Layout));
 
-        y += 8;
+        y += 9;
         for i in 0..m.tabs.len() {
             if y + row > bottom - 8 {
                 break;
@@ -190,8 +216,10 @@ impl Bar {
         let s = m.scale;
         let vertical = m.position.vertical();
         let px = c.font_size * s as f32;
+        let radius = c.radius * s as f32;
         let (bw, bh) = (m.size.0 * s, m.size.1 * s);
         let mut canvas = Canvas::new(bw, bh, p.surface);
+        let parts = self.layout(m);
 
         // A hairline between the bar and the windows.
         match m.position {
@@ -201,105 +229,151 @@ impl Bar {
             BarPosition::Right => canvas.fill_rect(0, 0, s, bh, p.separator),
         }
 
+        // A short divider between the workspaces and the window list.
+        let last_ws = parts
+            .iter()
+            .filter(|(_, p)| matches!(p, Part::Workspace(_)))
+            .map(|(r, _)| *r)
+            .next_back();
+        if let Some(r) = last_ws {
+            if vertical {
+                let y = (r.y + r.h + 4) * s;
+                canvas.fill_rect(8 * s, y, bw - 16 * s, s, p.separator);
+            } else {
+                let x = (r.x + r.w + 4) * s;
+                canvas.fill_rect(x, bh / 4, s, bh / 2, p.separator);
+            }
+        }
+
         let centered = |canvas: &mut Canvas, label: &str, r: Rect, size: f32, color: Color| {
             let tw = text.width(label, size);
             let tx = r.x as f32 + (r.w as f32 - tw) / 2.0;
             let baseline = text.centered_baseline(r.y as f32, r.h as f32, size);
             text.draw(canvas, label, size, (tx, baseline), color, (r.x, r.x + r.w));
         };
-        // Highlights leave a margin across the bar and a small gap between neighbours.
-        let (gap, margin) = (2 * s, 4 * s);
-        let pill = |r: Rect| {
-            if vertical {
-                Rect::new(r.x + margin, r.y + gap / 2, r.w - 2 * margin, r.h - gap)
-            } else {
-                Rect::new(r.x + gap, r.y + margin, r.w - 2 * gap, r.h - 2 * margin)
-            }
+        let rounded = |canvas: &mut Canvas, r: Rect, color: Color| {
+            canvas.fill_rounded_rect(r.x, r.y, r.w, r.h, radius, color);
         };
-        let fill = |canvas: &mut Canvas, r: Rect, color: Color| canvas.fill_rect(r.x, r.y, r.w, r.h, color);
+        // Buttons are drawn a little inside their hit area so neighbours don't touch.
+        let inset = |r: Rect, by: i32| Rect::new(r.x + by, r.y + by, r.w - 2 * by, r.h - 2 * by);
 
-        for (r, part) in self.layout(text, m) {
+        for (r, part) in parts {
             let r = Rect::new(r.x * s, r.y * s, r.w * s, r.h * s);
             let hovered = m.hover == Some(part);
             match part {
                 Part::Workspace(i) => {
                     let look = m.workspaces[i];
+                    let pill = inset(r, 3 * s);
                     let label_color = match look {
                         WsLook::Active => {
-                            fill(&mut canvas, pill(r), p.accent);
+                            rounded(&mut canvas, pill, p.accent);
                             p.on_accent
                         }
                         WsLook::Occupied | WsLook::Empty => {
                             if hovered {
-                                fill(&mut canvas, pill(r), p.hover);
+                                rounded(&mut canvas, pill, p.hover);
                             }
                             if look == WsLook::Occupied { p.text } else { p.subtext }
                         }
                     };
-                    centered(&mut canvas, &(i + 1).to_string(), r, px, label_color);
-                    // A small mark on workspaces that have windows: under the number on a
-                    // horizontal bar, beside it on a vertical one.
+                    let label = (i + 1).to_string();
+                    centered(
+                        &mut canvas,
+                        &label,
+                        Rect::new(r.x, r.y - s, r.w, r.h),
+                        px * 0.9,
+                        label_color,
+                    );
+                    // A dot under workspaces that have windows.
                     if look != WsLook::Empty {
-                        let mark = if look == WsLook::Active { p.on_accent } else { p.text };
-                        let tw = text.width(&(i + 1).to_string(), px) as i32;
-                        if vertical {
-                            let x = r.x + (r.w + tw) / 2 + 4 * s;
-                            canvas.fill_rect(x, r.y + r.h / 2 - s, 3 * s, s.max(2), mark);
-                        } else {
-                            canvas.fill_rect(r.x + r.w / 2 - 4 * s, r.y + r.h - margin - 3 * s, 8 * s, s.max(2), mark);
-                        }
+                        let dot = if look == WsLook::Active { p.on_accent } else { p.subtext };
+                        let d = 3 * s;
+                        canvas.fill_rounded_rect(r.x + (r.w - d) / 2, pill.y + pill.h - d - 2 * s, d, d, d as f32, dot);
                     }
                 }
                 Part::Tab(i) => {
-                    let (title, focused) = &m.tabs[i];
-                    let bg = match (focused, hovered) {
-                        (true, _) => p.selected,
-                        (false, true) => p.hover,
-                        (false, false) => p.raised,
-                    };
+                    let tab = &m.tabs[i];
                     let area = if vertical {
-                        Rect::new(r.x + margin, r.y, r.w - 2 * margin, r.h)
+                        Rect::new(r.x + 6 * s, r.y, r.w - 12 * s, r.h)
                     } else {
-                        Rect::new(r.x, r.y + margin, r.w, r.h - 2 * margin)
+                        Rect::new(r.x, r.y + 3 * s, r.w, r.h - 6 * s)
                     };
-                    fill(&mut canvas, area, bg);
-                    if *focused {
-                        let mark = if m.active_monitor { p.accent } else { p.accent_inactive };
-                        // An underline on a horizontal bar, a stripe on the left of a vertical one.
+                    if tab.focused {
+                        rounded(&mut canvas, area, p.selected);
+                    } else if hovered {
+                        rounded(&mut canvas, area, p.hover);
+                    }
+                    let mark = if m.active_monitor { p.accent } else { p.accent_inactive };
+                    if tab.focused {
+                        // A small accent bar: at the bottom middle of a tab, at the left of a row.
                         if vertical {
-                            canvas.fill_rect(area.x, area.y, 2 * s, area.h, mark);
+                            let h = area.h / 2;
+                            canvas.fill_rounded_rect(area.x, area.y + (area.h - h) / 2, 3 * s, h, 1.5 * s as f32, mark);
                         } else {
-                            canvas.fill_rect(area.x, area.y + area.h - 2 * s, area.w, 2 * s, mark);
+                            let w = (area.w / 4).clamp(12 * s, 32 * s);
+                            canvas.fill_rounded_rect(
+                                area.x + (area.w - w) / 2,
+                                area.y + area.h - 3 * s,
+                                w,
+                                2 * s,
+                                s as f32,
+                                mark,
+                            );
                         }
                     }
+
                     let pad = 8 * s;
-                    let label = text.fit(title, px, (area.w - 2 * pad) as f32);
-                    let color = if *focused { p.text } else { p.muted };
-                    let baseline = text.centered_baseline(r.y as f32, r.h as f32, px);
-                    text.draw(
-                        &mut canvas,
-                        &label,
-                        px,
-                        ((area.x + pad) as f32, baseline),
-                        color,
-                        (area.x, area.x + area.w - pad / 2),
-                    );
+                    let icon_px = ((area.h - 8 * s).max(8 * s) as u32).min(24 * s as u32);
+                    let mut x = area.x + pad;
+                    let y = area.y + (area.h - icon_px as i32) / 2;
+                    if let Some(icon) = self.icons.borrow_mut().get(&tab.app_id, icon_px) {
+                        canvas.draw_image(x, y, icon.size, &icon.rgba);
+                    } else {
+                        // No icon: the app's first letter on a rounded square.
+                        let side = icon_px as i32;
+                        canvas.fill_rounded_rect(x, y, side, side, radius.min(side as f32 / 3.0), p.hover);
+                        let name = if tab.app_id.is_empty() { &tab.title } else { &tab.app_id };
+                        let letter: String = name
+                            .chars()
+                            .next()
+                            .map(|c| c.to_uppercase().collect())
+                            .unwrap_or_default();
+                        centered(
+                            &mut canvas,
+                            &letter,
+                            Rect::new(x, y, side, side),
+                            side as f32 * 0.7,
+                            p.text,
+                        );
+                    }
+                    x += icon_px as i32 + 6 * s;
+                    let right = area.x + area.w - pad;
+                    if right > x {
+                        let label = text.fit(&tab.title, px, (right - x) as f32);
+                        let color = if tab.focused { p.text } else { p.muted };
+                        let baseline = text.centered_baseline(r.y as f32, r.h as f32, px);
+                        text.draw(&mut canvas, &label, px, (x as f32, baseline), color, (x, right));
+                    }
                 }
                 Part::Layout => {
+                    let pill = inset(r, 3 * s);
                     if hovered {
-                        fill(&mut canvas, pill(r), p.hover);
+                        rounded(&mut canvas, pill, p.hover);
                     }
-                    let name = match m.layout {
-                        LayoutKind::Tile => "tile",
-                        LayoutKind::Monocle => "monocle",
-                    };
-                    centered(&mut canvas, name, r, px, if hovered { p.text } else { p.muted });
+                    let color = if hovered { p.text } else { p.muted };
+                    draw_layout_glyph(&mut canvas, m.layout, r, s, color);
                 }
                 Part::Launcher => {
+                    let pill = inset(r, 3 * s);
                     if hovered {
-                        fill(&mut canvas, pill(r), p.hover);
+                        rounded(&mut canvas, pill, p.hover);
                     }
-                    centered(&mut canvas, "+", r, px * 1.4, p.text);
+                    // A plus sign from two rounded bars.
+                    let (len, th) = (12 * s, 2 * s);
+                    let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
+                    let color = if hovered { p.text } else { p.muted };
+                    canvas.fill_rounded_rect(cx - len / 2, cy - th / 2, len, th, s as f32, color);
+                    canvas.fill_rounded_rect(cx - th / 2, cy - len / 2, th, len, s as f32, color);
                 }
             }
         }
@@ -319,6 +393,25 @@ impl Bar {
         let steps = (self.scroll / SCROLL_STEP).trunc();
         self.scroll -= steps * SCROLL_STEP;
         steps as i32
+    }
+}
+
+/// A small picture of the layout: a master pane and a stack for tile, one pane for monocle.
+fn draw_layout_glyph(canvas: &mut Canvas, layout: LayoutKind, r: Rect, s: i32, color: Color) {
+    let (w, h) = (16 * s, 12 * s);
+    let (x, y) = (r.x + (r.w - w) / 2, r.y + (r.h - h) / 2);
+    let radius = 1.5 * s as f32;
+    match layout {
+        LayoutKind::Tile => {
+            let gap = 2 * s;
+            let left = (w - gap) * 3 / 5;
+            let right = w - gap - left;
+            let half = (h - gap) / 2;
+            canvas.fill_rounded_rect(x, y, left, h, radius, color);
+            canvas.fill_rounded_rect(x + left + gap, y, right, half, radius, color);
+            canvas.fill_rounded_rect(x + left + gap, y + half + gap, right, h - half - gap, radius, color);
+        }
+        LayoutKind::Monocle => canvas.fill_rounded_rect(x, y, w, h, radius, color),
     }
 }
 
@@ -418,7 +511,11 @@ impl State {
                     .filter(|t| !t.is_empty())
                     .or(app_id)
                     .unwrap_or_else(|| "untitled".into());
-                (label, ws.focus.as_ref() == Some(&e.window))
+                Tab {
+                    title: label,
+                    app_id: toplevel_ids(&e.window).0.unwrap_or_default(),
+                    focused: ws.focus.as_ref() == Some(&e.window),
+                }
             })
             .collect();
         let name = m.output.name();
@@ -459,11 +556,10 @@ impl State {
         if !rect.to_f64().contains(pos) {
             return None;
         }
-        let text = self.bar.text.as_ref()?;
         let (x, y) = ((pos.x - rect.loc.x as f64) as i32, (pos.y - rect.loc.y as f64) as i32);
         let model = self.bar_model(mon, (rect.size.w, rect.size.h), 1);
         self.bar
-            .layout(text, &model)
+            .layout(&model)
             .into_iter()
             .find(|(r, _)| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h)
             .map(|(_, part)| (mon, part))
@@ -559,7 +655,14 @@ mod tests {
                 WsLook::Occupied,
                 WsLook::Empty,
             ],
-            tabs: tabs.iter().map(|(t, f)| (t.to_string(), *f)).collect(),
+            tabs: tabs
+                .iter()
+                .map(|(t, f)| Tab {
+                    title: t.to_string(),
+                    app_id: "Alacritty".into(),
+                    focused: *f,
+                })
+                .collect(),
             layout: LayoutKind::Tile,
             hover,
             active_monitor: true,
@@ -572,7 +675,6 @@ mod tests {
 
     #[test]
     fn layout_parts_do_not_overlap() {
-        let Some(text) = Text::load("sans") else { return };
         let bar = Bar::new(&Config::default().bar);
         let tabs = [("one", true), ("two", false), ("three", false)];
         for (size, position) in [
@@ -580,7 +682,7 @@ mod tests {
             ((180, 1400), BarPosition::Left),
             ((180, 1400), BarPosition::Right),
         ] {
-            let parts = bar.layout(&text, &model(size, position, &tabs, None));
+            let parts = bar.layout(&model(size, position, &tabs, None));
             for (i, (a, pa)) in parts.iter().enumerate() {
                 assert!(
                     a.x >= 0 && a.y >= 0 && a.x + a.w <= size.0 && a.y + a.h <= size.1,
@@ -596,10 +698,9 @@ mod tests {
 
     #[test]
     fn vertical_bar_drops_tabs_that_do_not_fit() {
-        let Some(text) = Text::load("sans") else { return };
         let bar = Bar::new(&Config::default().bar);
         let tabs: Vec<(&str, bool)> = (0..50).map(|_| ("w", false)).collect();
-        let parts = bar.layout(&text, &model((180, 600), BarPosition::Left, &tabs, None));
+        let parts = bar.layout(&model((180, 600), BarPosition::Left, &tabs, None));
         let shown = parts.iter().filter(|(_, p)| matches!(p, Part::Tab(_))).count();
         assert!(shown > 0 && shown < 50, "{shown}");
     }
@@ -633,14 +734,19 @@ mod tests {
             position,
             &[
                 ("uaio@host: ~/git/wayland-time", true),
-                ("second terminal", false),
+                ("Start Page - Vivaldi", false),
                 (
-                    "A very long window title that will certainly need to be cut short",
+                    "bar.rs - wayland-time - A very long window title that will need to be cut short",
                     false,
                 ),
+                ("Steam", false),
             ],
             Some(Part::Tab(1)),
         );
+        let mut m = m;
+        for (tab, app) in m.tabs.iter_mut().zip(["Alacritty", "vivaldi-stable", "code", "XClock"]) {
+            tab.app_id = app.into();
+        }
         let canvas = bar.paint_canvas(&text, &m);
         std::fs::write(&path, canvas.to_premultiplied_rgba()).unwrap();
         eprintln!("{}x{}", canvas.w, canvas.h);

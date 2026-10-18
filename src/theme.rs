@@ -207,6 +207,10 @@ pub struct Theme {
     /// fontconfig name, or a path to a font file.
     pub font: String,
     pub font_size: f32,
+    /// Corner radius of buttons, tabs, menus and panels, in logical pixels.
+    pub radius: f32,
+    /// Icon theme name, or "auto" for the one the desktop uses.
+    pub icon_theme: String,
     pub palette: Palette,
 }
 
