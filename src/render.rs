@@ -140,6 +140,20 @@ where
 
     push_layers(&mut out, renderer, Layer::Overlay);
 
+    // X11 menus and tooltips, topmost last in the list.
+    for x in state.x11_unmanaged.iter().rev() {
+        let geo = x.geometry();
+        if !geo.overlaps(output_geo) {
+            continue;
+        }
+        let loc = (geo.loc - output_geo.loc).to_physical_precise_round(scale);
+        out.extend(
+            x.render_elements::<WaylandSurfaceRenderElement<R>>(renderer, loc, scale, 1.0)
+                .into_iter()
+                .map(OutputElement::Surface),
+        );
+    }
+
     if let Some((rect, buffer)) = bar {
         let loc = (rect.loc - output_geo.loc).to_f64().to_physical(scale);
         match MemoryRenderBufferRenderElement::from_buffer(renderer, loc, &buffer, None, None, None, Kind::Unspecified)

@@ -4,6 +4,7 @@ mod layer_shell;
 pub mod lock;
 mod output_power;
 mod xdg_shell;
+pub mod xwayland;
 
 use smithay::{
     delegate_data_device, delegate_fractional_scale, delegate_output, delegate_primary_selection, delegate_seat,
@@ -24,10 +25,17 @@ use smithay::{
     },
 };
 
-use crate::state::State;
+use std::os::fd::OwnedFd;
+
+use smithay::wayland::{
+    seat::WaylandFocus,
+    selection::{SelectionSource, SelectionTarget},
+};
+
+use crate::{focus::KeyboardFocusTarget, state::State};
 
 impl SeatHandler for State {
-    type KeyboardFocus = WlSurface;
+    type KeyboardFocus = KeyboardFocusTarget;
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
@@ -45,17 +53,51 @@ impl SeatHandler for State {
         self.update_leds(leds);
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocusTarget>) {
+        tracing::debug!(
+            "keyboard focus: {}",
+            match focused {
+                None => "nothing".to_string(),
+                Some(KeyboardFocusTarget::Surface(_)) => "Wayland surface".to_string(),
+                Some(KeyboardFocusTarget::X11(x, _)) => format!("X11 window \"{}\"", x.title()),
+            }
+        );
         let dh = &self.display_handle;
-        let client = focused.and_then(|s| dh.get_client(s.id()).ok());
+        let client = focused
+            .and_then(|f| f.wl_surface())
+            .and_then(|s| dh.get_client(s.id()).ok());
         set_data_device_focus(dh, seat, client.clone());
         set_primary_focus(dh, seat, client);
     }
 }
 delegate_seat!(State);
 
+// Selections are shared with Xwayland so copy and paste works between X11 and Wayland apps.
 impl SelectionHandler for State {
     type SelectionUserData = ();
+
+    fn new_selection(&mut self, ty: SelectionTarget, source: Option<SelectionSource>, _seat: Seat<Self>) {
+        if let Some(xwm) = self.xwm.as_mut()
+            && let Err(e) = xwm.new_selection(ty, source.map(|s| s.mime_types()))
+        {
+            tracing::warn!("could not pass the selection to X11: {e}");
+        }
+    }
+
+    fn send_selection(
+        &mut self,
+        ty: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        _user_data: &(),
+    ) {
+        if let Some(xwm) = self.xwm.as_mut()
+            && let Err(e) = xwm.send_selection(ty, mime_type, fd, self.loop_handle.clone())
+        {
+            tracing::warn!("could not read the selection from X11: {e}");
+        }
+    }
 }
 
 impl DataDeviceHandler for State {

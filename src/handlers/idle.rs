@@ -12,6 +12,8 @@ use smithay::{
     },
 };
 
+use smithay::wayland::seat::WaylandFocus;
+
 use crate::state::State;
 
 impl State {
@@ -33,7 +35,7 @@ impl State {
         }
         self.space
             .elements()
-            .any(|w| w.toplevel().is_some_and(|t| t.wl_surface() == &root))
+            .any(|w| w.wl_surface().is_some_and(|s| *s == root))
             || self.space.outputs().any(|o| {
                 layer_map_for_output(o)
                     .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)

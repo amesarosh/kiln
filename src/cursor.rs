@@ -10,6 +10,8 @@ use smithay::{
 use xcursor::{CursorTheme, parser::parse_xcursor};
 
 type Image = (MemoryRenderBuffer, Point<i32, Logical>);
+/// Raw RGBA pixels, (width, height) and (x, y) hotspot.
+pub type RawImage = (Vec<u8>, (u16, u16), (u16, u16));
 
 pub struct Cursor {
     theme: CursorTheme,
@@ -48,6 +50,21 @@ impl Cursor {
             .unwrap_or_else(fallback);
         self.cache.insert((icon.name(), scale), loaded.clone());
         loaded
+    }
+
+    /// The theme's default arrow as raw RGBA, its size and its hotspot (for Xwayland).
+    pub fn default_image(&self) -> Option<RawImage> {
+        let path = self
+            .theme
+            .load_icon("default")
+            .or_else(|| self.theme.load_icon("left_ptr"))?;
+        let images = parse_xcursor(&std::fs::read(path).ok()?)?;
+        let img = images.iter().min_by_key(|i| (i.size as i32 - self.size as i32).abs())?;
+        Some((
+            img.pixels_rgba.clone(),
+            (img.width as u16, img.height as u16),
+            (img.xhot as u16, img.yhot as u16),
+        ))
     }
 
     fn load(&self, name: &str, scale: i32) -> Option<Image> {

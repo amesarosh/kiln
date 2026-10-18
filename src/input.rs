@@ -223,7 +223,7 @@ impl State {
                 self.active_mon = mon;
                 let output = self.monitors[mon].output.clone();
                 if let Some(surface) = self.lock_surface(&output).map(|s| s.wl_surface().clone()) {
-                    self.keyboard().set_focus(self, Some(surface), serial);
+                    self.keyboard().set_focus(self, Some(surface.into()), serial);
                 }
             }
             pointer.button(

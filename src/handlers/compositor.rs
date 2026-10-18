@@ -16,7 +16,12 @@ use smithay::{
     },
 };
 
-use crate::state::{ClientState, State};
+use smithay::xwayland::XWaylandClientData;
+
+use crate::{
+    focus::KeyboardFocusTarget,
+    state::{ClientState, State},
+};
 
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
@@ -24,6 +29,10 @@ impl CompositorHandler for State {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
+        // Xwayland's connection is made by smithay and carries its own data type.
+        if let Some(x) = client.get_data::<XWaylandClientData>() {
+            return &x.compositor_state;
+        }
         &client
             .get_data::<ClientState>()
             .expect("client has ClientState")
@@ -58,6 +67,17 @@ impl CompositorHandler for State {
                 }
             } else {
                 self.on_window_commit(&window);
+                // An X11 window can only take the keyboard once its surface is linked, which
+                // may be after it was focused.
+                if window.is_x11()
+                    && self.ws().focus.as_ref() == Some(&window)
+                    && self
+                        .keyboard()
+                        .current_focus()
+                        .is_none_or(|f| !matches!(f, KeyboardFocusTarget::X11(..)))
+                {
+                    self.refocus();
+                }
             }
         }
 

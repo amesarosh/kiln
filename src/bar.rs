@@ -414,8 +414,8 @@ impl State {
                 }
             }
             (Part::Tab(i), BTN_MIDDLE) => {
-                if let Some(t) = tab_window(self, i).and_then(|w| w.toplevel().cloned()) {
-                    t.send_close();
+                if let Some(w) = tab_window(self, i) {
+                    crate::state::close_window(&w);
                 }
             }
             (Part::Layout, BTN_LEFT | BTN_RIGHT) => self.run_action(Action::Layout(LayoutChoice::Next)),

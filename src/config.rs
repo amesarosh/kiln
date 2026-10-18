@@ -83,6 +83,8 @@ pub struct General {
     pub autostart: Vec<String>,
     /// Seconds without input before monitors turn off; 0 never.
     pub monitors_off_after: u64,
+    /// Run X11 apps through Xwayland. Read at startup only.
+    pub xwayland: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

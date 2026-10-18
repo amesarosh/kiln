@@ -24,7 +24,7 @@ use smithay::{
             protocol::wl_surface::WlSurface,
         },
     },
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
     wayland::{
         compositor::{CompositorClientState, CompositorState, with_states},
         dmabuf::{DmabufGlobal, DmabufState},
@@ -32,6 +32,7 @@ use smithay::{
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
         output::OutputManagerState,
+        seat::WaylandFocus,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         session_lock::{LockSurface, SessionLockManagerState},
         shell::{
@@ -41,14 +42,18 @@ use smithay::{
         shm::ShmState,
         socket::ListeningSocketSource,
         viewporter::ViewporterState,
+        xwayland_shell::XWaylandShellState,
     },
+    xwayland::{X11Surface, X11Wm},
 };
 
 use crate::{
     backend::Backend,
     bar::Bar,
     config::{Action, Config, LayoutChoice, ModKey, NewWindow},
+    focus::KeyboardFocusTarget,
     handlers::lock::LockState,
+    handlers::xwayland::{x11_float_rect, x11_wants_float},
     layout::{self, Rect},
     workspace::{Workspace, merge_workspaces, step},
 };
@@ -101,6 +106,15 @@ pub struct State {
     pub viewporter_state: ViewporterState,
     #[allow(dead_code)]
     pub fractional_scale_state: FractionalScaleManagerState,
+    pub xwayland_shell_state: XWaylandShellState,
+    /// The X11 window manager, once Xwayland is running.
+    pub xwm: Option<X11Wm>,
+    /// Xwayland's display number, set as `DISPLAY` for launched apps.
+    pub xdisplay: Option<u32>,
+    /// Mapped override-redirect X11 windows (menus, tooltips), bottom to top. Not tiled.
+    pub x11_unmanaged: Vec<X11Surface>,
+    /// Autostart and `--exec` commands, held until Xwayland is up so they get `DISPLAY`.
+    pub startup_commands: Vec<String>,
 
     /// Screen lock: while locked only lock surfaces are drawn and get input.
     pub lock: LockState,
@@ -174,6 +188,7 @@ impl State {
         let idle_inhibit_state = IdleInhibitManagerState::new::<Self>(&dh);
         let viewporter_state = ViewporterState::new::<Self>(&dh);
         let fractional_scale_state = FractionalScaleManagerState::new::<Self>(&dh);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         Self::create_output_power_global(&dh);
 
         let mut seat_state = SeatState::new();
@@ -220,6 +235,11 @@ impl State {
             idle_inhibit_state,
             viewporter_state,
             fractional_scale_state,
+            xwayland_shell_state,
+            xwm: None,
+            xdisplay: None,
+            x11_unmanaged: Vec::new(),
+            startup_commands: Vec::new(),
             lock: LockState::Unlocked,
             lock_surfaces: Vec::new(),
             idle_inhibitors: Vec::new(),
@@ -304,7 +324,7 @@ impl State {
             .position(|m| m.workspaces.iter().any(|ws| ws.contains(w)))
     }
 
-    fn all_workspaces(&self) -> impl Iterator<Item = &Workspace<Window>> {
+    pub fn all_workspaces(&self) -> impl Iterator<Item = &Workspace<Window>> {
         self.monitors
             .iter()
             .flat_map(|m| m.workspaces.iter())
@@ -556,7 +576,7 @@ impl State {
         self.all_workspaces()
             .flat_map(|ws| ws.entries.iter().map(|e| &e.window))
             .chain(self.pending_windows.iter())
-            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .find(|w| w.wl_surface().is_some_and(|s| *s == *surface))
             .cloned()
     }
 
@@ -592,9 +612,22 @@ impl State {
         if !floating && let Some(t) = window.toplevel() {
             floating = t.parent().is_some();
         }
+        if !floating && let Some(x) = window.x11_surface() {
+            floating = x11_wants_float(x);
+        }
 
         let at_master = self.config.general.new_window == NewWindow::Master;
-        let float_rect = floating.then_some(Rect::new(0, 0, 0, 0));
+        // Wayland windows are centered once they pick a size (see on_window_commit). X11 windows
+        // already have one.
+        let float_rect = floating.then(|| {
+            match (
+                window.x11_surface(),
+                self.monitors.get(target_mon).and(self.work_area(target_mon)),
+            ) {
+                (Some(x), Some(area)) => x11_float_rect(x, area),
+                _ => Rect::new(0, 0, 0, 0),
+            }
+        });
         let visible = match self.monitors.get_mut(target_mon) {
             Some(m) => {
                 let idx = target_ws.unwrap_or(m.active_ws);
@@ -707,7 +740,7 @@ impl State {
             for w in active.iter().filter(|w| **w != fs) {
                 self.space.unmap_elem(w);
             }
-            configure(&fs, output_geo.size, true, false);
+            configure(&fs, output_geo, true, false);
             self.space.map_element(fs, output_geo.loc, false);
             return;
         }
@@ -728,7 +761,12 @@ impl State {
 
         for (w, r) in tiled.iter().zip(rects) {
             let inner = r.inset(border);
-            configure(w, (inner.w, inner.h).into(), false, true);
+            configure(
+                w,
+                Rectangle::new((inner.x, inner.y).into(), (inner.w, inner.h).into()),
+                false,
+                true,
+            );
             self.space.map_element(w.clone(), (inner.x, inner.y), false);
         }
         if monocle && let Some(f) = focus.as_ref().filter(|f| tiled.contains(f)) {
@@ -743,6 +781,9 @@ impl State {
                     }
                 });
                 t.send_pending_configure();
+            }
+            if r.w > 0 {
+                configure_x11(&w, Rectangle::new((r.x, r.y).into(), (r.w, r.h).into()), false);
             }
             // Unplaced windows stay off-screen until their first sized commit.
             let loc = if r.w == 0 { (-100_000, -100_000) } else { (r.x, r.y) };
@@ -768,7 +809,12 @@ impl State {
             let current = keyboard.current_focus();
             let keep = current
                 .as_ref()
-                .is_some_and(|f| self.lock_surfaces.iter().any(|(_, s)| s.alive() && s.wl_surface() == f));
+                .and_then(|f| f.wl_surface().map(|s| s.into_owned()))
+                .is_some_and(|f| {
+                    self.lock_surfaces
+                        .iter()
+                        .any(|(_, s)| s.alive() && *s.wl_surface() == f)
+                });
             if !keep {
                 let surface = self
                     .output()
@@ -779,7 +825,7 @@ impl State {
                             .find(|(_, s)| s.alive())
                             .map(|(_, s)| s.clone())
                     })
-                    .map(|s| s.wl_surface().clone());
+                    .map(|s| s.wl_surface().clone().into());
                 keyboard.set_focus(self, surface, serial);
             }
             return;
@@ -788,7 +834,7 @@ impl State {
         // An exclusive layer (launcher, lock screen) always wins.
         if let Some(surface) = self.exclusive_layer() {
             self.focused_layer = Some(surface.clone());
-            keyboard.set_focus(self, Some(surface), serial);
+            keyboard.set_focus(self, Some(surface.into()), serial);
             return;
         }
         if let Some(layer) = self.focused_layer.clone() {
@@ -810,8 +856,12 @@ impl State {
         {
             self.space.raise_element(f, false);
         }
-        let surface = focus.and_then(|w| w.toplevel().map(|t| t.wl_surface().clone()));
-        keyboard.set_focus(self, surface, serial);
+        // Keep X11's stacking order in step, so it sends input to the window shown on top.
+        if let (Some(x), Some(xwm)) = (focus.as_ref().and_then(|w| w.x11_surface()), self.xwm.as_mut()) {
+            let _ = xwm.raise_window(x);
+        }
+        let target = focus.as_ref().and_then(KeyboardFocusTarget::for_window);
+        keyboard.set_focus(self, target, serial);
     }
 
     fn exclusive_layer(&self) -> Option<WlSurface> {
@@ -854,7 +904,7 @@ impl State {
             let surface = layer.wl_surface().clone();
             self.focused_layer = Some(surface.clone());
             self.keyboard()
-                .set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
+                .set_focus(self, Some(surface.into()), SERIAL_COUNTER.next_serial());
         }
     }
 
@@ -892,6 +942,21 @@ impl State {
         if let Some(hit) = layer_hit(Layer::Overlay) {
             return Some(hit);
         }
+        // X11 menus and tooltips sit above everything but overlays.
+        for x in self.x11_unmanaged.iter().rev() {
+            let geo = x.geometry();
+            if let Some(surface) = x.wl_surface()
+                && geo.to_f64().contains(pos)
+                && let Some((s, p)) = smithay::desktop::utils::under_from_surface_tree(
+                    &surface,
+                    pos - geo.loc.to_f64(),
+                    (0, 0),
+                    WindowSurfaceType::ALL,
+                )
+            {
+                return Some((s, (p + geo.loc).to_f64()));
+            }
+        }
         // The bar covers anything below it; clicks there are handled by the compositor.
         if on_bar {
             return None;
@@ -922,8 +987,8 @@ impl State {
         match action {
             Action::Spawn(cmd) => self.spawn(&cmd),
             Action::Close => {
-                if let Some(t) = self.ws().focus.as_ref().and_then(|w| w.toplevel().cloned()) {
-                    t.send_close();
+                if let Some(w) = self.ws().focus.clone() {
+                    close_window(&w);
                 }
             }
             Action::Quit => self.loop_signal.stop(),
@@ -1034,16 +1099,21 @@ impl State {
 
     pub fn spawn(&self, cmd: &str) {
         tracing::info!("spawn: {cmd}");
-        let result = Command::new("sh")
+        let mut command = Command::new("sh");
+        command
             .arg("-c")
             .arg(cmd)
             .env("WAYLAND_DISPLAY", &self.socket_name)
             .env("XDG_SESSION_TYPE", "wayland")
             .env("XDG_CURRENT_DESKTOP", "wayland-time")
             .env("XDG_DATA_DIRS", xdg_data_dirs())
-            .env_remove("DISPLAY")
-            .stdin(Stdio::null())
-            .spawn();
+            .stdin(Stdio::null());
+        // Never hand out the host's DISPLAY: X11 apps would open on another desktop.
+        match self.xdisplay {
+            Some(n) => command.env("DISPLAY", format!(":{n}")),
+            None => command.env_remove("DISPLAY"),
+        };
+        let result = command.spawn();
         match result {
             // Reap the child off-thread so finished programs don't linger as zombies.
             Ok(mut child) => {
@@ -1127,9 +1197,10 @@ impl State {
         self.refocus();
     }
 
-    pub fn run_autostart(&self) {
-        for cmd in &self.config.general.autostart {
-            self.spawn(cmd);
+    /// Run autostart and `--exec` commands, once.
+    pub fn run_startup_commands(&mut self) {
+        for cmd in std::mem::take(&mut self.startup_commands) {
+            self.spawn(&cmd);
         }
     }
 
@@ -1179,6 +1250,15 @@ impl State {
     }
 }
 
+/// Ask a window to close.
+pub fn close_window(w: &Window) {
+    if let Some(t) = w.toplevel() {
+        t.send_close();
+    } else if let Some(x) = w.x11_surface() {
+        let _ = x.close();
+    }
+}
+
 const TILED_STATES: [xdg_toplevel::State; 4] = [
     xdg_toplevel::State::TiledLeft,
     xdg_toplevel::State::TiledRight,
@@ -1186,8 +1266,20 @@ const TILED_STATES: [xdg_toplevel::State; 4] = [
     xdg_toplevel::State::TiledBottom,
 ];
 
-/// Set size and state flags on a toplevel and send a configure if anything changed.
-fn configure(w: &Window, size: Size<i32, Logical>, fullscreen: bool, tiled: bool) {
+/// X11 windows are told their position as well as their size: they place their menus from it.
+fn configure_x11(w: &Window, rect: Rectangle<i32, Logical>, fullscreen: bool) {
+    if let Some(x) = w.x11_surface() {
+        let _ = x.set_fullscreen(fullscreen);
+        if x.geometry() != rect {
+            let _ = x.configure(rect);
+        }
+    }
+}
+
+/// Set size and state flags on a window and send a configure if anything changed.
+fn configure(w: &Window, rect: Rectangle<i32, Logical>, fullscreen: bool, tiled: bool) {
+    configure_x11(w, rect, fullscreen);
+    let size = rect.size;
     let Some(t) = w.toplevel() else { return };
     t.with_pending_state(|s| {
         s.size = Some(size);
@@ -1208,7 +1300,11 @@ fn configure(w: &Window, size: Size<i32, Logical>, fullscreen: bool, tiled: bool
     t.send_pending_configure();
 }
 
+/// (app_id, title). For X11 windows the app_id is the WM_CLASS class, e.g. "steam".
 pub fn toplevel_ids(w: &Window) -> (Option<String>, Option<String>) {
+    if let Some(x) = w.x11_surface() {
+        return (Some(x.class()), Some(x.title()));
+    }
     let Some(t) = w.toplevel() else { return (None, None) };
     with_states(t.wl_surface(), |states| {
         states

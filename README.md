@@ -10,6 +10,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
 - Runs nested for development or **on real hardware from a TTY**, with hardware cursor planes, direct scanout and GPU buffer sharing (linux-dmabuf)
 - Server-side decorations requested by default, so apps don't draw title bars; clipboard and primary selection supported
+- **X11 apps through Xwayland** (Steam, games, the VS Code snap, older programs): tiled and focused like any window, with copy and paste working between X11 and Wayland apps
 - **Screen locking** (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 
 ## Status
@@ -40,6 +41,7 @@ Logging uses `RUST_LOG`, e.g. `RUST_LOG=debug`.
 ### Running from a TTY
 
 Build dependencies: `libinput-dev`, `libseat-dev`, `libgbm-dev`, `libdrm-dev`, `libudev-dev`, `libxkbcommon-dev`.
+For X11 apps, install `xwayland` (turn it off with `xwayland = false` under `[general]`).
 
 1. Switch to a free text console with `Ctrl+Alt+F3` and log in.
 2. For a first test, use a timeout so it exits on its own even if input doesn't work:
@@ -195,6 +197,8 @@ is on screen.
 | `src/workspace.rs` | per-workspace window order, focus, floating (unit tested) |
 | `src/config.rs` | TOML parsing, validation, keybind/action parsing (unit tested) |
 | `src/theme.rs` | shared font and color palette; resolves color names and `mix(...)` |
+| `src/handlers/xwayland.rs` | Xwayland: starting it, managing X11 windows, sharing the clipboard with X11 |
+| `src/focus.rs` | keyboard focus target: a Wayland surface or an X11 window |
 | `src/input.rs` | keyboard binds, pointer focus, Mod+drag |
 | `src/grabs.rs` | interactive move/resize |
 | `src/render.rs` | builds the frame: layers, windows, borders, lock screen |
@@ -215,7 +219,6 @@ monitors: `WAYLAND_TIME_NESTED_OUTPUTS=2 cargo run -- -b winit`.
 ## Roadmap
 
 1. 10-bit output, multi-GPU.
-2. XWayland for X11-only apps.
-3. IPC socket for status bars and scripting (workspace state, focused window, run actions).
-4. More protocols: xdg-activation, screencopy (screenshots/screen sharing), presentation-time.
-5. Small optional animations (window open/close, workspace switch).
+2. IPC socket for status bars and scripting (workspace state, focused window, run actions).
+3. More protocols: xdg-activation, screencopy (screenshots/screen sharing), presentation-time.
+4. Small optional animations (window open/close, workspace switch).

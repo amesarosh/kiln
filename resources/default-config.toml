@@ -19,6 +19,9 @@ autostart = []
 # Turn monitors off after this many seconds without input (0 = never). Any key,
 # click or pointer movement turns them back on. Video players can hold it off.
 monitors_off_after = 0
+# Run X11-only apps (Steam, many games, older programs) through Xwayland. Needs
+# the Xwayland package; changing this takes effect after a restart.
+xwayland = true
 
 # The look shared by everything the compositor draws: the bar, window borders,
 # the lock screen, and menus and panels as they are added.

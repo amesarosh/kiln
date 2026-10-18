@@ -17,6 +17,8 @@ use smithay::{
     utils::{Logical, Point, Rectangle, Serial, Size},
 };
 
+use smithay::wayland::seat::WaylandFocus;
+
 use crate::{layout::Rect, state::State};
 
 /// Start a move from a client request (title bar drag). Validates the client actually holds a click.
@@ -29,6 +31,26 @@ pub fn start_move(state: &mut State, seat: &Seat<State>, window: Window, serial:
 pub fn start_resize(state: &mut State, seat: &Seat<State>, window: Window, serial: Serial) {
     if let Some(start) = client_grab_start(seat, &window, serial) {
         begin_resize(state, seat, window, start, serial);
+    }
+}
+
+/// Start a move or resize asked for by an X11 window. X11 requests carry no serial, so the
+/// pointer just has to be holding a button over the same app.
+pub fn start_x11_grab(state: &mut State, seat: &Seat<State>, window: Window, resize: bool) {
+    let Some(pointer) = seat.get_pointer() else { return };
+    let Some(start) = pointer.grab_start_data() else { return };
+    let same_client = match (start.focus.as_ref(), window.wl_surface()) {
+        (Some((focus, _)), Some(surface)) => focus.id().same_client_as(&surface.id()),
+        _ => false,
+    };
+    if !same_client {
+        return;
+    }
+    let serial = smithay::utils::SERIAL_COUNTER.next_serial();
+    if resize {
+        begin_resize(state, seat, window, start, serial);
+    } else {
+        begin_move(state, seat, window, start, serial);
     }
 }
 
@@ -93,7 +115,7 @@ fn client_grab_start(seat: &Seat<State>, window: &Window, serial: Serial) -> Opt
     }
     let start = pointer.grab_start_data()?;
     let (focus, _) = start.focus.as_ref()?;
-    let surface = window.toplevel()?.wl_surface();
+    let surface = window.wl_surface()?;
     focus.id().same_client_as(&surface.id()).then_some(start)
 }
 
@@ -121,6 +143,10 @@ impl MoveGrab {
             r.y = loc.y;
         }
         state.space.map_element(self.window.clone(), loc, false);
+        // X11 apps place their menus from where they think they are.
+        if let Some(x) = self.window.x11_surface() {
+            let _ = x.configure(Rectangle::new(loc, x.geometry().size));
+        }
         state.needs_redraw = true;
     }
 
@@ -131,7 +157,7 @@ impl MoveGrab {
 }
 
 impl ResizeGrab {
-    fn on_motion(&mut self, _state: &mut State, location: Point<f64, Logical>) {
+    fn on_motion(&mut self, state: &mut State, location: Point<f64, Logical>) {
         let delta = location - self.start.location;
         let size: Size<i32, Logical> = (
             (self.initial.w as f64 + delta.x).max(50.0) as i32,
@@ -141,6 +167,10 @@ impl ResizeGrab {
         if let Some(t) = self.window.toplevel() {
             t.with_pending_state(|s| s.size = Some(size));
             t.send_pending_configure();
+        }
+        if let Some(x) = self.window.x11_surface() {
+            let loc = state.space.element_location(&self.window).unwrap_or_default();
+            let _ = x.configure(Rectangle::new(loc, size));
         }
     }
 

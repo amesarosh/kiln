@@ -2,6 +2,7 @@ mod backend;
 mod bar;
 mod config;
 mod cursor;
+mod focus;
 mod grabs;
 mod handlers;
 mod input;
@@ -180,9 +181,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     state.watch_config();
     state.arm_idle_power_off();
-    state.run_autostart();
-    for cmd in &args.exec {
-        state.spawn(cmd);
+    state.startup_commands = state.config.general.autostart.clone();
+    state.startup_commands.extend(args.exec.iter().cloned());
+    if state.config.general.xwayland {
+        state.start_xwayland();
+    } else {
+        state.run_startup_commands();
     }
 
     event_loop.run(None, &mut state, |state| {
