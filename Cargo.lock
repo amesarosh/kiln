@@ -2335,6 +2335,7 @@ dependencies = [
  "inotify",
  "png 0.18.1",
  "resvg",
+ "rustix 1.1.5",
  "serde",
  "smithay",
  "smithay-drm-extras",

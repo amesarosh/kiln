@@ -85,6 +85,8 @@ pub struct General {
     pub monitors_off_after: u64,
     /// Run X11 apps through Xwayland. Read at startup only.
     pub xwayland: bool,
+    /// Keep the clipboard after the app that copied closes.
+    pub keep_clipboard: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

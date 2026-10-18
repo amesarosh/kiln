@@ -132,6 +132,8 @@ pub struct State {
         smithay::reexports::wayland_protocols_wlr::output_power_management::v1::server::zwlr_output_power_v1::ZwlrOutputPowerV1,
         Output,
     )>,
+    /// Copies of the clipboard, kept after the app that copied closes.
+    pub clipboard: crate::clipboard::Keeper,
     /// The open pop-up menu, if any.
     pub menu: Option<crate::menu::Menu>,
     /// The theme font, loaded for menus; reloaded when `[theme] font` changes.
@@ -273,6 +275,7 @@ impl State {
             last_activity: Instant::now(),
             idle_power_timer: None,
             output_powers: Vec::new(),
+            clipboard: Default::default(),
             menu: None,
             ui_text: None,
             screencopy_pending: Vec::new(),

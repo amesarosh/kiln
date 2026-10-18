@@ -24,6 +24,9 @@ monitors_off_after = 0
 # Run X11-only apps (Steam, many games, older programs) through Xwayland. Needs
 # the Xwayland package; changing this takes effect after a restart.
 xwayland = true
+# Keep what you copied after the app you copied from closes. The compositor
+# holds its own copy (up to 64 MiB); the middle-click selection isn't kept.
+keep_clipboard = true
 
 # The look shared by everything the compositor draws: the bar, window borders,
 # the lock screen, and menus and panels as they are added.

@@ -1,5 +1,6 @@
 mod backend;
 mod bar;
+mod clipboard;
 mod config;
 mod cursor;
 mod focus;

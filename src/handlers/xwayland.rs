@@ -28,7 +28,7 @@ use smithay::{
     },
 };
 
-use crate::{cursor::Cursor, focus::KeyboardFocusTarget, grabs, layout::Rect, state::State};
+use crate::{clipboard::SelectionData, cursor::Cursor, focus::KeyboardFocusTarget, grabs, layout::Rect, state::State};
 
 /// If Xwayland hasn't reported in by then, run startup commands without it.
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -272,6 +272,13 @@ impl XwmHandler for State {
     }
 
     fn send_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_type: String, fd: OwnedFd) {
+        // Our own copy of the clipboard (its app has closed, or it's about to).
+        if selection == SelectionTarget::Clipboard
+            && let Some(kept) = self.kept_clipboard()
+        {
+            crate::clipboard::serve_kept(&kept, &mime_type, fd);
+            return;
+        }
         let result = match selection {
             SelectionTarget::Clipboard => {
                 request_data_device_client_selection(&self.seat, mime_type, fd).map_err(|e| format!("{e:?}"))
@@ -288,15 +295,33 @@ impl XwmHandler for State {
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         let dh = self.display_handle.clone();
         match selection {
-            SelectionTarget::Clipboard => set_data_device_selection(&dh, &self.seat, mime_types, ()),
-            SelectionTarget::Primary => set_primary_selection(&dh, &self.seat, mime_types, ()),
+            SelectionTarget::Clipboard => {
+                set_data_device_selection(&dh, &self.seat, mime_types.clone(), SelectionData::X11);
+                self.keep_clipboard(mime_types, true);
+            }
+            SelectionTarget::Primary => set_primary_selection(&dh, &self.seat, mime_types, SelectionData::X11),
         }
     }
 
     fn cleared_selection(&mut self, _xwm: XwmId, selection: SelectionTarget) {
         let dh = self.display_handle.clone();
         match selection {
-            SelectionTarget::Clipboard => clear_data_device_selection(&dh, &self.seat),
+            // The X11 app that copied went away, but we kept a copy: offer it to X11 apps too.
+            SelectionTarget::Clipboard if self.kept_clipboard().is_some() => {
+                self.loop_handle.insert_idle(|state| {
+                    let Some(kept) = state.kept_clipboard() else { return };
+                    if let Some(xwm) = state.xwm.as_mut() {
+                        let mime_types = kept.iter().map(|(m, _)| m.clone()).collect();
+                        let _ = xwm.new_selection(SelectionTarget::Clipboard, Some(mime_types));
+                        // See SelectionHandler::new_selection: this flushes without waiting.
+                        let _ = xwm.update_stacking_order_upwards(std::iter::empty::<&X11Surface>());
+                    }
+                });
+            }
+            SelectionTarget::Clipboard => {
+                self.stop_keeping();
+                clear_data_device_selection(&dh, &self.seat);
+            }
             SelectionTarget::Primary => clear_primary_selection(&dh, &self.seat),
         }
     }

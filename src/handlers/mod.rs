@@ -75,9 +75,15 @@ delegate_seat!(State);
 
 // Selections are shared with Xwayland so copy and paste works between X11 and Wayland apps.
 impl SelectionHandler for State {
-    type SelectionUserData = ();
+    type SelectionUserData = crate::clipboard::SelectionData;
 
     fn new_selection(&mut self, ty: SelectionTarget, source: Option<SelectionSource>, _seat: Seat<Self>) {
+        if ty == SelectionTarget::Clipboard {
+            match &source {
+                Some(s) => self.keep_clipboard(s.mime_types(), false),
+                None => self.stop_keeping(),
+            }
+        }
         if let Some(xwm) = self.xwm.as_mut() {
             if let Err(e) = xwm.new_selection(ty, source.map(|s| s.mime_types())) {
                 tracing::warn!("could not pass the selection to X11: {e}");
@@ -95,12 +101,17 @@ impl SelectionHandler for State {
         mime_type: String,
         fd: OwnedFd,
         _seat: Seat<Self>,
-        _user_data: &(),
+        user_data: &crate::clipboard::SelectionData,
     ) {
-        if let Some(xwm) = self.xwm.as_mut()
-            && let Err(e) = xwm.send_selection(ty, mime_type, fd, self.loop_handle.clone())
-        {
-            tracing::warn!("could not read the selection from X11: {e}");
+        match user_data {
+            crate::clipboard::SelectionData::Kept(kept) => crate::clipboard::serve_kept(kept, &mime_type, fd),
+            crate::clipboard::SelectionData::X11 => {
+                if let Some(xwm) = self.xwm.as_mut()
+                    && let Err(e) = xwm.send_selection(ty, mime_type, fd, self.loop_handle.clone())
+                {
+                    tracing::warn!("could not read the selection from X11: {e}");
+                }
+            }
         }
     }
 }

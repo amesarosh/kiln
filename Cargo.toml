@@ -17,6 +17,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ab_glyph = "0.2"
 png = "0.18"
 resvg = { version = "0.45", default-features = false }
+rustix = { version = "1", features = ["pipe", "fs"] }
 
 [dependencies.smithay]
 version = "0.7"
