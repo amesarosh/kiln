@@ -97,6 +97,9 @@ pub struct State {
     pub seat_state: SeatState<State>,
     pub data_device_state: DataDeviceState,
     pub primary_selection_state: PrimarySelectionState,
+    /// Clipboard access for clipboard managers (cliphist, `wl-paste --watch`): wlroots and ext.
+    pub wlr_data_control_state: smithay::wayland::selection::wlr_data_control::DataControlState,
+    pub ext_data_control_state: smithay::wayland::selection::ext_data_control::DataControlState,
     pub seat: Seat<State>,
     pub session_lock_state: SessionLockManagerState,
     pub idle_notifier: IdleNotifierState<State>,
@@ -191,6 +194,17 @@ impl State {
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let primary_selection_state = PrimarySelectionState::new::<Self>(&dh);
+        // Any client may watch and set the clipboard, as on other wlroots-style desktops.
+        let wlr_data_control_state = smithay::wayland::selection::wlr_data_control::DataControlState::new::<Self, _>(
+            &dh,
+            Some(&primary_selection_state),
+            |_| true,
+        );
+        let ext_data_control_state = smithay::wayland::selection::ext_data_control::DataControlState::new::<Self, _>(
+            &dh,
+            Some(&primary_selection_state),
+            |_| true,
+        );
         let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_| true);
         let idle_notifier = IdleNotifierState::new(&dh, loop_handle.clone());
         let idle_inhibit_state = IdleInhibitManagerState::new::<Self>(&dh);
@@ -238,6 +252,8 @@ impl State {
             seat_state,
             data_device_state,
             primary_selection_state,
+            wlr_data_control_state,
+            ext_data_control_state,
             seat,
             session_lock_state,
             idle_notifier,

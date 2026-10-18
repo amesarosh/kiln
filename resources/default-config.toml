@@ -15,6 +15,8 @@ new_window = "master"
 # Commands run once at startup, through `sh -c`. To lock after 5 minutes idle
 # and before suspend:
 #   autostart = ["swayidle -w timeout 300 'swaylock -f' before-sleep 'swaylock -f'"]
+# To keep a clipboard history for Mod+v (needs cliphist):
+#   autostart = ["wl-paste --watch cliphist store"]
 autostart = []
 # Turn monitors off after this many seconds without input (0 = never). Any key,
 # click or pointer movement turns them back on. Video players can hold it off.
@@ -143,6 +145,8 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 # (in your Pictures folder). Needs grim, slurp and wl-clipboard.
 "Print" = 'spawn grim -g "$(slurp)" - | wl-copy'
 "Shift+Print" = "spawn grim"
+# Clipboard history: pick an old entry and copy it again (see autostart above).
+"Mod+v" = "spawn cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
 
 "Mod+j" = "focus next"
 "Mod+k" = "focus prev"

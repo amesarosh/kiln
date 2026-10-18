@@ -78,10 +78,14 @@ impl SelectionHandler for State {
     type SelectionUserData = ();
 
     fn new_selection(&mut self, ty: SelectionTarget, source: Option<SelectionSource>, _seat: Seat<Self>) {
-        if let Some(xwm) = self.xwm.as_mut()
-            && let Err(e) = xwm.new_selection(ty, source.map(|s| s.mime_types()))
-        {
-            tracing::warn!("could not pass the selection to X11: {e}");
+        if let Some(xwm) = self.xwm.as_mut() {
+            if let Err(e) = xwm.new_selection(ty, source.map(|s| s.mime_types())) {
+                tracing::warn!("could not pass the selection to X11: {e}");
+            }
+            // new_selection() doesn't flush, so X11 apps wouldn't hear about the copy until
+            // something else did. This call changes nothing with an empty list, but always
+            // flushes, and (unlike calls that wait for a reply) can't block on Xwayland.
+            let _ = xwm.update_stacking_order_upwards(std::iter::empty::<&smithay::xwayland::X11Surface>());
         }
     }
 
@@ -116,6 +120,21 @@ impl PrimarySelectionHandler for State {
     }
 }
 delegate_primary_selection!(State);
+
+// Clipboard managers. Both protocol versions, since tools differ in which they speak.
+impl smithay::wayland::selection::wlr_data_control::DataControlHandler for State {
+    fn data_control_state(&self) -> &smithay::wayland::selection::wlr_data_control::DataControlState {
+        &self.wlr_data_control_state
+    }
+}
+smithay::delegate_data_control!(State);
+
+impl smithay::wayland::selection::ext_data_control::DataControlHandler for State {
+    fn data_control_state(&self) -> &smithay::wayland::selection::ext_data_control::DataControlState {
+        &self.ext_data_control_state
+    }
+}
+smithay::delegate_ext_data_control!(State);
 
 impl OutputHandler for State {}
 delegate_output!(State);

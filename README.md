@@ -9,8 +9,9 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **Idle costs nothing:** frames are only drawn when something changes, and only damaged regions are repainted
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
 - Runs nested for development or **on real hardware from a TTY**, with hardware cursor planes, direct scanout and GPU buffer sharing (linux-dmabuf)
-- Server-side decorations requested by default, so apps don't draw title bars; clipboard and primary selection supported
+- Server-side decorations requested by default, so apps don't draw title bars; clipboard and primary selection supported, including clipboard managers (cliphist, `wl-paste --watch`)
 - **X11 apps through Xwayland** (Steam, games, the VS Code snap, older programs): tiled and focused like any window, with copy and paste working between X11 and Wayland apps
+- **Screenshots and recording** (grim, slurp, wf-recorder) and screen sharing through xdg-desktop-portal-wlr
 - **Screen locking** (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 
 ## Status
@@ -80,6 +81,8 @@ sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
 | `Mod+Shift+q` | close window |
 | `Mod+Shift+r` | reload config |
 | `Mod+Escape` | lock the screen (swaylock) |
+| `Print` / `Shift+Print` | screenshot a region to the clipboard / all monitors to a file (grim, slurp, wl-copy) |
+| `Mod+v` | pick from clipboard history (cliphist and fuzzel; start `wl-paste --watch cliphist store` in autostart) |
 | `Mod+Shift+e` | quit |
 | `Mod+left drag` / `Mod+right drag` | move / resize (floats the window); drop on another monitor to move it there |
 
