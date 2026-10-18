@@ -1209,8 +1209,41 @@ impl State {
 
     /// Run autostart and `--exec` commands, once.
     pub fn run_startup_commands(&mut self) {
+        self.export_session_env();
         for cmd in std::mem::take(&mut self.startup_commands) {
             self.spawn(&cmd);
+        }
+    }
+
+    /// Tell systemd and D-Bus our display, so services they start (keyring unlock prompt,
+    /// desktop portals) can open windows here. Skipped when nested, to leave the host's alone.
+    fn export_session_env(&self) {
+        if self.nested {
+            return;
+        }
+        let display = self.xdisplay.map(|n| format!(":{n}"));
+        let mut vars = vec!["WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE"];
+        let mut command = Command::new("dbus-update-activation-environment");
+        command
+            .arg("--systemd")
+            .env("WAYLAND_DISPLAY", &self.socket_name)
+            .env("XDG_CURRENT_DESKTOP", "wayland-time")
+            .env("XDG_SESSION_TYPE", "wayland");
+        match &display {
+            Some(d) => {
+                command.env("DISPLAY", d);
+                vars.push("DISPLAY");
+            }
+            // An old DISPLAY (say, from an earlier X session) would point at the wrong screen.
+            None => {
+                let _ = Command::new("systemctl").args(["--user", "unset-environment", "DISPLAY"]).status();
+            }
+        }
+        // Wait for it, so autostart programs see the new values.
+        match command.args(&vars).stdin(Stdio::null()).status() {
+            Ok(s) if s.success() => tracing::info!("exported {} to systemd/D-Bus", vars.join(", ")),
+            Ok(s) => tracing::warn!("dbus-update-activation-environment exited with {s}"),
+            Err(e) => tracing::warn!("could not run dbus-update-activation-environment: {e}"),
         }
     }
 
