@@ -143,6 +143,8 @@ pub struct State {
     pub foreign_toplevels: crate::handlers::foreign_toplevel::ForeignToplevels,
     /// Copies of the clipboard, kept after the app that copied closes.
     pub clipboard: crate::clipboard::Keeper,
+    /// Saving the open windows, and bringing back the last session's.
+    pub session: crate::session::Session,
     /// The Alt+Tab switcher, while open.
     pub switcher: Option<crate::switcher::Switcher>,
     /// Windows by when they last had focus, most recent first.
@@ -305,6 +307,7 @@ impl State {
             ui_text: None,
             screencopy_pending: Vec::new(),
             screencopy_watch: Vec::new(),
+            session: crate::session::Session::new(config.session.restore, nested),
             config,
             bar,
             config_path,
@@ -426,6 +429,7 @@ impl State {
             workspaces,
             active_ws: 0,
         });
+        self.restore_monitor(self.monitors.len() - 1);
         self.sort_monitors();
         self.arrange();
         self.refocus();
@@ -690,6 +694,17 @@ impl State {
         if !floating && let Some(x) = window.x11_surface() {
             floating = x11_wants_float(x);
         }
+        let is_dialog = window.toplevel().is_some_and(|t| t.parent().is_some());
+        let restored = (!is_dialog)
+            .then(|| self.restored_placement(&window, app_id.as_deref().unwrap_or(""), title.as_deref().unwrap_or("")))
+            .flatten();
+        if let Some(p) = &restored {
+            if let Some(m) = p.mon {
+                target_mon = m;
+            }
+            target_ws = Some(p.workspace);
+            floating = p.floating.is_some();
+        }
 
         let at_master = self.config.general.new_window == NewWindow::Master;
         // Wayland windows are centered once they pick a size (see on_window_commit). X11 windows
@@ -703,17 +718,46 @@ impl State {
                 _ => Rect::new(0, 0, 0, 0),
             }
         });
-        let visible = match self.monitors.get_mut(target_mon) {
+        let float_rect = match &restored {
+            Some(p) => p.floating,
+            None => float_rect,
+        };
+        let (idx, visible) = match self.monitors.get(target_mon) {
             Some(m) => {
                 let idx = target_ws.unwrap_or(m.active_ws);
-                m.workspaces[idx].add(window.clone(), at_master, float_rect);
-                idx == m.active_ws
+                (idx, idx == m.active_ws)
             }
-            None => {
-                self.parked[target_ws.unwrap_or(0)].add(window.clone(), at_master, float_rect);
-                false
-            }
+            None => (target_ws.unwrap_or(0), false),
         };
+        // Back where it was last session: same slot in the tiling order, same size.
+        let index = restored.as_ref().map(|p| {
+            let ws = match self.monitors.get(target_mon) {
+                Some(m) => &m.workspaces[idx],
+                None => &self.parked[idx],
+            };
+            let entries: Vec<Window> = ws.entries.iter().map(|e| e.window.clone()).collect();
+            self.restored_index(&entries, p.order)
+        });
+        let ws = match self.monitors.get_mut(target_mon) {
+            Some(m) => &mut m.workspaces[idx],
+            None => &mut self.parked[idx],
+        };
+        match (&restored, index) {
+            (Some(p), Some(index)) => {
+                let focus_before = ws.focus.clone();
+                ws.add_at(window.clone(), index, float_rect, p.weight);
+                if p.fullscreen {
+                    ws.fullscreen = Some(window.clone());
+                }
+                if !p.focused && focus_before.is_some() {
+                    ws.focus = focus_before;
+                }
+                if let (Some(t), Some(r)) = (window.toplevel(), float_rect) {
+                    t.with_pending_state(|s| s.size = Some((r.w, r.h).into()));
+                }
+            }
+            _ => ws.add(window.clone(), at_master, float_rect),
+        }
 
         if let Some(t) = window.toplevel() {
             t.with_pending_state(|s| {
@@ -1080,7 +1124,10 @@ impl State {
                     close_window(&w);
                 }
             }
-            Action::Quit => self.loop_signal.stop(),
+            Action::Quit => {
+                self.save_session_final();
+                self.loop_signal.stop();
+            }
             Action::Reload => self.reload_config(),
             Action::Focus(dir) => {
                 self.ws_mut().focus_dir(dir);
@@ -1188,10 +1235,25 @@ impl State {
     }
 
     pub fn spawn(&mut self, cmd: &str) {
+        self.spawn_with(cmd, true);
+    }
+
+    /// `activate`: let the app bring its window forward. Off for apps started at login, so
+    /// they don't pull the view away from the workspace the last session was on.
+    pub fn spawn_with(&mut self, cmd: &str, activate: bool) {
         tracing::info!("spawn: {cmd}");
-        // Lets an app that's already running bring its window forward when launched again.
-        let token = self.launch_token();
         let mut command = Command::new("sh");
+        if activate {
+            // Lets an app that's already running bring its window forward when launched again.
+            let token = self.launch_token();
+            command
+                .env("XDG_ACTIVATION_TOKEN", &token)
+                .env("DESKTOP_STARTUP_ID", &token);
+        } else {
+            command
+                .env_remove("XDG_ACTIVATION_TOKEN")
+                .env_remove("DESKTOP_STARTUP_ID");
+        }
         command
             .arg("-c")
             .arg(cmd)
@@ -1199,8 +1261,6 @@ impl State {
             .env("XDG_SESSION_TYPE", "wayland")
             .env("XDG_CURRENT_DESKTOP", "wayland-time")
             .env("XDG_DATA_DIRS", xdg_data_dirs())
-            .env("XDG_ACTIVATION_TOKEN", &token)
-            .env("DESKTOP_STARTUP_ID", &token)
             .stdin(Stdio::null());
         // Never hand out the host's DISPLAY: X11 apps would open on another desktop.
         match self.xdisplay {
@@ -1304,8 +1364,9 @@ impl State {
     pub fn run_startup_commands(&mut self) {
         self.export_session_env();
         for cmd in std::mem::take(&mut self.startup_commands) {
-            self.spawn(&cmd);
+            self.spawn_with(&cmd, false);
         }
+        self.launch_session_apps();
     }
 
     /// Tell systemd and D-Bus our display, so services they start (keyring unlock prompt,

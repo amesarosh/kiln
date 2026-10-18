@@ -90,6 +90,17 @@ impl<W: Clone + PartialEq> Workspace<W> {
         self.focus = Some(window);
     }
 
+    /// Insert a window at a spot in the list (clamped to the end) and focus it.
+    pub fn add_at(&mut self, window: W, index: usize, floating: Option<Rect>, weight: f32) {
+        let entry = Entry {
+            window: window.clone(),
+            floating,
+            weight,
+        };
+        self.entries.insert(index.min(self.entries.len()), entry);
+        self.focus = Some(window);
+    }
+
     /// Remove a window, moving focus to a neighbour. Returns false if it wasn't here.
     pub fn remove(&mut self, w: &W) -> bool {
         let Some(idx) = self.index_of(w) else { return false };

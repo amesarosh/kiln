@@ -105,6 +105,15 @@ tap_to_click = true
 natural_scroll = false
 pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 
+# Bring back your apps and windows at the next start: the same monitors,
+# workspaces, tiling order, sizes and layouts. Saved a few seconds after any
+# change and when you quit, to ~/.local/state/wayland-time/session.toml.
+[session]
+restore = true    # read at startup only
+# App ids never saved or started again. A trailing * matches any ending, e.g.
+# "steam_app_*" for Steam games.
+exclude = []
+
 # Keybinds: "Modifiers+Key" = "action".
 # Modifiers: Mod, Super, Alt, Ctrl, Shift. Keys use xkb names (Return, space, a, 1, F1, ...).
 # A bare "Mod" binds tapping Mod on its own (no other key or click while it is held).

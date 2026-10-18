@@ -34,6 +34,7 @@ struct RawConfig {
     bar: RawBar,
     keyboard: KeyboardConfig,
     input: InputConfig,
+    session: SessionConfig,
     binds: BTreeMap<String, String>,
     #[serde(default)]
     rules: Vec<WindowRule>,
@@ -52,6 +53,7 @@ struct PartialConfig {
     bar: Option<toml::Table>,
     keyboard: Option<toml::Table>,
     input: Option<toml::Table>,
+    session: Option<toml::Table>,
     binds: Option<BTreeMap<String, String>>,
     rules: Option<Vec<toml::Table>>,
     outputs: Option<Vec<toml::Table>>,
@@ -179,6 +181,16 @@ pub struct KeyboardConfig {
     pub options: String,
     pub repeat_rate: i32,
     pub repeat_delay: i32,
+}
+
+/// Saving open windows on quit and bringing them back at the next start.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SessionConfig {
+    /// Read at startup only.
+    pub restore: bool,
+    /// App ids never saved or relaunched; a trailing `*` matches any ending.
+    pub exclude: Vec<String>,
 }
 
 /// Pointer and touchpad settings (hardware backend only).
@@ -311,6 +323,7 @@ pub struct Config {
     pub bar: BarConfig,
     pub keyboard: KeyboardConfig,
     pub input: InputConfig,
+    pub session: SessionConfig,
     pub binds: Vec<Bind>,
     pub rules: Vec<WindowRule>,
     pub outputs: Vec<OutputConfig>,
@@ -476,6 +489,7 @@ impl Config {
         merge("bar", user.bar);
         merge("keyboard", user.keyboard);
         merge("input", user.input);
+        merge("session", user.session);
         if let Some(binds) = user.binds {
             let table = binds.into_iter().map(|(k, v)| (k, toml::Value::String(v))).collect();
             base.insert("binds".into(), toml::Value::Table(table));
@@ -709,6 +723,7 @@ impl Config {
             bar,
             keyboard: raw.keyboard,
             input: raw.input,
+            session: raw.session,
             binds,
             rules: raw.rules,
             outputs,

@@ -13,6 +13,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **X11 apps through Xwayland** (Steam, games, the VS Code snap, older programs): tiled and focused like any window, with copy and paste working between X11 and Wayland apps
 - **Window list for other programs**: taskbars (waybar's `wlr/taskbar`), window switchers and scripts (`wlrctl`, `lswt`) can list, focus, fullscreen and close windows
 - **Screenshots and recording** (grim, slurp, wf-recorder) and screen sharing through xdg-desktop-portal-wlr
+- **Sessions come back**: apps open when you quit, log out or shut down are started again at the next login, with each window on the same monitor and workspace, in the same tiling order, size and floating position
 - **Screen locking** (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 
 ## Status
@@ -164,6 +165,27 @@ its own table, e.g. `[bar.colors]`.
 If you define `[binds]`, it replaces the default binds entirely. See [`resources/default-config.toml`](resources/default-config.toml) for every option and action.
 A config with errors is rejected as a whole and the last working config stays active; all problems are logged at once.
 
+### Sessions
+
+Open windows are saved to `~/.local/state/wayland-time/session.toml` a few seconds after anything
+changes, and right away when you quit. At the next start each app is launched again (from its
+`.desktop` file, or the command line it ran with) and its windows go back where they were, along
+with each workspace's layout and the workspace each monitor was showing. A change is only saved
+once it has lasted a few seconds, so apps closing during shutdown aren't remembered as closed.
+
+An app with several windows in one process (a browser) is started once and reopens its windows
+itself. Windows an app opened on its own (a game from Steam, a viewer from a terminal) aren't
+started separately. Apps in `autostart` are left to autostart, but their windows are still put
+back. Terminals come back as fresh shells.
+
+```toml
+[session]
+restore = true                  # false: don't save or restore
+exclude = ["steam_app_*", "pavucontrol"]   # never saved or started again
+```
+
+Nested runs use `session-nested.toml`, so testing never touches the real session.
+
 ### Screen lock and idle
 
 Any locker that uses the standard lock protocol works, such as `swaylock` or `hyprlock`. Bind
@@ -197,6 +219,7 @@ is on screen.
 |---|---|
 | `src/main.rs` | CLI, startup, event loop, redraw scheduling |
 | `src/state.rs` | compositor state and window management: monitors, arrange, focus, actions, config reload |
+| `src/session.rs` | saving open windows and restoring them at the next start |
 | `src/bar.rs` | the built-in bar: layout, painting, hit testing, clicks |
 | `src/text.rs` | CPU text and shape drawing for compositor-drawn UI |
 | `src/layout.rs` | pure tiling math (unit tested); add new layouts here |

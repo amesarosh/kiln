@@ -232,7 +232,10 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
         }
         WinitEvent::Input(event) => state.process_input_event(event),
         WinitEvent::Redraw => render(state),
-        WinitEvent::CloseRequested => state.loop_signal.stop(),
+        WinitEvent::CloseRequested => {
+            state.save_session_final();
+            state.loop_signal.stop();
+        }
         WinitEvent::Focus(_) => {}
     })?;
 

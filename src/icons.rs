@@ -122,7 +122,7 @@ impl Icons {
 }
 
 /// `$XDG_DATA_HOME` and `$XDG_DATA_DIRS`, plus Flatpak and Snap exports.
-fn data_dirs() -> Vec<PathBuf> {
+pub fn data_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     let home = std::env::var_os("HOME").map(PathBuf::from);
     match std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()) {
@@ -192,7 +192,7 @@ fn desktop_index() -> HashMap<String, String> {
     index
 }
 
-fn collect_desktop_files(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
+pub fn collect_desktop_files(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let path = e.path();

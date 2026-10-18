@@ -11,6 +11,7 @@ mod input;
 mod layout;
 mod menu;
 mod render;
+mod session;
 mod state;
 mod switcher;
 mod text;
@@ -202,6 +203,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.track_focus_history();
         state.sync_constraint_focus();
         state.refresh_foreign_toplevels();
+        state.track_session();
         let _ = state.display_handle.flush_clients();
     })?;
 
