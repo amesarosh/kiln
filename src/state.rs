@@ -11,6 +11,7 @@ use smithay::{
     input::{
         Seat, SeatState,
         keyboard::{KeyboardHandle, Keycode, XkbConfig},
+        pointer::CursorImageStatus,
     },
     output::Output,
     reexports::{
@@ -25,6 +26,7 @@ use smithay::{
     utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size},
     wayland::{
         compositor::{CompositorClientState, CompositorState, with_states},
+        dmabuf::{DmabufGlobal, DmabufState},
         output::OutputManagerState,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         shell::{
@@ -37,7 +39,7 @@ use smithay::{
 };
 
 use crate::{
-    backend::winit::WinitData,
+    backend::Backend,
     config::{Action, Config, LayoutChoice, ModKey, NewWindow},
     layout::{self, Rect},
     workspace::Workspace,
@@ -81,7 +83,10 @@ pub struct State {
 
     /// Keys whose press triggered a bind; their release is hidden from clients.
     pub suppressed_keys: Vec<Keycode>,
-    pub winit: Option<WinitData>,
+    pub backend: Option<Backend>,
+    pub cursor_status: CursorImageStatus,
+    pub dmabuf_state: DmabufState,
+    pub dmabuf_global: Option<DmabufGlobal>,
     pub needs_redraw: bool,
 }
 
@@ -151,7 +156,10 @@ impl State {
             pending_windows: Vec::new(),
             focused_layer: None,
             suppressed_keys: Vec::new(),
-            winit: None,
+            backend: None,
+            cursor_status: CursorImageStatus::default_named(),
+            dmabuf_state: DmabufState::new(),
+            dmabuf_global: None,
             needs_redraw: true,
         }
     }
@@ -542,6 +550,7 @@ impl State {
             }
             Action::Workspace(n) => self.switch_workspace(n - 1),
             Action::MoveToWorkspace(n) => self.move_to_workspace(n - 1),
+            Action::SwitchVt(vt) => self.switch_vt(vt),
         }
     }
 
@@ -580,13 +589,23 @@ impl State {
             .arg(cmd)
             .env("WAYLAND_DISPLAY", &self.socket_name)
             .env("XDG_SESSION_TYPE", "wayland")
+            .env("XDG_CURRENT_DESKTOP", "wayland-time")
             .env_remove("DISPLAY")
             .stdin(Stdio::null())
             .spawn();
         match result {
             // Reap the child off-thread so finished programs don't linger as zombies.
             Ok(mut child) => {
-                std::thread::spawn(move || child.wait());
+                let cmd = cmd.to_owned();
+                std::thread::spawn(move || match child.wait() {
+                    // The child's stderr usually lands on a hidden VT, so surface failures here.
+                    Ok(status) if status.code() == Some(127) => {
+                        tracing::warn!("\"{cmd}\": command not found (exit 127)");
+                    }
+                    Ok(status) if !status.success() => tracing::warn!("\"{cmd}\" exited with {status}"),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("failed to wait for \"{cmd}\": {e}"),
+                });
             }
             Err(e) => tracing::error!("failed to spawn \"{cmd}\": {e}"),
         }
@@ -619,6 +638,12 @@ impl State {
                 tracing::error!("keyboard layout \"{}\" failed to load", kb.layout);
             }
             keyboard.change_repeat_info(kb.repeat_rate, kb.repeat_delay);
+        }
+
+        if config.input != self.config.input
+            && let Some(Backend::Udev(u)) = &mut self.backend
+        {
+            u.reapply_input_config(&config.input);
         }
 
         // Resize the workspace list, moving windows from removed workspaces to the last one.

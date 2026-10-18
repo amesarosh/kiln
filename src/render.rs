@@ -1,19 +1,25 @@
 //! Builds the list of things to draw for an output, front to back.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, time::Duration};
 
 use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer, Texture,
         element::{
-            AsRenderElements, Id, Kind, render_elements, solid::SolidColorRenderElement,
-            surface::WaylandSurfaceRenderElement,
+            AsRenderElements, Id, Kind,
+            memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+            render_elements,
+            solid::SolidColorRenderElement,
+            surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
         },
         utils::CommitCounter,
     },
     desktop::{Window, layer_map_for_output},
+    input::pointer::{CursorImageAttributes, CursorImageStatus},
     output::Output,
-    utils::{Logical, Physical, Rectangle, Scale},
+    reexports::wayland_server::Resource,
+    utils::{Logical, Physical, Point, Rectangle, Scale},
+    wayland::compositor::with_states,
     wayland::shell::wlr_layer::Layer,
 };
 
@@ -23,6 +29,16 @@ render_elements! {
     pub OutputElement<R> where R: ImportAll + ImportMem;
     Surface=WaylandSurfaceRenderElement<R>,
     Solid=SolidColorRenderElement,
+    Memory=MemoryRenderBufferRenderElement<R>,
+}
+
+/// What the pointer should look like this frame, for backends that draw it.
+pub enum CursorDraw<'a> {
+    None,
+    /// A themed cursor image and its hotspot.
+    Themed(&'a MemoryRenderBuffer, Point<i32, Logical>),
+    /// The client supplied its own cursor surface.
+    Surface,
 }
 
 /// Stable ids per window so the damage tracker only repaints borders that changed.
@@ -32,16 +48,59 @@ struct BorderIds {
     color: Color,
 }
 
-pub fn output_elements<R>(state: &State, renderer: &mut R, output: &Output) -> Vec<OutputElement<R>>
+pub fn output_elements<R>(
+    state: &State,
+    renderer: &mut R,
+    output: &Output,
+    cursor: CursorDraw<'_>,
+) -> Vec<OutputElement<R>>
 where
     R: Renderer + ImportAll + ImportMem,
-    R::TextureId: Clone + Texture + 'static,
+    R::TextureId: Clone + Texture + Send + 'static,
 {
     let mut out = Vec::new();
     let Some(output_geo) = state.space.output_geometry(output) else {
         return out;
     };
     let scale = Scale::from(output.current_scale().fractional_scale());
+
+    // The pointer is always on top.
+    let pointer = state.seat.get_pointer().unwrap().current_location();
+    if output_geo.to_f64().contains(pointer) {
+        let rel = pointer - output_geo.loc.to_f64();
+        match (cursor, &state.cursor_status) {
+            (CursorDraw::Themed(buffer, hotspot), _) => {
+                let loc = (rel - hotspot.to_f64()).to_physical(scale);
+                match MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    loc,
+                    buffer,
+                    None,
+                    None,
+                    None,
+                    Kind::Cursor,
+                ) {
+                    Ok(e) => out.push(OutputElement::Memory(e)),
+                    Err(e) => tracing::warn!("cursor upload failed: {e:?}"),
+                }
+            }
+            (CursorDraw::Surface, CursorImageStatus::Surface(surface)) if surface.is_alive() => {
+                let hotspot = with_states(surface, |s| {
+                    s.data_map
+                        .get::<std::sync::Mutex<CursorImageAttributes>>()
+                        .map(|a| a.lock().unwrap().hotspot)
+                        .unwrap_or_default()
+                });
+                let loc = (rel - hotspot.to_f64()).to_physical(scale).to_i32_round();
+                out.extend(
+                    render_elements_from_surface_tree(renderer, surface, loc, scale, 1.0, Kind::Cursor)
+                        .into_iter()
+                        .map(OutputElement::Surface),
+                );
+            }
+            _ => {}
+        }
+    }
     let fullscreen = state.ws().fullscreen.is_some();
 
     let map = layer_map_for_output(output);
@@ -137,4 +196,22 @@ fn push_border<R>(
             Kind::Unspecified,
         )));
     }
+}
+
+/// Tell clients they can draw their next frame, and do per-frame housekeeping.
+pub fn send_frames(state: &mut State, output: &Output) {
+    let time = state.start_time.elapsed();
+    for window in state.space.elements() {
+        window.send_frame(output, time, Some(Duration::ZERO), |_, _| Some(output.clone()));
+    }
+    for layer in layer_map_for_output(output).layers() {
+        layer.send_frame(output, time, Some(Duration::ZERO), |_, _| Some(output.clone()));
+    }
+    if let CursorImageStatus::Surface(surface) = &state.cursor_status {
+        smithay::desktop::utils::send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
+            Some(output.clone())
+        });
+    }
+    state.space.refresh();
+    state.popups.cleanup();
 }

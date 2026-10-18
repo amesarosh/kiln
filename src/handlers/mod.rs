@@ -4,7 +4,7 @@ mod xdg_shell;
 
 use smithay::{
     delegate_data_device, delegate_output, delegate_primary_selection, delegate_seat,
-    input::{Seat, SeatHandler, SeatState, pointer::CursorImageStatus},
+    input::{Seat, SeatHandler, SeatState, keyboard::LedState, pointer::CursorImageStatus},
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     wayland::{
         output::OutputHandler,
@@ -29,8 +29,15 @@ impl SeatHandler for State {
         &mut self.seat_state
     }
 
-    // The nested backend shows the host cursor; a hardware backend will draw this image.
-    fn cursor_image(&mut self, _seat: &Seat<Self>, _image: CursorImageStatus) {}
+    // The nested backend shows the host cursor; the hardware backend draws this.
+    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+        self.cursor_status = image;
+        self.needs_redraw |= self.draws_cursor();
+    }
+
+    fn led_state_changed(&mut self, _seat: &Seat<Self>, leds: LedState) {
+        self.update_leds(leds);
+    }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let dh = &self.display_handle;

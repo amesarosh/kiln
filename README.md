@@ -6,12 +6,14 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **One TOML file** for keybinds, gaps, borders, colors, keyboard layout and window rules, **reloaded on save**
 - **Idle costs nothing:** frames are only drawn when something changes, and only damaged regions are repainted
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
+- Runs nested for development or **on real hardware from a TTY**, with hardware cursor planes, direct scanout and GPU buffer sharing (linux-dmabuf)
 - Server-side decorations requested by default, so apps don't draw title bars; clipboard and primary selection supported
 
 ## Status
 
-Runs **nested** inside an existing X11 or Wayland session. That's the development setup.
-Running as a real session from a TTY (DRM/KMS + libinput) is the next milestone; see the roadmap.
+- **Nested** inside an existing X11 or Wayland session (development setup): working.
+- **TTY / real hardware** (DRM/KMS, libinput, libseat): implemented, needs testing on more machines.
+  Single GPU only; extra monitors light up but tiling happens on the first one.
 
 ## Build and run
 
@@ -25,14 +27,34 @@ On first start it writes a fully commented default config to `~/.config/wayland-
 ```
 -c, --config <PATH>    use a different config file
 -e, --exec <CMD>       run a command once ready (repeatable)
+-b, --backend <NAME>   auto (default), winit or tty
     --check-config     validate the config and exit
 ```
 
 Logging uses `RUST_LOG`, e.g. `RUST_LOG=debug`.
 
+### Running from a TTY
+
+Build dependencies: `libinput-dev`, `libseat-dev`, `libgbm-dev`, `libdrm-dev`, `libudev-dev`, `libxkbcommon-dev`.
+
+1. Switch to a free text console with `Ctrl+Alt+F3` and log in.
+2. For a first test, use a timeout so it exits on its own even if input doesn't work:
+   `timeout 60 ./target/release/wayland-time -e alacritty`
+3. Quit with `Super+Shift+e`. `Ctrl+Alt+F1..F12` switch consoles at any time.
+
+When run from a TTY, logs go to `~/.local/state/wayland-time/wayland-time.log` (previous run: `.log.old`).
+
+To pick it from a login screen (GDM, SDDM…), install the binary and session file:
+
+```sh
+sudo install -m755 target/release/wayland-time /usr/local/bin/
+sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
+```
+
 ## Default keys
 
 `Mod` is **Alt when nested** (so the host desktop doesn't steal Super) and **Super on hardware**. Set `general.mod` to override.
+`Ctrl+Alt+F1..F12` always switch consoles on hardware.
 
 | Keys | Action |
 |---|---|
@@ -89,14 +111,17 @@ A config with errors is rejected as a whole and the last working config stays ac
 | `src/render.rs` | builds the frame: layers, windows, borders |
 | `src/handlers/` | Wayland protocol handlers (xdg-shell, layer-shell, decorations, seat, clipboard) |
 | `src/backend/winit.rs` | nested backend |
+| `src/backend/udev.rs` | hardware backend: DRM/KMS outputs, libinput, session/VT handling |
+| `src/backend/mod.rs` | backend switch, linux-dmabuf (GPU buffer sharing) |
+| `src/cursor.rs` | XCursor theme loading for the hardware backend |
 
 `cargo test` runs the unit tests.
 
 ## Roadmap
 
-1. **TTY backend** (DRM/KMS, libinput, libseat) to run as a real login session, plus cursor rendering and VT switching. Needs `sudo apt install libinput-dev`.
-2. Multiple monitors (workspaces per output) and output config (mode, scale, position).
+1. Multiple monitors (workspaces per output) and output config (mode, scale, position, 10-bit), multi-GPU.
+2. Session lock (screen locker) and idle handling, which a real session needs.
 3. XWayland for X11-only apps.
 4. IPC socket for status bars and scripting (workspace state, focused window, run actions).
-5. More protocols: xdg-activation, fractional scale, viewporter, idle-inhibit, session lock, screencopy (screenshots/screen sharing).
+5. More protocols: xdg-activation, fractional scale, viewporter, idle-inhibit, screencopy (screenshots/screen sharing), presentation-time.
 6. Small optional animations (window open/close, workspace switch).

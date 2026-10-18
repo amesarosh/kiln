@@ -37,6 +37,12 @@ options = ""        # e.g. "caps:escape,compose:ralt"
 repeat_rate = 30    # keys per second
 repeat_delay = 250  # milliseconds
 
+# Pointer and touchpad settings (only apply when running from a TTY).
+[input]
+tap_to_click = true
+natural_scroll = false
+pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
+
 # Keybinds: "Modifiers+Key" = "action".
 # Modifiers: Mod, Super, Alt, Ctrl, Shift. Keys use xkb names (Return, space, a, 1, F1, ...).
 #
@@ -55,6 +61,9 @@ repeat_delay = 250  # milliseconds
 #   move-to-workspace <n>     send the focused window to workspace n
 #   reload                    reload this file (it also reloads on save)
 #   quit                      exit the compositor
+#
+# Ctrl+Alt+F1..F12 always switch virtual terminals when running from a TTY,
+# and Ctrl+Alt+Backspace always quits, whatever is in [binds].
 #
 # Mouse: Mod+left-drag moves a window (and floats it), Mod+right-drag resizes it.
 # If you define a [binds] table, it replaces all of these defaults.

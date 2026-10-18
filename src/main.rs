@@ -1,7 +1,6 @@
-mod backend {
-    pub mod winit;
-}
+mod backend;
 mod config;
+mod cursor;
 mod grabs;
 mod handlers;
 mod input;
@@ -10,7 +9,7 @@ mod render;
 mod state;
 mod workspace;
 
-use std::path::PathBuf;
+use std::{fs::File, path::PathBuf, sync::Mutex};
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
@@ -23,17 +22,27 @@ USAGE:
     wayland-time [OPTIONS]
 
 OPTIONS:
-    -c, --config <PATH>    Use this config file instead of ~/.config/wayland-time/config.toml
-    -e, --exec <CMD>       Run a command once the compositor is ready (repeatable)
-        --check-config     Validate the config file and exit
-    -h, --help             Show this help
+    -c, --config <PATH>      Use this config file instead of ~/.config/wayland-time/config.toml
+    -e, --exec <CMD>         Run a command once the compositor is ready (repeatable)
+    -b, --backend <NAME>     auto (default), winit (nested window) or tty (real hardware)
+        --check-config       Validate the config file and exit
+    -h, --help               Show this help
 
-Logging is controlled with RUST_LOG, e.g. RUST_LOG=debug.
+Logging is controlled with RUST_LOG, e.g. RUST_LOG=debug. When running from a TTY,
+logs are also written to ~/.local/state/wayland-time/wayland-time.log.
 ";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BackendChoice {
+    Auto,
+    Winit,
+    Tty,
+}
 
 struct Args {
     config: Option<PathBuf>,
     exec: Vec<String>,
+    backend: BackendChoice,
     check_config: bool,
 }
 
@@ -41,6 +50,7 @@ fn parse_args() -> Result<Args, String> {
     let mut args = Args {
         config: None,
         exec: Vec::new(),
+        backend: BackendChoice::Auto,
         check_config: false,
     };
     let mut it = std::env::args().skip(1);
@@ -48,6 +58,14 @@ fn parse_args() -> Result<Args, String> {
         match arg.as_str() {
             "-c" | "--config" => args.config = Some(it.next().ok_or("--config needs a path")?.into()),
             "-e" | "--exec" => args.exec.push(it.next().ok_or("--exec needs a command")?),
+            "-b" | "--backend" => {
+                args.backend = match it.next().as_deref() {
+                    Some("auto") => BackendChoice::Auto,
+                    Some("winit") => BackendChoice::Winit,
+                    Some("tty") => BackendChoice::Tty,
+                    _ => return Err("--backend must be auto, winit or tty".into()),
+                }
+            }
             "--check-config" => args.check_config = true,
             "-h" | "--help" => {
                 print!("{HELP}");
@@ -59,15 +77,49 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+/// On a TTY the console is hidden behind the compositor, so keep a log file too.
+fn init_logging(to_file: bool) {
+    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-    let args = parse_args().map_err(|e| {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let file = to_file.then(log_file).flatten();
+    let file_layer = file.map(|(f, path)| {
+        eprintln!("logging to {}", path.display());
+        fmt::layer().with_ansi(false).with_writer(Mutex::new(f))
+    });
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer())
+        .with(file_layer)
+        .init();
+}
+
+fn log_file() -> Option<(File, PathBuf)> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
+    let dir = base.join("wayland-time");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("wayland-time.log");
+    // Keep the previous run's log for debugging crashes.
+    let _ = std::fs::rename(&path, dir.join("wayland-time.log.old"));
+    File::create(&path).ok().map(|f| (f, path))
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = parse_args().unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
-    })?;
+    });
+
+    let has_display = std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some();
+    let nested = match args.backend {
+        BackendChoice::Auto => has_display,
+        BackendChoice::Winit => true,
+        BackendChoice::Tty => false,
+    };
+    init_logging(!nested && !args.check_config);
 
     let config_path = args.config.or_else(Config::default_path);
 
@@ -95,13 +147,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => Config::default(),
     };
 
-    let nested = std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some();
-    if !nested {
-        return Err(
-            "running from a TTY is not supported yet; start wayland-time inside an X11 or Wayland session".into(),
-        );
-    }
-
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
     let handle = event_loop.handle();
@@ -114,7 +159,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         nested,
     );
 
-    backend::winit::init(&mut state, &handle)?;
+    let result = if nested {
+        backend::winit::init(&mut state, &handle)
+    } else {
+        backend::udev::init(&mut state, &handle)
+    };
+    if let Err(e) = result {
+        tracing::error!("failed to start {} backend: {e}", if nested { "nested" } else { "tty" });
+        return Err(e);
+    }
     tracing::info!("listening on WAYLAND_DISPLAY={}", state.socket_name.to_string_lossy());
 
     state.watch_config();
@@ -127,12 +180,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Redraw only when something changed; an idle desktop costs nothing.
         if state.needs_redraw {
             state.needs_redraw = false;
-            if let Some(w) = &state.winit {
-                w.request_redraw();
-            }
+            state.schedule_redraw();
         }
         let _ = state.display_handle.flush_clients();
     })?;
 
+    tracing::info!("exiting");
     Ok(())
 }

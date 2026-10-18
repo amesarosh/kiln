@@ -8,6 +8,8 @@ license = "MIT"
 [dependencies]
 bitflags = "2"
 inotify = { version = "0.11", default-features = false }
+smithay-drm-extras = { version = "0.1", default-features = false }
+xcursor = "0.3"
 serde = { version = "1", features = ["derive"] }
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 tracing = "0.1"
@@ -16,7 +18,18 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dependencies.smithay]
 version = "0.7"
 default-features = false
-features = ["backend_winit", "wayland_frontend", "desktop", "renderer_gl"]
+features = [
+    "backend_winit",
+    "backend_drm",
+    "backend_gbm",
+    "backend_egl",
+    "backend_libinput",
+    "backend_udev",
+    "backend_session_libseat",
+    "renderer_gl",
+    "wayland_frontend",
+    "desktop",
+]
 
 [profile.release]
 lto = "thin"

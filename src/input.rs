@@ -16,8 +16,15 @@ use crate::{
     state::State,
 };
 
+/// Relative motion details: (accelerated delta, raw delta, timestamp in µs).
+type Relative = (Point<f64, Logical>, Point<f64, Logical>, u64);
+
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
+const XF86_SWITCH_VT_1: u32 = 0x1008_FE01;
+const XF86_SWITCH_VT_12: u32 = 0x1008_FE0C;
+const XKB_BACKSPACE: u32 = 0xFF08;
+const XKB_TERMINATE_SERVER: u32 = 0xFED5;
 
 impl State {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
@@ -63,10 +70,23 @@ impl State {
                         }
                         return FilterResult::Forward;
                     }
+                    // Ctrl+Alt+Fn produces XF86Switch_VT_n; always handled so you can't get stuck.
+                    let modified = handle.modified_sym().raw();
+                    if (XF86_SWITCH_VT_1..=XF86_SWITCH_VT_12).contains(&modified) {
+                        state.suppressed_keys.push(code);
+                        let vt = (modified - XF86_SWITCH_VT_1 + 1) as i32;
+                        return FilterResult::Intercept(Some(Action::SwitchVt(vt)));
+                    }
                     // Match on the unshifted, layout-independent sym so "Mod+Shift+1" works.
                     let Some(sym) = handle.raw_latin_sym_or_raw_current_sym() else {
                         return FilterResult::Forward;
                     };
+                    // Ctrl+Alt+Backspace always quits, so a broken [binds] table can't trap you.
+                    let raw = sym.raw();
+                    if raw == XKB_TERMINATE_SERVER || (raw == XKB_BACKSPACE && mods.ctrl && mods.alt) {
+                        state.suppressed_keys.push(code);
+                        return FilterResult::Intercept(Some(Action::Quit));
+                    }
                     let sym = normalize_keysym(sym);
                     let pressed = Mods::from_state(mods);
                     let mod_key = state.mod_key();
@@ -88,11 +108,13 @@ impl State {
         &mut self,
         pos: Point<f64, Logical>,
         time: u32,
-        relative: Option<(Point<f64, Logical>, Point<f64, Logical>, u64)>,
+        relative: Option<Relative>,
     ) {
         let pointer = self.seat.get_pointer().unwrap();
         let under = self.surface_under(pos);
         let serial = SERIAL_COUNTER.next_serial();
+        // The hardware backend draws the pointer, so moving it is a visible change.
+        self.needs_redraw |= self.draws_cursor();
 
         if self.config.general.focus_follows_mouse
             && !pointer.is_grabbed()
@@ -214,7 +236,13 @@ impl State {
     }
 
     fn clamp_to_output(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
-        let Some(geo) = self.output().and_then(|o| self.space.output_geometry(&o)) else {
+        // Bounding box of all monitors, so the pointer can cross between them.
+        let Some(geo) = self
+            .space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .reduce(|a, b| a.merge(b))
+        else {
             return pos;
         };
         let max_x = (geo.loc.x + geo.size.w - 1) as f64;

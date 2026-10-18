@@ -25,6 +25,7 @@ struct RawConfig {
     layout: LayoutConfig,
     decoration: RawDecoration,
     keyboard: KeyboardConfig,
+    input: InputConfig,
     binds: BTreeMap<String, String>,
     #[serde(default)]
     rules: Vec<WindowRule>,
@@ -38,6 +39,7 @@ struct PartialConfig {
     layout: Option<toml::Table>,
     decoration: Option<toml::Table>,
     keyboard: Option<toml::Table>,
+    input: Option<toml::Table>,
     binds: Option<BTreeMap<String, String>>,
     rules: Option<Vec<toml::Table>>,
 }
@@ -99,6 +101,15 @@ pub struct KeyboardConfig {
     pub repeat_delay: i32,
 }
 
+/// Pointer and touchpad settings (hardware backend only).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct InputConfig {
+    pub tap_to_click: bool,
+    pub natural_scroll: bool,
+    pub pointer_speed: f64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WindowRule {
@@ -126,6 +137,7 @@ pub struct Config {
     pub layout: LayoutConfig,
     pub decoration: Decoration,
     pub keyboard: KeyboardConfig,
+    pub input: InputConfig,
     pub binds: Vec<Bind>,
     pub rules: Vec<WindowRule>,
 }
@@ -200,6 +212,8 @@ pub enum Action {
     ToggleFullscreen,
     Workspace(usize),
     MoveToWorkspace(usize),
+    /// Ctrl+Alt+F1..F12 on the hardware backend; not configurable.
+    SwitchVt(i32),
 }
 
 #[derive(Debug)]
@@ -265,6 +279,7 @@ impl Config {
         merge("layout", user.layout);
         merge("decoration", user.decoration);
         merge("keyboard", user.keyboard);
+        merge("input", user.input);
         if let Some(binds) = user.binds {
             let table = binds.into_iter().map(|(k, v)| (k, toml::Value::String(v))).collect();
             base.insert("binds".into(), toml::Value::Table(table));
@@ -319,6 +334,9 @@ impl Config {
         if !(0.05..=0.95).contains(&layout.master_ratio) {
             problems.push("layout.master_ratio must be between 0.05 and 0.95".into());
         }
+        if !(-1.0..=1.0).contains(&raw.input.pointer_speed) {
+            problems.push("input.pointer_speed must be between -1.0 and 1.0".into());
+        }
         if !(1..=32).contains(&layout.workspaces) {
             problems.push("layout.workspaces must be between 1 and 32".into());
         }
@@ -342,6 +360,7 @@ impl Config {
             layout,
             decoration,
             keyboard: raw.keyboard,
+            input: raw.input,
             binds,
             rules: raw.rules,
         })
