@@ -23,7 +23,7 @@ use smithay::{
             protocol::wl_surface::WlSurface,
         },
     },
-    utils::{Logical, Point, SERIAL_COUNTER, Size},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Size},
     wayland::{
         compositor::{CompositorClientState, CompositorState, with_states},
         dmabuf::{DmabufGlobal, DmabufState},
@@ -319,6 +319,80 @@ impl State {
         self.focused_layer = None;
         self.arrange();
         self.refocus();
+    }
+
+    /// Move a monitor to a new spot in the global space, carrying its floating windows along.
+    pub fn move_monitor(&mut self, output: &Output, loc: Point<i32, Logical>) {
+        let old = output.current_location();
+        output.change_current_state(None, None, None, Some(loc));
+        self.space.map_output(output, loc);
+        if old != loc
+            && let Some(i) = self.monitor_index(output)
+        {
+            shift_floating(&mut self.monitors[i].workspaces, (loc.x - old.x, loc.y - old.y));
+        }
+    }
+
+    /// Place every monitor: those with a `position` in the config go there, the rest follow
+    /// left to right (in the order they were connected) after the rightmost placed one.
+    pub fn layout_monitors(&mut self) {
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        let size = |o: &Output| self.space.output_geometry(o).map(|g| g.size).unwrap_or_default();
+        let mut placed: Vec<(Output, Rectangle<i32, Logical>)> = Vec::new();
+        let mut auto = Vec::new();
+        for o in outputs {
+            match self.config.output(&o.name()).position {
+                Some((x, y)) => {
+                    let rect = Rectangle::new((x, y).into(), size(&o));
+                    if let Some((other, _)) = placed.iter().find(|(_, r)| r.overlaps(rect)) {
+                        tracing::warn!("monitors {} and {} overlap", o.name(), other.name());
+                    }
+                    placed.push((o, rect));
+                }
+                None => auto.push(o),
+            }
+        }
+        let mut x = placed.iter().map(|(_, r)| r.loc.x + r.size.w).max().unwrap_or(0);
+        for o in auto {
+            let rect = Rectangle::new((x, 0).into(), size(&o));
+            x += rect.size.w;
+            placed.push((o, rect));
+        }
+        for (o, rect) in placed {
+            self.move_monitor(&o, rect.loc);
+        }
+    }
+
+    /// Monitors were added, removed, moved, resized or rescaled: redo everything that depends
+    /// on their geometry.
+    pub fn monitors_changed(&mut self) {
+        for o in self.space.outputs() {
+            layer_map_for_output(o).arrange();
+        }
+        self.sort_monitors();
+        // The pointer may now be off every monitor.
+        let pointer = self.seat.get_pointer().unwrap();
+        let pos = pointer.current_location();
+        if self.monitor_at(pos).is_none()
+            && let Some(geo) = self.output().and_then(|o| self.space.output_geometry(&o))
+        {
+            let center = geo.to_f64().loc + geo.to_f64().size.downscale(2.0).to_point();
+            let under = self.surface_under(center);
+            let time = self.start_time.elapsed().as_millis() as u32;
+            pointer.motion(
+                self,
+                under,
+                &smithay::input::pointer::MotionEvent {
+                    location: center,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                },
+            );
+            pointer.frame(self);
+        }
+        self.arrange();
+        self.refocus();
+        self.needs_redraw = true;
     }
 
     /// Keep monitors ordered left to right (then top to bottom), so next/prev are spatial.
@@ -946,7 +1020,11 @@ impl State {
         if config.bar != self.config.bar {
             self.bar.reconfigure(&config.bar);
         }
+        let outputs_changed = config.outputs != self.config.outputs;
         self.config = config;
+        if outputs_changed {
+            self.apply_output_config();
+        }
         self.arrange();
         self.refocus();
     }

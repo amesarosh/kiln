@@ -32,6 +32,15 @@ impl State {
         matches!(self.backend, Some(Backend::Udev(_)))
     }
 
+    /// The `[[outputs]]` config changed: re-apply modes, scales, positions and on/off.
+    pub fn apply_output_config(&mut self) {
+        match &self.backend {
+            Some(Backend::Winit(_)) => winit::apply_output_config(self),
+            Some(Backend::Udev(_)) => udev::apply_output_config(self),
+            None => {}
+        }
+    }
+
     pub fn switch_vt(&mut self, vt: i32) {
         if let Some(Backend::Udev(u)) = &mut self.backend {
             u.switch_vt(vt);

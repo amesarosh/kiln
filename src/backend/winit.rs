@@ -9,15 +9,19 @@ use smithay::{
         renderer::{
             ImportDma,
             damage::OutputDamageTracker,
-            element::utils::{Relocate, RelocateRenderElement},
+            Renderer,
+            element::{
+                Element, Id, Kind, RenderElement, UnderlyingStorage,
+                utils::{Relocate, RelocateRenderElement},
+            },
             gles::GlesRenderer,
+            utils::{CommitCounter, DamageSet, OpaqueRegions},
         },
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
-    desktop::layer_map_for_output,
-    output::{Mode, Output, PhysicalProperties, Subpixel},
+    output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::calloop::LoopHandle,
-    utils::{Physical, Size, Transform},
+    utils::{Buffer, Physical, Point, Rectangle, Size, Transform},
     wayland::dmabuf::DmabufFeedbackBuilder,
 };
 
@@ -31,6 +35,8 @@ pub struct WinitData {
     backend: WinitGraphicsBackend<GlesRenderer>,
     /// Left to right, splitting the window evenly.
     outputs: Vec<Output>,
+    /// Where each output's slice starts in the window, in window pixels.
+    offsets: Vec<Point<i32, Physical>>,
     /// Covers the whole window; each output's elements are shifted into its slice.
     damage_tracker: OutputDamageTracker,
 }
@@ -47,9 +53,13 @@ fn nested_output_count() -> usize {
 }
 
 /// Give each output its slice of the window. The last one takes any leftover pixels.
-fn layout_outputs(state: &mut State, outputs: &[Output], window: Size<i32, Physical>) {
+/// Only `scale` from the outputs config applies here; mode and position follow the window.
+/// Returns where each slice starts, in window pixels.
+fn layout_outputs(state: &mut State, outputs: &[Output], window: Size<i32, Physical>) -> Vec<Point<i32, Physical>> {
     let n = outputs.len() as i32;
     let w = window.w / n;
+    let mut offsets = Vec::new();
+    let mut logical_x = 0;
     for (i, output) in outputs.iter().enumerate() {
         let i = i as i32;
         let width = if i == n - 1 { window.w - w * (n - 1) } else { w };
@@ -57,10 +67,80 @@ fn layout_outputs(state: &mut State, outputs: &[Output], window: Size<i32, Physi
             size: (width, window.h).into(),
             refresh: 60_000,
         };
-        output.change_current_state(Some(mode), None, None, Some((i * w, 0).into()));
+        let scale = state.config.output(&output.name()).scale;
+        output.change_current_state(Some(mode), None, Some(Scale::Fractional(scale)), None);
         output.set_preferred(mode);
-        state.space.map_output(output, (i * w, 0));
-        layer_map_for_output(output).arrange();
+        state.move_monitor(output, (logical_x, 0).into());
+        logical_x += state.space.output_geometry(output).map_or(0, |g| g.size.w);
+        offsets.push((i * w, 0).into());
+    }
+    offsets
+}
+
+/// Re-apply output scales after a config reload.
+pub fn apply_output_config(state: &mut State) {
+    let Some(Backend::Winit(data)) = &state.backend else { return };
+    let (outputs, size) = (data.outputs.clone(), data.backend.window_size());
+    let offsets = layout_outputs(state, &outputs, size);
+    if let Some(Backend::Winit(data)) = &mut state.backend {
+        data.offsets = offsets;
+    }
+    state.monitors_changed();
+}
+
+/// The whole window is drawn by one damage tracker at scale 1, but each fake monitor has its
+/// own scale. This makes an element ignore the tracker's scale and use its monitor's.
+struct AtScale<E> {
+    inner: E,
+    scale: smithay::utils::Scale<f64>,
+}
+
+impl<E: Element> Element for AtScale<E> {
+    fn id(&self) -> &Id {
+        self.inner.id()
+    }
+    fn current_commit(&self) -> CommitCounter {
+        self.inner.current_commit()
+    }
+    fn src(&self) -> Rectangle<f64, Buffer> {
+        self.inner.src()
+    }
+    fn geometry(&self, _: smithay::utils::Scale<f64>) -> Rectangle<i32, Physical> {
+        self.inner.geometry(self.scale)
+    }
+    fn location(&self, _: smithay::utils::Scale<f64>) -> Point<i32, Physical> {
+        self.inner.location(self.scale)
+    }
+    fn transform(&self) -> Transform {
+        self.inner.transform()
+    }
+    fn damage_since(&self, _: smithay::utils::Scale<f64>, commit: Option<CommitCounter>) -> DamageSet<i32, Physical> {
+        self.inner.damage_since(self.scale, commit)
+    }
+    fn opaque_regions(&self, _: smithay::utils::Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        self.inner.opaque_regions(self.scale)
+    }
+    fn alpha(&self) -> f32 {
+        self.inner.alpha()
+    }
+    fn kind(&self) -> Kind {
+        self.inner.kind()
+    }
+}
+
+impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for AtScale<E> {
+    fn draw(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
+    ) -> Result<(), R::Error> {
+        self.inner.draw(frame, src, dst, damage, opaque_regions)
+    }
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
+        self.inner.underlying_storage(renderer)
     }
 }
 
@@ -102,7 +182,7 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
         })
         .collect();
     let window_size = backend.window_size();
-    layout_outputs(state, &outputs, window_size);
+    let offsets = layout_outputs(state, &outputs, window_size);
     for output in &outputs {
         state.add_monitor(output.clone());
     }
@@ -132,6 +212,7 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
     state.backend = Some(Backend::Winit(WinitData {
         backend,
         outputs,
+        offsets,
         damage_tracker,
     }));
 
@@ -142,8 +223,11 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
             };
             data.damage_tracker = OutputDamageTracker::new(size, 1.0, WINDOW_TRANSFORM);
             let outputs = data.outputs.clone();
-            layout_outputs(state, &outputs, size);
-            state.arrange();
+            let offsets = layout_outputs(state, &outputs, size);
+            if let Some(Backend::Winit(data)) = &mut state.backend {
+                data.offsets = offsets;
+            }
+            state.monitors_changed();
         }
         WinitEvent::Input(event) => state.process_input_event(event),
         WinitEvent::Redraw => render(state),
@@ -166,16 +250,12 @@ fn render(state: &mut State) {
         Ok((renderer, mut framebuffer)) => {
             // Each output renders its own elements, shifted to its slice of the window.
             let mut elements = Vec::new();
-            for output in &data.outputs {
-                let offset = state
-                    .space
-                    .output_geometry(output)
-                    .map(|g| g.loc.to_physical(1))
-                    .unwrap_or_default();
+            for (output, &offset) in data.outputs.iter().zip(&data.offsets) {
+                let scale = smithay::utils::Scale::from(output.current_scale().fractional_scale());
                 elements.extend(
                     render::output_elements(state, renderer, output, CursorDraw::None)
                         .into_iter()
-                        .map(|e| RelocateRenderElement::from_element(e, offset, Relocate::Relative)),
+                        .map(|e| RelocateRenderElement::from_element(AtScale { inner: e, scale }, offset, Relocate::Relative)),
                 );
             }
             match data

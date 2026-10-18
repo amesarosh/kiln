@@ -27,21 +27,25 @@ use smithay::{
     },
     desktop::layer_map_for_output,
     input::{keyboard::LedState, pointer::CursorImageStatus},
-    output::{Mode as WlMode, Output, PhysicalProperties},
+    output::{Mode as WlMode, Output, PhysicalProperties, Scale},
     reexports::{
         calloop::{LoopHandle, RegistrationToken},
-        drm::control::{ModeTypeFlags, connector, crtc},
+        drm::{
+            self,
+            control::{ModeTypeFlags, connector, crtc},
+        },
         input::{self as libinput, DeviceCapability, Libinput},
         rustix::fs::OFlags,
         wayland_server::backend::GlobalId,
     },
-    utils::{DeviceFd, Transform},
+    utils::DeviceFd,
     wayland::dmabuf::DmabufFeedbackBuilder,
 };
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use super::Backend;
 use crate::{
+    config::{Config, ModeSpec},
     cursor::Cursor,
     render::{self, CursorDraw, OutputElement},
     state::State,
@@ -76,6 +80,8 @@ struct Gpu {
 
 struct Surface {
     output: Output,
+    connector: connector::Handle,
+    mode: drm::control::Mode,
     drm_output: DrmOutput<Allocator, Exporter, (), DrmDeviceFd>,
     global: GlobalId,
     /// A frame is queued and we're waiting for vblank before rendering again.
@@ -311,32 +317,173 @@ fn scan_connectors(state: &mut State, node: DrmNode) {
             _ => {}
         }
     }
-    state.arrange();
-    state.refocus();
+    state.layout_monitors();
+    state.monitors_changed();
+}
+
+fn connector_name(info: &connector::Info) -> String {
+    format!("{}-{}", info.interface().as_str(), info.interface_id())
+}
+
+/// Whether a connected monitor should be lit. Never all of them off: if the config disables
+/// every connected monitor, the first one by name stays on.
+fn wants_enabled(u: &UdevData, config: &Config, name: &str) -> bool {
+    if !u.only_outputs.is_empty() && !u.only_outputs.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+        return false;
+    }
+    if config.output(name).enabled {
+        return true;
+    }
+    let Some(gpu) = &u.gpu else { return false };
+    let mut connected: Vec<String> = gpu.scanner.crtcs().map(|(info, _)| connector_name(info)).collect();
+    connected.sort();
+    let all_off = connected.iter().all(|n| !config.output(n).enabled);
+    all_off && connected.first().is_some_and(|n| n == name)
+}
+
+/// The configured mode if the monitor has it, else its preferred one.
+fn pick_mode(info: &connector::Info, want: Option<ModeSpec>) -> Option<drm::control::Mode> {
+    let modes = info.modes();
+    let preferred = modes
+        .iter()
+        .find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED))
+        .or_else(|| modes.first())
+        .copied();
+    let Some(want) = want else { return preferred };
+    let refresh = |m: &drm::control::Mode| WlMode::from(*m).refresh as f64 / 1000.0;
+    let same_size = modes.iter().filter(|m| {
+        let (w, h) = m.size();
+        (w as i32, h as i32) == (want.width, want.height)
+    });
+    let best = match want.refresh {
+        Some(hz) => same_size.min_by(|a, b| (refresh(a) - hz).abs().total_cmp(&(refresh(b) - hz).abs())),
+        None => same_size.max_by(|a, b| refresh(a).total_cmp(&refresh(b))),
+    };
+    let name = connector_name(info);
+    match best {
+        Some(m) => {
+            if let Some(hz) = want.refresh
+                && (refresh(m) - hz).abs() > 0.5
+            {
+                tracing::warn!("{name}: no {hz} Hz mode, using {:.3} Hz", refresh(m));
+            }
+            Some(*m)
+        }
+        None => {
+            tracing::warn!(
+                "{name}: no {}x{} mode, using the preferred one",
+                want.width,
+                want.height
+            );
+            preferred
+        }
+    }
+}
+
+fn describe_modes(info: &connector::Info) -> String {
+    let mut seen = Vec::new();
+    for m in info.modes() {
+        let (w, h) = m.size();
+        let s = format!("{w}x{h}@{:.2}", WlMode::from(*m).refresh as f64 / 1000.0);
+        if !seen.contains(&s) {
+            seen.push(s);
+        }
+    }
+    seen.join(", ")
+}
+
+/// Push scale and rotation from the config onto an output.
+fn apply_scale_transform(output: &Output, config: &Config) {
+    let cfg = config.output(&output.name());
+    output.change_current_state(None, Some(cfg.transform), Some(Scale::Fractional(cfg.scale)), None);
+}
+
+/// Re-apply `[[outputs]]` after a config reload.
+pub fn apply_output_config(state: &mut State) {
+    let Some(u) = udev_data(state) else { return };
+    if !u.session.is_active() {
+        return; // resume rescans
+    }
+    let Some(gpu) = &u.gpu else { return };
+    let lit: Vec<(crtc::Handle, String)> = gpu
+        .surfaces
+        .iter()
+        .map(|(crtc, s)| (*crtc, s.output.name()))
+        .collect();
+    let dark: Vec<(connector::Info, crtc::Handle)> = gpu
+        .scanner
+        .crtcs()
+        .filter(|(_, crtc)| !gpu.surfaces.contains_key(crtc))
+        .map(|(info, crtc)| (info.clone(), crtc))
+        .collect();
+
+    for (crtc, name) in lit {
+        let config = state.config.clone();
+        let u = udev_data_mut(state).unwrap();
+        if !wants_enabled(u, &config, &name) {
+            tracing::info!("{name}: disabled in config");
+            remove_surface(state, crtc);
+            continue;
+        }
+        let gpu = u.gpu.as_mut().unwrap();
+        let Some(info) = gpu
+            .surfaces
+            .get(&crtc)
+            .and_then(|s| gpu.scanner.connectors().get(&s.connector))
+            .cloned()
+        else {
+            continue;
+        };
+        let surface = gpu.surfaces.get_mut(&crtc).unwrap();
+        if let Some(mode) = pick_mode(&info, config.output(&name).mode)
+            && mode != surface.mode
+        {
+            let wl = WlMode::from(mode);
+            match surface.drm_output.use_mode::<_, OutputElement<GlesRenderer>>(
+                mode,
+                &mut gpu.renderer,
+                &DrmOutputRenderElements::default(),
+            ) {
+                Ok(()) => {
+                    tracing::info!("{name}: mode {}x{}@{}", wl.size.w, wl.size.h, wl.refresh as f32 / 1000.0);
+                    surface.mode = mode;
+                    surface.output.set_preferred(wl);
+                    surface.output.change_current_state(Some(wl), None, None, None);
+                }
+                Err(e) => tracing::warn!("{name}: could not switch mode: {e}"),
+            }
+        }
+        let output = surface.output.clone();
+        apply_scale_transform(&output, &config);
+    }
+
+    for (info, crtc) in dark {
+        let enable = udev_data(state).is_some_and(|u| wants_enabled(u, &state.config, &connector_name(&info)));
+        if enable {
+            connector_connected(state, info, crtc);
+        }
+    }
+    state.layout_monitors();
+    state.monitors_changed();
 }
 
 fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc::Handle) {
-    let name = format!("{}-{}", connector.interface().as_str(), connector.interface_id());
-    if let Some(u) = udev_data(state)
-        && !u.only_outputs.is_empty()
-        && !u.only_outputs.iter().any(|n| n.eq_ignore_ascii_case(&name))
-    {
-        return tracing::info!("{name}: skipped (not listed in --output)");
+    let name = connector_name(&connector);
+    tracing::info!("{name}: connected, modes: {}", describe_modes(&connector));
+    if !udev_data(state).is_some_and(|u| wants_enabled(u, &state.config, &name)) {
+        return tracing::info!("{name}: left off (disabled in config or not listed in --output)");
     }
-    let Some(&drm_mode) = connector
-        .modes()
-        .iter()
-        .find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED))
-        .or_else(|| connector.modes().first())
-    else {
+    let cfg = state.config.output(&name);
+    let Some(drm_mode) = pick_mode(&connector, cfg.mode) else {
         return tracing::warn!("{name}: no usable modes");
     };
     let mode = WlMode::from(drm_mode);
     tracing::info!(
-        "{name}: {}x{}@{}",
+        "{name}: using {}x{}@{}, scale {}",
         mode.size.w,
         mode.size.h,
-        mode.refresh as f32 / 1000.0
+        mode.refresh as f32 / 1000.0,
+        cfg.scale
     );
 
     let (phys_w, phys_h) = connector.size().unwrap_or((0, 0));
@@ -351,7 +498,7 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
     );
     let global = output.create_global::<State>(&state.display_handle);
 
-    // Place monitors left to right in the order they're found.
+    // Start right of the others; layout_monitors() puts it in its final place.
     let x: i32 = state
         .space
         .outputs()
@@ -360,7 +507,12 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
         .max()
         .unwrap_or(0);
     output.set_preferred(mode);
-    output.change_current_state(Some(mode), Some(Transform::Normal), None, Some((x, 0).into()));
+    output.change_current_state(
+        Some(mode),
+        Some(cfg.transform),
+        Some(Scale::Fractional(cfg.scale)),
+        Some((x, 0).into()),
+    );
     state.space.map_output(&output, (x, 0));
 
     let Some(gpu) = udev_data_mut(state).and_then(|u| u.gpu.as_mut()) else {
@@ -387,6 +539,8 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
         crtc,
         Surface {
             output: output.clone(),
+            connector: connector.handle(),
+            mode: drm_mode,
             drm_output,
             global,
             waiting_vblank: false,
@@ -398,17 +552,22 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
 }
 
 fn connector_disconnected(state: &mut State, connector: connector::Info, crtc: crtc::Handle) {
+    tracing::info!("{} disconnected", connector_name(&connector));
+    remove_surface(state, crtc);
+}
+
+/// Stop driving a monitor and forget it.
+fn remove_surface(state: &mut State, crtc: crtc::Handle) {
     let Some(gpu) = udev_data_mut(state).and_then(|u| u.gpu.as_mut()) else {
         return;
     };
     let Some(surface) = gpu.surfaces.remove(&crtc) else {
         return;
     };
-    tracing::info!(
-        "{}-{} disconnected",
-        connector.interface().as_str(),
-        connector.interface_id()
-    );
+    // Dropping a DrmOutput doesn't turn the screen off; clear the CRTC so it goes dark.
+    if let Err(e) = surface.drm_output.with_compositor(|c| c.clear()) {
+        tracing::debug!("could not turn off {}: {e}", surface.output.name());
+    }
     state.remove_monitor(&surface.output);
     state.space.unmap_output(&surface.output);
     state.display_handle.remove_global::<State>(surface.global);
@@ -490,7 +649,7 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
 
     if let (Some(output), Some(gpu)) = (&output, u.gpu.as_mut()) {
         let themed = match &state.cursor_status {
-            CursorImageStatus::Named(icon) => Some(u.cursor.get(*icon)),
+            CursorImageStatus::Named(icon) => Some(u.cursor.get(*icon, output.current_scale().integer_scale())),
             CursorImageStatus::Surface(_) => None,
             CursorImageStatus::Hidden => None,
         };

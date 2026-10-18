@@ -9,11 +9,14 @@ use smithay::{
 };
 use xcursor::{CursorTheme, parser::parse_xcursor};
 
+type Image = (MemoryRenderBuffer, Point<i32, Logical>);
+
 pub struct Cursor {
     theme: CursorTheme,
     size: u32,
-    /// Loaded per icon name; only the first frame is used so an idle desktop never redraws.
-    cache: HashMap<&'static str, (MemoryRenderBuffer, Point<i32, Logical>)>,
+    /// Loaded per icon name and scale; only the first frame is used so an idle desktop never
+    /// redraws.
+    cache: HashMap<(&'static str, i32), Image>,
 }
 
 impl Cursor {
@@ -31,41 +34,46 @@ impl Cursor {
     }
 
     /// Buffer and hotspot for a named cursor, falling back to the default arrow.
-    pub fn get(&mut self, icon: CursorIcon) -> (MemoryRenderBuffer, Point<i32, Logical>) {
-        if let Some(hit) = self.cache.get(icon.name()) {
+    /// `scale` is the monitor's scale rounded up, so the image is sharp on HiDPI screens.
+    pub fn get(&mut self, icon: CursorIcon, scale: i32) -> Image {
+        let scale = scale.max(1);
+        if let Some(hit) = self.cache.get(&(icon.name(), scale)) {
             return hit.clone();
         }
         let loaded = self
-            .load(icon.name())
-            .or_else(|| icon.alt_names().iter().find_map(|n| self.load(n)))
-            .or_else(|| self.load("default"))
-            .or_else(|| self.load("left_ptr"))
+            .load(icon.name(), scale)
+            .or_else(|| icon.alt_names().iter().find_map(|n| self.load(n, scale)))
+            .or_else(|| self.load("default", scale))
+            .or_else(|| self.load("left_ptr", scale))
             .unwrap_or_else(fallback);
-        self.cache.insert(icon.name(), loaded.clone());
+        self.cache.insert((icon.name(), scale), loaded.clone());
         loaded
     }
 
-    fn load(&self, name: &str) -> Option<(MemoryRenderBuffer, Point<i32, Logical>)> {
+    fn load(&self, name: &str, scale: i32) -> Option<Image> {
         let path = self.theme.load_icon(name)?;
         let data = std::fs::read(path).ok()?;
         let images = parse_xcursor(&data)?;
-        let image = images
-            .iter()
-            .min_by_key(|img| (img.size as i32 - self.size as i32).abs())?;
+        let want = self.size as i32 * scale;
+        let image = images.iter().min_by_key(|img| (img.size as i32 - want).abs())?;
+        // Pick the buffer scale from the size we actually got, so a theme without big images
+        // still shows a normal-sized cursor.
+        let buffer_scale = (image.size as f64 / self.size as f64).round().max(1.0) as i32;
         let buffer = MemoryRenderBuffer::from_slice(
             &image.pixels_rgba,
             Fourcc::Abgr8888,
             (image.width as i32, image.height as i32),
-            1,
+            buffer_scale,
             Transform::Normal,
             None,
         );
-        Some((buffer, (image.xhot as i32, image.yhot as i32).into()))
+        let hotspot = (image.xhot as i32 / buffer_scale, image.yhot as i32 / buffer_scale);
+        Some((buffer, hotspot.into()))
     }
 }
 
 /// A plain arrow, used when no cursor theme is installed.
-fn fallback() -> (MemoryRenderBuffer, Point<i32, Logical>) {
+fn fallback() -> Image {
     const W: usize = 12;
     const H: usize = 18;
     let mut px = vec![0u8; W * H * 4];
@@ -102,16 +110,16 @@ mod tests {
             size: 24,
             cache: HashMap::new(),
         };
-        let (_, hotspot) = c.load("default").expect("Adwaita default cursor should load");
+        let (_, hotspot) = c.load("default", 1).expect("Adwaita default cursor should load");
         assert!(hotspot.x >= 0 && hotspot.y >= 0);
     }
 
     #[test]
     fn unknown_icons_fall_back_to_default() {
         let mut c = Cursor::new();
-        c.get(CursorIcon::Default);
-        c.get(CursorIcon::ZoomIn);
-        assert!(c.cache.contains_key("default"));
-        assert!(c.cache.contains_key("zoom-in"));
+        c.get(CursorIcon::Default, 1);
+        c.get(CursorIcon::ZoomIn, 2);
+        assert!(c.cache.contains_key(&("default", 1)));
+        assert!(c.cache.contains_key(&("zoom-in", 2)));
     }
 }

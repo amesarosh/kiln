@@ -147,3 +147,19 @@ pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
 # app_id = "firefox"
 # workspace = 2
 # output = "DP-5"   # open on this monitor (names are in the log)
+
+# Monitors, matched by connector name (e.g. "DP-1", "HDMI-A-1", "eDP-1"). The
+# log lists each connected monitor with its name and available modes. Monitors
+# you don't list use their preferred mode at scale 1. Every key but `name` is
+# optional. Changes apply when you save.
+#
+# [[outputs]]
+# name = "DP-1"
+# mode = "2560x1440@144"   # "WIDTHxHEIGHT", "WIDTHxHEIGHT@HZ" or "preferred"
+# scale = 1.5              # 0.5 to 4; fractions work, whole numbers look sharpest
+# position = [0, 0]        # in scaled pixels; unset monitors go to the right of set ones
+# transform = "normal"     # "90", "180", "270", "flipped", "flipped-90", ... (counter-clockwise)
+#
+# [[outputs]]
+# name = "HDMI-A-1"
+# enabled = false          # leave this monitor off (at least one always stays on)

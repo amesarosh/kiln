@@ -15,8 +15,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 
 - **Nested** inside an existing X11 or Wayland session (development setup): working.
 - **TTY / real hardware** (DRM/KMS, libinput, libseat): implemented, needs testing on more machines.
-  Single GPU only. Monitors are placed left to right in the order they're detected; positions,
-  modes and scale aren't configurable yet.
+  Single GPU only. Mode, scale, position and rotation are set per monitor with `[[outputs]]`.
 
 ## Build and run
 
@@ -93,6 +92,33 @@ to it, middle-click a tab to close that window, click the layout name to cycle l
 over the bar or empty desktop to change workspace. It works alongside waybar; set
 `bar.enabled = false` to use waybar alone.
 
+### Monitor settings
+
+Each `[[outputs]]` entry sets up one monitor by its connector name. The log shows the names and
+modes of connected monitors.
+
+```toml
+[[outputs]]
+name = "DP-1"
+mode = "2560x1440@144"
+scale = 1.5
+position = [0, 0]
+
+[[outputs]]
+name = "HDMI-A-1"
+position = [1707, 0]   # right of DP-1: 2560 / 1.5 ≈ 1707
+transform = "90"       # rotated to portrait
+
+[[outputs]]
+name = "eDP-1"
+enabled = false
+```
+
+Positions are in scaled pixels, so a 2560-wide monitor at scale 1.5 is 1707 wide. Monitors
+without a `position` are placed left to right after the ones that have one. Apps are asked to
+draw at the scale rounded up, and the compositor shrinks them for fractional scales. Nested, only
+`scale` applies (the fake monitors are named `winit` or `winit-1`, `winit-2`…).
+
 ### Config file
 
 Any section or key you leave out uses the default, so a config can be as small as:
@@ -148,7 +174,7 @@ monitors: `WAYLAND_TIME_NESTED_OUTPUTS=2 cargo run -- -b winit`.
 
 ## Roadmap
 
-1. Output config (mode, scale, position, 10-bit), multi-GPU.
+1. 10-bit output, multi-GPU.
 2. Session lock (screen locker) and idle handling, which a real session needs.
 3. XWayland for X11-only apps.
 4. IPC socket for status bars and scripting (workspace state, focused window, run actions).

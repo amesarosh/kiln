@@ -7,9 +7,12 @@ use std::{
 };
 
 use serde::Deserialize;
-use smithay::input::keyboard::{
-    ModifiersState,
-    xkb::{self, Keysym},
+use smithay::{
+    input::keyboard::{
+        ModifiersState,
+        xkb::{self, Keysym},
+    },
+    utils::Transform,
 };
 
 use crate::layout::{LayoutKind, Params};
@@ -30,6 +33,8 @@ struct RawConfig {
     binds: BTreeMap<String, String>,
     #[serde(default)]
     rules: Vec<WindowRule>,
+    #[serde(default)]
+    outputs: Vec<RawOutput>,
 }
 
 /// User files may omit any section; missing pieces come from the default config.
@@ -44,6 +49,7 @@ struct PartialConfig {
     input: Option<toml::Table>,
     binds: Option<BTreeMap<String, String>>,
     rules: Option<Vec<toml::Table>>,
+    outputs: Option<Vec<toml::Table>>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -145,7 +151,58 @@ pub struct WindowRule {
     pub output: Option<String>,
 }
 
+/// One `[[outputs]]` entry: settings for a monitor, matched by connector name.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOutput {
+    name: String,
+    #[serde(default = "yes")]
+    enabled: bool,
+    mode: Option<String>,
+    scale: Option<f64>,
+    position: Option<[i32; 2]>,
+    transform: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
 // ---------- validated config ----------
+
+/// A requested resolution, with an optional refresh rate in Hz.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModeSpec {
+    pub width: i32,
+    pub height: i32,
+    pub refresh: Option<f64>,
+}
+
+/// Settings for one monitor. Anything left out keeps the monitor's own default.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OutputConfig {
+    pub name: String,
+    pub enabled: bool,
+    /// None: the monitor's preferred mode.
+    pub mode: Option<ModeSpec>,
+    pub scale: f64,
+    /// None: placed to the right of the other monitors.
+    pub position: Option<(i32, i32)>,
+    pub transform: Transform,
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: true,
+            mode: None,
+            scale: 1.0,
+            position: None,
+            transform: Transform::Normal,
+        }
+    }
+}
 
 pub type Color = [f32; 4];
 
@@ -183,6 +240,7 @@ pub struct Config {
     pub input: InputConfig,
     pub binds: Vec<Bind>,
     pub rules: Vec<WindowRule>,
+    pub outputs: Vec<OutputConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -338,6 +396,12 @@ impl Config {
                 toml::Value::Array(rules.into_iter().map(toml::Value::Table).collect()),
             );
         }
+        if let Some(outputs) = user.outputs {
+            base.insert(
+                "outputs".into(),
+                toml::Value::Array(outputs.into_iter().map(toml::Value::Table).collect()),
+            );
+        }
 
         let raw: RawConfig = base.try_into().map_err(|e: toml::de::Error| err(e.to_string()))?;
         Self::validate(raw)
@@ -425,6 +489,36 @@ impl Config {
             }
         }
 
+        let mut outputs: Vec<OutputConfig> = Vec::with_capacity(raw.outputs.len());
+        for o in raw.outputs {
+            let at = format!("outputs \"{}\"", o.name);
+            if outputs.iter().any(|x| x.name.eq_ignore_ascii_case(&o.name)) {
+                problems.push(format!("{at}: listed twice"));
+            }
+            let mode = o.mode.as_deref().filter(|m| *m != "preferred").and_then(|m| {
+                parse_mode(m)
+                    .map_err(|e| problems.push(format!("{at}: mode: {e}")))
+                    .ok()
+            });
+            let scale = o.scale.unwrap_or(1.0);
+            if !(0.5..=4.0).contains(&scale) {
+                problems.push(format!("{at}: scale must be between 0.5 and 4"));
+            }
+            let transform = o.transform.as_deref().map_or(Ok(Transform::Normal), parse_transform);
+            let transform = transform.unwrap_or_else(|e| {
+                problems.push(format!("{at}: transform: {e}"));
+                Transform::Normal
+            });
+            outputs.push(OutputConfig {
+                name: o.name,
+                enabled: o.enabled,
+                mode,
+                scale,
+                position: o.position.map(|[x, y]| (x, y)),
+                transform,
+            });
+        }
+
         if !problems.is_empty() {
             return Err(err(problems.join("\n")));
         }
@@ -438,7 +532,20 @@ impl Config {
             input: raw.input,
             binds,
             rules: raw.rules,
+            outputs,
         })
+    }
+
+    /// Settings for a monitor by connector name; defaults if it isn't listed.
+    pub fn output(&self, name: &str) -> OutputConfig {
+        self.outputs
+            .iter()
+            .find(|o| o.name.eq_ignore_ascii_case(name))
+            .cloned()
+            .unwrap_or_else(|| OutputConfig {
+                name: name.to_string(),
+                ..Default::default()
+            })
     }
 
     pub fn layout_params(&self) -> Params {
@@ -566,6 +673,47 @@ fn parse_action(s: &str) -> Result<Action, String> {
     })
 }
 
+/// "2560x1440" or "2560x1440@144" (refresh in Hz, decimals allowed).
+fn parse_mode(s: &str) -> Result<ModeSpec, String> {
+    let bad = || format!("\"{s}\" is not WIDTHxHEIGHT or WIDTHxHEIGHT@HZ");
+    let (size, refresh) = match s.split_once('@') {
+        Some((size, hz)) => {
+            let hz: f64 = hz.trim().trim_end_matches("Hz").parse().map_err(|_| bad())?;
+            if hz <= 0.0 {
+                return Err(bad());
+            }
+            (size, Some(hz))
+        }
+        None => (s, None),
+    };
+    let (w, h) = size.split_once('x').ok_or_else(bad)?;
+    let width: i32 = w.trim().parse().map_err(|_| bad())?;
+    let height: i32 = h.trim().parse().map_err(|_| bad())?;
+    if width <= 0 || height <= 0 {
+        return Err(bad());
+    }
+    Ok(ModeSpec { width, height, refresh })
+}
+
+/// Rotation in degrees counter-clockwise, optionally mirrored first.
+fn parse_transform(s: &str) -> Result<Transform, String> {
+    Ok(match s {
+        "normal" | "0" => Transform::Normal,
+        "90" => Transform::_90,
+        "180" => Transform::_180,
+        "270" => Transform::_270,
+        "flipped" => Transform::Flipped,
+        "flipped-90" => Transform::Flipped90,
+        "flipped-180" => Transform::Flipped180,
+        "flipped-270" => Transform::Flipped270,
+        _ => {
+            return Err(format!(
+                "\"{s}\" is not normal, 90, 180, 270, flipped, flipped-90, flipped-180 or flipped-270"
+            ));
+        }
+    })
+}
+
 /// "#rgb", "#rrggbb", or "#rrggbbaa"
 fn parse_color(s: &str) -> Result<Color, String> {
     let hex = s
@@ -667,6 +815,37 @@ mod tests {
         assert!(parse_action("workspace 0").is_err());
         assert!(parse_action("focus up").is_err());
         assert!(parse_action("spawn").is_err());
+    }
+
+    #[test]
+    fn outputs() {
+        let c = Config::parse_user(
+            "[[outputs]]\nname = \"DP-1\"\nmode = \"2560x1440@143.9\"\nscale = 1.5\nposition = [0, 0]\ntransform = \"90\"\n\
+             [[outputs]]\nname = \"HDMI-A-1\"\nenabled = false\n",
+        )
+        .unwrap();
+        let dp = c.output("dp-1");
+        assert_eq!(
+            dp.mode,
+            Some(ModeSpec {
+                width: 2560,
+                height: 1440,
+                refresh: Some(143.9)
+            })
+        );
+        assert_eq!((dp.scale, dp.position, dp.transform), (1.5, Some((0, 0)), Transform::_90));
+        assert!(!c.output("HDMI-A-1").enabled);
+        assert_eq!(c.output("eDP-1"), OutputConfig { name: "eDP-1".into(), ..Default::default() });
+        assert_eq!(parse_mode("1920x1080").unwrap().refresh, None);
+        assert!(parse_mode("1920").is_err());
+        assert!(parse_mode("1920x1080@0").is_err());
+
+        let e = Config::parse_user(
+            "[[outputs]]\nname = \"DP-1\"\nscale = 9\ntransform = \"sideways\"\n[[outputs]]\nname = \"dp-1\"\n",
+        )
+        .unwrap_err()
+        .0;
+        assert!(e.contains("scale") && e.contains("transform") && e.contains("twice"), "{e}");
     }
 
     #[test]

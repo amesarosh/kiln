@@ -17,9 +17,9 @@ use smithay::{
     desktop::{Window, layer_map_for_output},
     input::pointer::{CursorImageAttributes, CursorImageStatus},
     output::Output,
-    reexports::wayland_server::Resource,
-    utils::{Logical, Physical, Point, Rectangle, Scale},
-    wayland::compositor::with_states,
+    reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
+    utils::{Logical, Physical, Point, Rectangle, Scale, Transform},
+    wayland::compositor::{SurfaceData, send_surface_state, with_states},
     wayland::shell::wlr_layer::Layer,
 };
 
@@ -223,15 +223,22 @@ fn push_border<R>(
 pub fn send_frames(state: &mut State, output: &Output) {
     let time = state.start_time.elapsed();
     let first_output = state.space.outputs().next() == Some(output);
+    // Apps on this monitor render at its scale (rounded up; we downscale for fractions).
+    let buffer_scale = output.current_scale().integer_scale();
+    let hint = |surface: &WlSurface, data: &SurfaceData| send_surface_state(surface, data, buffer_scale, Transform::Normal);
     for window in state.space.elements() {
         // Paced by the monitor they're on. Windows on no monitor (not placed yet) use the first.
         let outputs = state.space.outputs_for_element(window);
         if outputs.contains(output) || (outputs.is_empty() && first_output) {
             window.send_frame(output, time, Some(Duration::ZERO), |_, _| Some(output.clone()));
         }
+        if main_output(state, window).as_ref() == Some(output) {
+            window.with_surfaces(hint);
+        }
     }
     for layer in layer_map_for_output(output).layers() {
         layer.send_frame(output, time, Some(Duration::ZERO), |_, _| Some(output.clone()));
+        layer.with_surfaces(hint);
     }
     if let CursorImageStatus::Surface(surface) = &state.cursor_status {
         smithay::desktop::utils::send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
@@ -240,4 +247,20 @@ pub fn send_frames(state: &mut State, output: &Output) {
     }
     state.space.refresh();
     state.popups.cleanup();
+}
+
+/// The monitor showing most of a window.
+fn main_output(state: &State, window: &Window) -> Option<Output> {
+    let geo = state.space.element_geometry(window)?;
+    state
+        .space
+        .outputs_for_element(window)
+        .into_iter()
+        .max_by_key(|o| {
+            state
+                .space
+                .output_geometry(o)
+                .and_then(|g| g.intersection(geo))
+                .map_or(0, |r| r.size.w as i64 * r.size.h as i64)
+        })
 }
