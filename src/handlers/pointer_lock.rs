@@ -125,7 +125,12 @@ impl PointerConstraintsHandler for State {
 
     /// A locked client says where it drew the cursor (Xwayland uses this for pointer warps).
     /// Move ours there without telling clients, so the cursor shows up in the right place.
-    fn cursor_position_hint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>, location: Point<f64, Logical>) {
+    fn cursor_position_hint(
+        &mut self,
+        surface: &WlSurface,
+        pointer: &PointerHandle<Self>,
+        location: Point<f64, Logical>,
+    ) {
         let active = with_pointer_constraint(surface, pointer, |c| c.is_some_and(|c| c.is_active()));
         if !active {
             return;

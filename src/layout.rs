@@ -54,8 +54,10 @@ pub struct Params {
     pub smart_gaps: bool,
 }
 
-/// Compute one rectangle per tiled window, in order.
-pub fn arrange(kind: LayoutKind, n: usize, area: Rect, p: &Params) -> Vec<Rect> {
+/// Compute one rectangle per tiled window, in order. `weights` has one entry per window:
+/// its share of its column's height (all 1.0 means equal rows).
+pub fn arrange(kind: LayoutKind, weights: &[f32], area: Rect, p: &Params) -> Vec<Rect> {
+    let n = weights.len();
     if n == 0 {
         return Vec::new();
     }
@@ -69,11 +71,12 @@ pub fn arrange(kind: LayoutKind, n: usize, area: Rect, p: &Params) -> Vec<Rect> 
 
     match kind {
         LayoutKind::Monocle => vec![area; n],
-        LayoutKind::Tile => tile(n, area, p, inner),
+        LayoutKind::Tile => tile(weights, area, p, inner),
     }
 }
 
-fn tile(n: usize, area: Rect, p: &Params, gap: i32) -> Vec<Rect> {
+fn tile(weights: &[f32], area: Rect, p: &Params, gap: i32) -> Vec<Rect> {
+    let n = weights.len();
     let masters = p.master_count.min(n);
     let stack = n - masters;
 
@@ -93,27 +96,35 @@ fn tile(n: usize, area: Rect, p: &Params, gap: i32) -> Vec<Rect> {
 
     let mut out = Vec::with_capacity(n);
     if let Some(col) = master_col {
-        split_vertical(col, masters, gap, &mut out);
+        split_vertical(col, &weights[..masters], gap, &mut out);
     }
     if let Some(col) = stack_col {
-        split_vertical(col, stack, gap, &mut out);
+        split_vertical(col, &weights[masters..], gap, &mut out);
     }
     out
 }
 
-/// Split a column into `count` rows separated by `gap`, giving leftover pixels to the last row.
-fn split_vertical(col: Rect, count: usize, gap: i32, out: &mut Vec<Rect>) {
-    if count == 0 {
+/// Split a column into rows sized by `weights`, separated by `gap`. The last row takes
+/// whatever is left, so the column is filled exactly.
+fn split_vertical(col: Rect, weights: &[f32], gap: i32, out: &mut Vec<Rect>) {
+    if weights.is_empty() {
         return;
     }
-    let count_i = count as i32;
-    let usable = (col.h - gap * (count_i - 1)).max(count_i);
-    let each = usable / count_i;
+    let count = weights.len() as i32;
+    let usable = (col.h - gap * (count - 1)).max(count);
+    let total: f32 = weights.iter().map(|w| w.max(0.0)).sum();
     let mut y = col.y;
-    for i in 0..count_i {
-        let h = if i == count_i - 1 { col.y + col.h - y } else { each };
-        out.push(Rect::new(col.x, y, col.w, h.max(1)));
-        y += each + gap;
+    for (i, w) in weights.iter().enumerate() {
+        let h = if i as i32 == count - 1 {
+            col.y + col.h - y
+        } else if total > 0.0 {
+            (usable as f32 * w.max(0.0) / total).round() as i32
+        } else {
+            usable / count
+        };
+        let h = h.max(1);
+        out.push(Rect::new(col.x, y, col.w, h));
+        y += h + gap;
     }
 }
 
@@ -135,12 +146,12 @@ mod tests {
 
     #[test]
     fn empty() {
-        assert!(arrange(LayoutKind::Tile, 0, AREA, &params()).is_empty());
+        assert!(arrange(LayoutKind::Tile, &[1.0; 0], AREA, &params()).is_empty());
     }
 
     #[test]
     fn single_window_fills_area_minus_outer_gap() {
-        let r = arrange(LayoutKind::Tile, 1, AREA, &params());
+        let r = arrange(LayoutKind::Tile, &[1.0; 1], AREA, &params());
         assert_eq!(r, vec![Rect::new(10, 10, 980, 780)]);
     }
 
@@ -150,12 +161,12 @@ mod tests {
             smart_gaps: true,
             ..params()
         };
-        assert_eq!(arrange(LayoutKind::Tile, 1, AREA, &p), vec![AREA]);
+        assert_eq!(arrange(LayoutKind::Tile, &[1.0; 1], AREA, &p), vec![AREA]);
     }
 
     #[test]
     fn master_and_stack() {
-        let r = arrange(LayoutKind::Tile, 3, AREA, &params());
+        let r = arrange(LayoutKind::Tile, &[1.0; 3], AREA, &params());
         // usable width 980, minus 10 gap = 970, half = 485
         assert_eq!(r[0], Rect::new(10, 10, 485, 780));
         assert_eq!(r[1], Rect::new(505, 10, 485, 385));
@@ -165,7 +176,7 @@ mod tests {
     #[test]
     fn rows_fill_column_exactly() {
         let mut out = Vec::new();
-        split_vertical(Rect::new(0, 0, 100, 101), 3, 5, &mut out);
+        split_vertical(Rect::new(0, 0, 100, 101), &[1.0; 3], 5, &mut out);
         let last = out.last().unwrap();
         assert_eq!(last.y + last.h, 101);
     }
@@ -176,14 +187,24 @@ mod tests {
             master_count: 0,
             ..params()
         };
-        let r = arrange(LayoutKind::Tile, 2, AREA, &p);
+        let r = arrange(LayoutKind::Tile, &[1.0; 2], AREA, &p);
         assert_eq!(r[0].w, 980);
         assert_eq!(r[1].w, 980);
     }
 
     #[test]
+    fn weights_share_a_column() {
+        // Stack column: 3 rows, the first twice as tall. Usable height 780 - 2*10 = 760.
+        let r = arrange(LayoutKind::Tile, &[1.0, 2.0, 1.0, 1.0], AREA, &params());
+        assert_eq!(r[1].h, 380);
+        assert_eq!(r[2].h, 190);
+        assert_eq!(r[3].y + r[3].h, 790, "column still filled exactly");
+        assert_eq!(r[2].y, r[1].y + r[1].h + 10);
+    }
+
+    #[test]
     fn monocle_gives_everyone_the_full_area() {
-        let r = arrange(LayoutKind::Monocle, 3, AREA, &params());
+        let r = arrange(LayoutKind::Monocle, &[1.0; 3], AREA, &params());
         assert!(r.iter().all(|x| *x == Rect::new(10, 10, 980, 780)));
     }
 }

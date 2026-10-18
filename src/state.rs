@@ -226,7 +226,8 @@ impl State {
         let viewporter_state = ViewporterState::new::<Self>(&dh);
         let fractional_scale_state = FractionalScaleManagerState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
-        let pointer_constraints_state = smithay::wayland::pointer_constraints::PointerConstraintsState::new::<Self>(&dh);
+        let pointer_constraints_state =
+            smithay::wayland::pointer_constraints::PointerConstraintsState::new::<Self>(&dh);
         let relative_pointer_state = smithay::wayland::relative_pointer::RelativePointerManagerState::new::<Self>(&dh);
         let activation_state = smithay::wayland::xdg_activation::XdgActivationState::new::<Self>(&dh);
         Self::create_output_power_global(&dh);
@@ -794,6 +795,20 @@ impl State {
         self.update_idle_inhibit();
     }
 
+    /// Where the tiled windows of a monitor's workspace go, in tiling order (borders included).
+    pub fn tile_rects(&self, mon: usize, area: Rectangle<i32, Logical>) -> Vec<Rect> {
+        let ws = self.monitors[mon].ws();
+        let mut params = self.config.layout_params();
+        params.master_ratio = ws.master_ratio;
+        params.master_count = ws.master_count;
+        layout::arrange(
+            ws.layout,
+            &ws.tiled_weights(),
+            Rect::new(area.loc.x, area.loc.y, area.size.w, area.size.h),
+            &params,
+        )
+    }
+
     fn arrange_monitor(&mut self, mon: usize) {
         let output = self.monitors[mon].output.clone();
         let Some(output_geo) = self.space.output_geometry(&output) else {
@@ -820,15 +835,7 @@ impl State {
         }
 
         let tiled: Vec<Window> = ws.tiled().cloned().collect();
-        let mut params = self.config.layout_params();
-        params.master_ratio = ws.master_ratio;
-        params.master_count = ws.master_count;
-        let rects = layout::arrange(
-            ws.layout,
-            tiled.len(),
-            Rect::new(area.loc.x, area.loc.y, area.size.w, area.size.h),
-            &params,
-        );
+        let rects = self.tile_rects(mon, area);
         let monocle = ws.layout == layout::LayoutKind::Monocle;
         let focus = ws.focus.clone();
         let floating: Vec<(Window, Rect)> = ws.floating().map(|(w, r)| (w.clone(), r)).collect();

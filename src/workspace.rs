@@ -12,6 +12,8 @@ pub struct Entry<W> {
     pub window: W,
     /// `Some` when floating. Size of zero means "not placed yet, center once the client picks a size".
     pub floating: Option<Rect>,
+    /// Share of its tiling column's height; 1.0 is an equal share. Changed by Mod+right-drag.
+    pub weight: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +59,15 @@ impl<W: Clone + PartialEq> Workspace<W> {
         self.entry(w).is_some_and(|e| e.floating.is_some())
     }
 
+    /// Height shares of the tiled windows, in tiling order.
+    pub fn tiled_weights(&self) -> Vec<f32> {
+        self.entries
+            .iter()
+            .filter(|e| e.floating.is_none())
+            .map(|e| e.weight)
+            .collect()
+    }
+
     pub fn tiled(&self) -> impl Iterator<Item = &W> {
         self.entries.iter().filter(|e| e.floating.is_none()).map(|e| &e.window)
     }
@@ -69,6 +80,7 @@ impl<W: Clone + PartialEq> Workspace<W> {
         let entry = Entry {
             window: window.clone(),
             floating,
+            weight: 1.0,
         };
         if at_master {
             self.entries.insert(0, entry);

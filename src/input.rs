@@ -67,7 +67,11 @@ impl State {
                 match self.pointer_constraint() {
                     // The app gets the movement, but the cursor stays put.
                     Constraint::Locked => return self.send_relative_only(relative),
-                    Constraint::Confined { surface, origin, region } => {
+                    Constraint::Confined {
+                        surface,
+                        origin,
+                        region,
+                    } => {
                         let stays = self.surface_under(pos).is_some_and(|(s, _)| s == surface)
                             && region.is_none_or(|r| r.contains((pos - origin).to_i32_round()));
                         if !stays {

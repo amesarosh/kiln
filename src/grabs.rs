@@ -1,4 +1,5 @@
-//! Interactive move and resize. Both make a tiled window floating, like dwm.
+//! Interactive move and resize. Moving makes a tiled window floating, like dwm. Resizing a
+//! tiled window keeps it tiled and moves the borders it shares with its neighbours.
 
 use smithay::{
     desktop::Window,
@@ -19,7 +20,13 @@ use smithay::{
 
 use smithay::wayland::seat::WaylandFocus;
 
-use crate::{layout::Rect, state::State};
+use crate::{
+    layout::{LayoutKind, Rect},
+    state::State,
+};
+
+/// Rows can't be dragged smaller than this.
+const MIN_TILE_HEIGHT: i32 = 50;
 
 /// Start a move from a client request (title bar drag). Validates the client actually holds a click.
 pub fn start_move(state: &mut State, seat: &Seat<State>, window: Window, serial: Serial) {
@@ -75,6 +82,14 @@ pub fn begin_resize(
     start: GrabStartData<State>,
     serial: Serial,
 ) {
+    if let Some(tiled) = tiled_resize(state, &window, &start) {
+        state.focus_window(&window);
+        let grab = TileResizeGrab { start, tiled };
+        if let Some(pointer) = seat.get_pointer() {
+            pointer.set_grab(state, grab, serial, Focus::Clear);
+        }
+        return;
+    }
     let Some(geo) = float_window(state, &window) else {
         return;
     };
@@ -117,6 +132,110 @@ fn client_grab_start(seat: &Seat<State>, window: &Window, serial: Serial) -> Opt
     let (focus, _) = start.focus.as_ref()?;
     let surface = window.wl_surface()?;
     focus.id().same_client_as(&surface.id()).then_some(start)
+}
+
+/// What a drag on a tiled window can change, measured when the drag starts.
+struct TiledResize {
+    window: Window,
+    /// Sideways: the master ratio at the start, and the pixel width it is a fraction of.
+    split: Option<(f32, f64)>,
+    /// Up and down: the border between two rows of one column.
+    rows: Option<Rows>,
+}
+
+struct Rows {
+    upper: Window,
+    lower: Window,
+    /// Heights in pixels and weights at the start.
+    heights: (i32, i32),
+    weights: (f32, f32),
+}
+
+/// Set up a tiled resize, or None if the window isn't tiled (then it floats as before).
+/// Monocle has nothing to share space with, so it floats too.
+fn tiled_resize(state: &State, window: &Window, start: &GrabStartData<State>) -> Option<TiledResize> {
+    let mon = state.monitor_showing(window)?;
+    let ws = state.monitors[mon].ws();
+    if ws.layout != LayoutKind::Tile || ws.fullscreen.is_some() || ws.is_floating(window) {
+        return None;
+    }
+    let tiled: Vec<Window> = ws.tiled().cloned().collect();
+    let i = tiled.iter().position(|w| w == window)?;
+    let rects = state.tile_rects(mon, state.work_area(mon)?);
+    let weights = ws.tiled_weights();
+    let n = tiled.len();
+    let masters = ws.master_count.min(n);
+
+    // Master and stack column widths add up to the width the ratio divides.
+    let split = (masters > 0 && masters < n).then(|| (ws.master_ratio, (rects[0].w + rects[masters].w) as f64));
+
+    // Grabbing the top half moves the top border, the bottom half the bottom one; at the
+    // end of a column, use the only border there is.
+    let column = if i < masters { 0..masters } else { masters..n };
+    let r = rects[i];
+    let top_half = start.location.y < (r.y + r.h / 2) as f64;
+    let above = (i > column.start).then(|| i - 1);
+    let below = (i + 1 < column.end).then_some(i + 1);
+    let other = if top_half { above.or(below) } else { below.or(above) };
+    let rows = other.map(|j| {
+        let (a, b) = (i.min(j), i.max(j));
+        Rows {
+            upper: tiled[a].clone(),
+            lower: tiled[b].clone(),
+            heights: (rects[a].h, rects[b].h),
+            weights: (weights[a], weights[b]),
+        }
+    });
+
+    Some(TiledResize {
+        window: window.clone(),
+        split,
+        rows,
+    })
+}
+
+struct TileResizeGrab {
+    start: GrabStartData<State>,
+    tiled: TiledResize,
+}
+
+impl TileResizeGrab {
+    /// The borders follow the pointer.
+    fn on_motion(&mut self, state: &mut State, location: Point<f64, Logical>) {
+        let delta = location - self.start.location;
+        let t = &self.tiled;
+        let Some(ws) = state.workspace_of_mut(&t.window) else {
+            return;
+        };
+        let mut changed = false;
+        if let Some((ratio, width)) = t.split
+            && width > 0.0
+        {
+            let new = (ratio + (delta.x / width) as f32).clamp(0.05, 0.95);
+            changed |= new != ws.master_ratio;
+            ws.master_ratio = new;
+        }
+        if let Some(rows) = &t.rows {
+            let (ha, hb) = rows.heights;
+            let total = ha + hb;
+            let upper_h = (ha + delta.y.round() as i32)
+                .clamp(MIN_TILE_HEIGHT.min(total / 2), (total - MIN_TILE_HEIGHT).max(total / 2));
+            let sum = rows.weights.0 + rows.weights.1;
+            let wa = sum * upper_h as f32 / total.max(1) as f32;
+            if let Some(e) = ws.entry_mut(&rows.upper) {
+                changed |= e.weight != wa;
+                e.weight = wa;
+            }
+            if let Some(e) = ws.entry_mut(&rows.lower) {
+                e.weight = sum - wa;
+            }
+        }
+        if changed {
+            state.arrange();
+        }
+    }
+
+    fn on_release(&mut self, _state: &mut State, _location: Point<f64, Logical>) {}
 }
 
 struct MoveGrab {
@@ -302,3 +421,4 @@ macro_rules! impl_grab {
 
 impl_grab!(MoveGrab);
 impl_grab!(ResizeGrab);
+impl_grab!(TileResizeGrab);

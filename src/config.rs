@@ -940,11 +940,9 @@ mod tests {
 
     #[test]
     fn errors_are_collected() {
-        let e = Config::parse_user(
-            "[decoration]\nbackground = \"red\"\n[layout]\nmaster_ratio = 2.0\n",
-        )
-        .unwrap_err()
-        .0;
+        let e = Config::parse_user("[decoration]\nbackground = \"red\"\n[layout]\nmaster_ratio = 2.0\n")
+            .unwrap_err()
+            .0;
         assert!(e.contains("decoration.background = \"red\""), "{e}");
         assert!(e.contains("master_ratio"), "{e}");
     }
