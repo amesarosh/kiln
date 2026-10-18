@@ -1,9 +1,11 @@
+mod activation;
 mod compositor;
 pub mod foreign_toplevel;
 mod idle;
 mod layer_shell;
 pub mod lock;
 mod output_power;
+pub mod pointer_lock;
 pub mod screencopy;
 mod xdg_shell;
 pub mod xwayland;
@@ -64,6 +66,7 @@ impl SeatHandler for State {
                 Some(KeyboardFocusTarget::X11(x, _)) => format!("X11 window \"{}\"", x.title()),
             }
         );
+        self.keyboard_focus_moved = true;
         let dh = &self.display_handle;
         let client = focused
             .and_then(|f| f.wl_surface())

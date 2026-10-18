@@ -110,6 +110,13 @@ pub struct State {
     #[allow(dead_code)]
     pub fractional_scale_state: FractionalScaleManagerState,
     pub xwayland_shell_state: XWaylandShellState,
+    #[allow(dead_code)]
+    pub pointer_constraints_state: smithay::wayland::pointer_constraints::PointerConstraintsState,
+    #[allow(dead_code)]
+    pub relative_pointer_state: smithay::wayland::relative_pointer::RelativePointerManagerState,
+    pub activation_state: smithay::wayland::xdg_activation::XdgActivationState,
+    /// Set when keyboard focus changes; the main loop then re-checks pointer constraints.
+    pub keyboard_focus_moved: bool,
     /// The X11 window manager, once Xwayland is running.
     pub xwm: Option<X11Wm>,
     /// Xwayland's display number, set as `DISPLAY` for launched apps.
@@ -219,6 +226,9 @@ impl State {
         let viewporter_state = ViewporterState::new::<Self>(&dh);
         let fractional_scale_state = FractionalScaleManagerState::new::<Self>(&dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
+        let pointer_constraints_state = smithay::wayland::pointer_constraints::PointerConstraintsState::new::<Self>(&dh);
+        let relative_pointer_state = smithay::wayland::relative_pointer::RelativePointerManagerState::new::<Self>(&dh);
+        let activation_state = smithay::wayland::xdg_activation::XdgActivationState::new::<Self>(&dh);
         Self::create_output_power_global(&dh);
         Self::create_screencopy_global(&dh);
         let foreign_toplevels = crate::handlers::foreign_toplevel::ForeignToplevels::new(&dh);
@@ -270,6 +280,10 @@ impl State {
             viewporter_state,
             fractional_scale_state,
             xwayland_shell_state,
+            pointer_constraints_state,
+            relative_pointer_state,
+            activation_state,
+            keyboard_focus_moved: false,
             xwm: None,
             xdisplay: None,
             x11_unmanaged: Vec::new(),
@@ -1166,8 +1180,10 @@ impl State {
         self.refocus();
     }
 
-    pub fn spawn(&self, cmd: &str) {
+    pub fn spawn(&mut self, cmd: &str) {
         tracing::info!("spawn: {cmd}");
+        // Lets an app that's already running bring its window forward when launched again.
+        let token = self.launch_token();
         let mut command = Command::new("sh");
         command
             .arg("-c")
@@ -1176,6 +1192,8 @@ impl State {
             .env("XDG_SESSION_TYPE", "wayland")
             .env("XDG_CURRENT_DESKTOP", "wayland-time")
             .env("XDG_DATA_DIRS", xdg_data_dirs())
+            .env("XDG_ACTIVATION_TOKEN", &token)
+            .env("DESKTOP_STARTUP_ID", &token)
             .stdin(Stdio::null());
         // Never hand out the host's DISPLAY: X11 apps would open on another desktop.
         match self.xdisplay {

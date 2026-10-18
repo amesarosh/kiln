@@ -14,6 +14,7 @@ use crate::{
     bar::{BTN_LEFT, BTN_RIGHT},
     config::{Action, ModKey, Mods, normalize_keysym},
     grabs,
+    handlers::pointer_lock::Constraint,
     menu::MenuKey,
     state::State,
 };
@@ -61,12 +62,22 @@ impl State {
             InputEvent::Keyboard { event } => self.on_key::<I>(event),
             InputEvent::PointerMotion { event } => {
                 let delta = event.delta();
+                let relative = (delta, event.delta_unaccel(), event.time());
                 let pos = self.clamp_to_output(self.seat.get_pointer().unwrap().current_location() + delta);
-                self.on_pointer_moved(
-                    pos,
-                    event.time_msec(),
-                    Some((delta, event.delta_unaccel(), event.time())),
-                );
+                match self.pointer_constraint() {
+                    // The app gets the movement, but the cursor stays put.
+                    Constraint::Locked => return self.send_relative_only(relative),
+                    Constraint::Confined { surface, origin, region } => {
+                        let stays = self.surface_under(pos).is_some_and(|(s, _)| s == surface)
+                            && region.is_none_or(|r| r.contains((pos - origin).to_i32_round()));
+                        if !stays {
+                            return self.send_relative_only(relative);
+                        }
+                    }
+                    Constraint::None => {}
+                }
+                self.on_pointer_moved(pos, event.time_msec(), Some(relative));
+                self.maybe_activate_constraint();
             }
             InputEvent::PointerMotionAbsolute { event } => {
                 // Tablets and the nested window span all monitors.
@@ -79,7 +90,12 @@ impl State {
                     return;
                 };
                 let pos = event.position_transformed(geo.size) + geo.loc.to_f64();
+                // No relative motion to give a locked app, so just hold still.
+                if matches!(self.pointer_constraint(), Constraint::Locked) {
+                    return;
+                }
                 self.on_pointer_moved(pos, event.time_msec(), None);
+                self.maybe_activate_constraint();
             }
             InputEvent::PointerButton { event } => self.on_button::<I>(event),
             InputEvent::PointerAxis { event } => self.on_axis::<I>(event),
@@ -254,6 +270,22 @@ impl State {
                 },
             );
         }
+        pointer.frame(self);
+    }
+
+    /// Movement for an app that has locked or confined the pointer, without moving it.
+    fn send_relative_only(&mut self, (delta, delta_unaccel, utime): Relative) {
+        let pointer = self.seat.get_pointer().unwrap();
+        let focus = self.surface_under(pointer.current_location());
+        pointer.relative_motion(
+            self,
+            focus,
+            &RelativeMotionEvent {
+                delta,
+                delta_unaccel,
+                utime,
+            },
+        );
         pointer.frame(self);
     }
 

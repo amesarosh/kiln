@@ -200,6 +200,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.schedule_redraw();
         }
         state.track_focus_history();
+        state.sync_constraint_focus();
         state.refresh_foreign_toplevels();
         let _ = state.display_handle.flush_clients();
     })?;
