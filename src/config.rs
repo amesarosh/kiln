@@ -515,7 +515,9 @@ impl Config {
                     key,
                     action,
                 }),
-                (Err(e), _) | (_, Err(e)) => problems.push(format!("bind \"{combo}\": {e}")),
+                // Skip just this bind, so one typo (or a bind from a newer version) doesn't
+                // throw away the whole config.
+                (Err(e), _) | (_, Err(e)) => tracing::warn!("skipping bind \"{combo}\": {e}"),
             }
         }
 
@@ -939,13 +941,22 @@ mod tests {
     #[test]
     fn errors_are_collected() {
         let e = Config::parse_user(
-            "[binds]\n\"Mod+nope\" = \"close\"\n\"Mod+a\" = \"fly\"\n[decoration]\nbackground = \"red\"\n",
+            "[decoration]\nbackground = \"red\"\n[layout]\nmaster_ratio = 2.0\n",
         )
         .unwrap_err()
         .0;
-        assert!(e.contains("unknown key"), "{e}");
-        assert!(e.contains("unknown action"), "{e}");
         assert!(e.contains("decoration.background = \"red\""), "{e}");
+        assert!(e.contains("master_ratio"), "{e}");
+    }
+
+    #[test]
+    fn bad_binds_are_skipped() {
+        let c = Config::parse_user(
+            "[binds]\n\"Mod+nope\" = \"close\"\n\"Mod+a\" = \"fly\"\n\"Mod+x\" = \"close\"\n[layout]\ngaps_inner = 20\n",
+        )
+        .unwrap();
+        assert_eq!(c.binds.len(), 1);
+        assert_eq!(c.layout.gaps_inner, 20);
     }
 
     #[test]
