@@ -1,0 +1,225 @@
+//! Per-workspace window bookkeeping: order, focus, floating and fullscreen state.
+//!
+//! Generic over the window type so the logic can be tested without a compositor.
+
+use crate::{
+    config::Dir,
+    layout::{LayoutKind, Rect},
+};
+
+#[derive(Debug, Clone)]
+pub struct Entry<W> {
+    pub window: W,
+    /// `Some` when floating. Size of zero means "not placed yet, center once the client picks a size".
+    pub floating: Option<Rect>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Workspace<W> {
+    /// Tiling order: the first tiled entry is the master.
+    pub entries: Vec<Entry<W>>,
+    pub focus: Option<W>,
+    pub fullscreen: Option<W>,
+    pub layout: LayoutKind,
+    pub master_ratio: f32,
+    pub master_count: usize,
+}
+
+impl<W: Clone + PartialEq> Workspace<W> {
+    pub fn new(layout: LayoutKind, master_ratio: f32, master_count: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            focus: None,
+            fullscreen: None,
+            layout,
+            master_ratio,
+            master_count,
+        }
+    }
+
+    pub fn contains(&self, w: &W) -> bool {
+        self.index_of(w).is_some()
+    }
+
+    fn index_of(&self, w: &W) -> Option<usize> {
+        self.entries.iter().position(|e| &e.window == w)
+    }
+
+    pub fn entry(&self, w: &W) -> Option<&Entry<W>> {
+        self.entries.iter().find(|e| &e.window == w)
+    }
+
+    pub fn entry_mut(&mut self, w: &W) -> Option<&mut Entry<W>> {
+        self.entries.iter_mut().find(|e| &e.window == w)
+    }
+
+    pub fn is_floating(&self, w: &W) -> bool {
+        self.entry(w).is_some_and(|e| e.floating.is_some())
+    }
+
+    pub fn tiled(&self) -> impl Iterator<Item = &W> {
+        self.entries.iter().filter(|e| e.floating.is_none()).map(|e| &e.window)
+    }
+
+    pub fn floating(&self) -> impl Iterator<Item = (&W, Rect)> {
+        self.entries.iter().filter_map(|e| e.floating.map(|r| (&e.window, r)))
+    }
+
+    pub fn add(&mut self, window: W, at_master: bool, floating: Option<Rect>) {
+        let entry = Entry {
+            window: window.clone(),
+            floating,
+        };
+        if at_master {
+            self.entries.insert(0, entry);
+        } else {
+            self.entries.push(entry);
+        }
+        self.focus = Some(window);
+    }
+
+    /// Remove a window, moving focus to a neighbour. Returns false if it wasn't here.
+    pub fn remove(&mut self, w: &W) -> bool {
+        let Some(idx) = self.index_of(w) else { return false };
+        self.entries.remove(idx);
+        if self.fullscreen.as_ref() == Some(w) {
+            self.fullscreen = None;
+        }
+        if self.focus.as_ref() == Some(w) {
+            let next = idx.min(self.entries.len().saturating_sub(1));
+            self.focus = self.entries.get(next).map(|e| e.window.clone());
+        }
+        true
+    }
+
+    pub fn focus_dir(&mut self, dir: Dir) {
+        let n = self.entries.len();
+        if n == 0 {
+            return;
+        }
+        let cur = self.focus.as_ref().and_then(|f| self.index_of(f)).unwrap_or(0);
+        let next = step(cur, n, dir);
+        self.focus = Some(self.entries[next].window.clone());
+    }
+
+    /// Move the focused tiled window one slot through the tiled order (wrapping).
+    pub fn swap_dir(&mut self, dir: Dir) {
+        let Some(focus) = self.focus.clone() else { return };
+        let tiled: Vec<usize> = (0..self.entries.len())
+            .filter(|&i| self.entries[i].floating.is_none())
+            .collect();
+        let Some(pos) = tiled.iter().position(|&i| self.entries[i].window == focus) else {
+            return;
+        };
+        if tiled.len() < 2 {
+            return;
+        }
+        let other = tiled[step(pos, tiled.len(), dir)];
+        self.entries.swap(tiled[pos], other);
+    }
+
+    /// Swap the focused tiled window with the master. If it already is the master, swap with the next one.
+    pub fn zoom(&mut self) {
+        let Some(focus) = self.focus.clone() else { return };
+        let tiled: Vec<usize> = (0..self.entries.len())
+            .filter(|&i| self.entries[i].floating.is_none())
+            .collect();
+        let Some(pos) = tiled.iter().position(|&i| self.entries[i].window == focus) else {
+            return;
+        };
+        let target = match pos {
+            0 if tiled.len() > 1 => tiled[1],
+            0 => return,
+            _ => tiled[0],
+        };
+        self.entries.swap(tiled[pos], target);
+        // Keep focus on the window that is now master.
+        self.focus = Some(self.entries[tiled[0]].window.clone());
+    }
+}
+
+fn step(cur: usize, n: usize, dir: Dir) -> usize {
+    match dir {
+        Dir::Next => (cur + 1) % n,
+        Dir::Prev => (cur + n - 1) % n,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ws(ids: &[u32]) -> Workspace<u32> {
+        let mut w = Workspace::new(LayoutKind::Tile, 0.5, 1);
+        for &id in ids {
+            w.add(id, false, None);
+        }
+        w
+    }
+
+    fn order(w: &Workspace<u32>) -> Vec<u32> {
+        w.entries.iter().map(|e| e.window).collect()
+    }
+
+    #[test]
+    fn add_at_master_and_stack() {
+        let mut w = ws(&[1, 2]);
+        w.add(3, true, None);
+        assert_eq!(order(&w), vec![3, 1, 2]);
+        assert_eq!(w.focus, Some(3));
+    }
+
+    #[test]
+    fn remove_moves_focus_to_neighbour() {
+        let mut w = ws(&[1, 2, 3]);
+        w.focus = Some(3);
+        w.remove(&3);
+        assert_eq!(w.focus, Some(2));
+        w.focus = Some(1);
+        w.remove(&1);
+        assert_eq!(w.focus, Some(2));
+        w.remove(&2);
+        assert_eq!(w.focus, None);
+        assert!(!w.remove(&99));
+    }
+
+    #[test]
+    fn focus_wraps() {
+        let mut w = ws(&[1, 2, 3]);
+        w.focus = Some(3);
+        w.focus_dir(Dir::Next);
+        assert_eq!(w.focus, Some(1));
+        w.focus_dir(Dir::Prev);
+        assert_eq!(w.focus, Some(3));
+    }
+
+    #[test]
+    fn swap_skips_floating() {
+        let mut w = ws(&[1, 2, 3]);
+        w.entry_mut(&2).unwrap().floating = Some(Rect::new(0, 0, 10, 10));
+        w.focus = Some(1);
+        w.swap_dir(Dir::Next);
+        assert_eq!(order(&w), vec![3, 2, 1]);
+        assert_eq!(w.focus, Some(1));
+    }
+
+    #[test]
+    fn zoom_promotes_and_toggles() {
+        let mut w = ws(&[1, 2, 3]);
+        w.focus = Some(3);
+        w.zoom();
+        assert_eq!(order(&w), vec![3, 2, 1]);
+        assert_eq!(w.focus, Some(3));
+        w.zoom();
+        assert_eq!(order(&w), vec![2, 3, 1]);
+        assert_eq!(w.focus, Some(2));
+    }
+
+    #[test]
+    fn removing_fullscreen_clears_it() {
+        let mut w = ws(&[1, 2]);
+        w.fullscreen = Some(2);
+        w.remove(&2);
+        assert_eq!(w.fullscreen, None);
+    }
+}

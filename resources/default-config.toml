@@ -1,0 +1,113 @@
+# wayland-time configuration
+#
+# This file is reloaded automatically when you save it. If it has an error,
+# the previous working config stays active and the error is logged.
+
+[general]
+# Modifier used as "Mod" in keybinds: "super", "alt", "ctrl", or "auto".
+# "auto" uses Alt when running nested inside another desktop (so the host
+# doesn't steal Super), and Super when running on real hardware.
+mod = "auto"
+# Focus the window under the pointer as it moves.
+focus_follows_mouse = true
+# Where new tiled windows go: "master" (becomes the main window) or "stack".
+new_window = "master"
+# Commands run once at startup, through `sh -c`.
+autostart = []
+
+[layout]
+default = "tile"      # "tile" or "monocle"
+master_ratio = 0.55   # share of width given to the master column
+master_count = 1      # number of windows in the master column
+gaps_inner = 6        # pixels between windows
+gaps_outer = 6        # pixels between windows and screen edge
+smart_gaps = false    # drop gaps when only one window is visible
+workspaces = 9
+
+[decoration]
+border_width = 2
+border_active = "#89b4fa"
+border_inactive = "#313244"
+background = "#11111b"
+
+[keyboard]
+layout = "us"
+variant = ""
+options = ""        # e.g. "caps:escape,compose:ralt"
+repeat_rate = 30    # keys per second
+repeat_delay = 250  # milliseconds
+
+# Keybinds: "Modifiers+Key" = "action".
+# Modifiers: Mod, Super, Alt, Ctrl, Shift. Keys use xkb names (Return, space, a, 1, F1, ...).
+#
+# Actions:
+#   spawn <command>           run a command through `sh -c`
+#   close                     ask the focused window to close
+#   focus next|prev           move focus through the window list
+#   swap next|prev            move the focused window through the list
+#   zoom                      swap the focused window with the master
+#   master-ratio +0.05|-0.05  grow/shrink the master column
+#   master-count +1|-1        add/remove a master window
+#   layout tile|monocle|next  change the workspace layout
+#   toggle-floating           float or re-tile the focused window
+#   toggle-fullscreen
+#   workspace <n>             switch to workspace n
+#   move-to-workspace <n>     send the focused window to workspace n
+#   reload                    reload this file (it also reloads on save)
+#   quit                      exit the compositor
+#
+# Mouse: Mod+left-drag moves a window (and floats it), Mod+right-drag resizes it.
+# If you define a [binds] table, it replaces all of these defaults.
+[binds]
+"Mod+Return" = "spawn alacritty"
+"Mod+d" = "spawn fuzzel"
+"Mod+Shift+q" = "close"
+"Mod+Shift+e" = "quit"
+"Mod+Shift+r" = "reload"
+
+"Mod+j" = "focus next"
+"Mod+k" = "focus prev"
+"Mod+Shift+j" = "swap next"
+"Mod+Shift+k" = "swap prev"
+"Mod+Shift+Return" = "zoom"
+
+"Mod+h" = "master-ratio -0.05"
+"Mod+l" = "master-ratio +0.05"
+"Mod+i" = "master-count +1"
+"Mod+o" = "master-count -1"
+
+"Mod+t" = "layout tile"
+"Mod+m" = "layout monocle"
+"Mod+space" = "layout next"
+"Mod+Shift+space" = "toggle-floating"
+"Mod+f" = "toggle-fullscreen"
+
+"Mod+1" = "workspace 1"
+"Mod+2" = "workspace 2"
+"Mod+3" = "workspace 3"
+"Mod+4" = "workspace 4"
+"Mod+5" = "workspace 5"
+"Mod+6" = "workspace 6"
+"Mod+7" = "workspace 7"
+"Mod+8" = "workspace 8"
+"Mod+9" = "workspace 9"
+"Mod+Shift+1" = "move-to-workspace 1"
+"Mod+Shift+2" = "move-to-workspace 2"
+"Mod+Shift+3" = "move-to-workspace 3"
+"Mod+Shift+4" = "move-to-workspace 4"
+"Mod+Shift+5" = "move-to-workspace 5"
+"Mod+Shift+6" = "move-to-workspace 6"
+"Mod+Shift+7" = "move-to-workspace 7"
+"Mod+Shift+8" = "move-to-workspace 8"
+"Mod+Shift+9" = "move-to-workspace 9"
+
+# Window rules. `app_id` must match exactly; `title` matches if it is contained
+# in the window title. Both are optional, but at least one should be set.
+#
+# [[rules]]
+# app_id = "pavucontrol"
+# floating = true
+#
+# [[rules]]
+# app_id = "firefox"
+# workspace = 2
