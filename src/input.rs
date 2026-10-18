@@ -14,6 +14,7 @@ use crate::{
     bar::{BTN_LEFT, BTN_RIGHT},
     config::{Action, ModKey, Mods, normalize_keysym},
     grabs,
+    menu::MenuKey,
     state::State,
 };
 
@@ -24,6 +25,21 @@ const XF86_SWITCH_VT_1: u32 = 0x1008_FE01;
 const XF86_SWITCH_VT_12: u32 = 0x1008_FE0C;
 const XKB_BACKSPACE: u32 = 0xFF08;
 const XKB_TERMINATE_SERVER: u32 = 0xFED5;
+
+/// What a key does while a menu is open.
+fn menu_key_for(raw: u32) -> Option<MenuKey> {
+    use smithay::input::keyboard::keysyms as k;
+    Some(match raw {
+        k::KEY_Escape => MenuKey::Close,
+        k::KEY_Up | k::KEY_ISO_Left_Tab => MenuKey::Up,
+        k::KEY_Down | k::KEY_Tab => MenuKey::Down,
+        k::KEY_Left => MenuKey::Left,
+        k::KEY_Right => MenuKey::Right,
+        k::KEY_Return | k::KEY_KP_Enter | k::KEY_space => MenuKey::Pick,
+        k::KEY_1..=k::KEY_9 => MenuKey::Workspace((raw - k::KEY_1) as usize),
+        _ => return None,
+    })
+}
 
 impl State {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
@@ -78,6 +94,7 @@ impl State {
         let key_state = event.state();
 
         let mut mod_tapped = false;
+        let mut menu_key = None;
         let action =
             self.keyboard()
                 .input::<Option<Action>, _>(self, code, key_state, serial, time, |state, mods, handle| {
@@ -118,6 +135,15 @@ impl State {
                         state.suppressed_keys.push(code);
                         return FilterResult::Intercept(Some(Action::Quit));
                     }
+                    // An open menu takes the keys it knows; the rest work as usual.
+                    if state.menu.is_some()
+                        && !(mods.ctrl || mods.alt || mods.logo)
+                        && let Some(k) = menu_key_for(raw)
+                    {
+                        state.suppressed_keys.push(code);
+                        menu_key = Some(k);
+                        return FilterResult::Intercept(None);
+                    }
                     let sym = normalize_keysym(sym);
                     let pressed = Mods::from_state(mods);
                     let mod_key = state.mod_key();
@@ -136,6 +162,9 @@ impl State {
 
         if let Some(Some(action)) = action {
             self.run_action(action);
+        }
+        if let Some(k) = menu_key {
+            self.menu_key(k);
         }
         if mod_tapped && let Some(bind) = self.config.binds.iter().find(|b| b.key.is_none()) {
             self.run_action(bind.action.clone());
@@ -162,15 +191,18 @@ impl State {
             return;
         }
         self.bar_hover(pos);
-        if self.over_bar(pos) && !pointer.is_grabbed() {
+        self.menu_motion(pos);
+        if (self.over_bar(pos) || self.over_menu(pos)) && !pointer.is_grabbed() {
             // Clients don't reset the pointer when it leaves them, so show the normal arrow here.
             self.cursor_status = CursorImageStatus::default_named();
         }
 
-        if self.config.general.focus_follows_mouse && !pointer.is_grabbed() && self.focused_layer.is_none() {
+        // While a menu is open, hovering doesn't move focus away from what it's for.
+        let follow = self.config.general.focus_follows_mouse && self.menu.is_none();
+        if follow && !pointer.is_grabbed() && self.focused_layer.is_none() {
             self.focus_monitor_at(pos);
         }
-        if self.config.general.focus_follows_mouse
+        if follow
             && !pointer.is_grabbed()
             && !self.over_bar(pos)
             && self.layer_under(pos).is_none()
@@ -237,6 +269,20 @@ impl State {
             );
             pointer.frame(self);
             return;
+        }
+
+        // An open menu sees clicks first. A press it uses (or one that just closes it) goes no
+        // further, and neither does its release.
+        if self.menu.is_some() && !pointer.is_grabbed() {
+            match button_state {
+                ButtonState::Pressed => {
+                    if self.menu_press(pos) {
+                        self.bar.held_buttons.push(button);
+                        return;
+                    }
+                }
+                ButtonState::Released => self.menu_release(pos),
+            }
         }
 
         // Bar clicks are handled here and never reach clients, press or release.

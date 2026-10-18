@@ -8,6 +8,7 @@ mod handlers;
 mod icons;
 mod input;
 mod layout;
+mod menu;
 mod render;
 mod state;
 mod text;

@@ -129,6 +129,10 @@ pub struct State {
         smithay::reexports::wayland_protocols_wlr::output_power_management::v1::server::zwlr_output_power_v1::ZwlrOutputPowerV1,
         Output,
     )>,
+    /// The open pop-up menu, if any.
+    pub menu: Option<crate::menu::Menu>,
+    /// The theme font, loaded for menus; reloaded when `[theme] font` changes.
+    pub ui_text: Option<(String, crate::text::Text)>,
     /// Screencopy frames waiting for the screen to change.
     pub screencopy_pending: Vec<crate::handlers::screencopy::PendingCopy>,
     /// Which screencopy clients have seen each output's latest contents.
@@ -253,6 +257,8 @@ impl State {
             last_activity: Instant::now(),
             idle_power_timer: None,
             output_powers: Vec::new(),
+            menu: None,
+            ui_text: None,
             screencopy_pending: Vec::new(),
             screencopy_watch: Vec::new(),
             config,
@@ -391,6 +397,9 @@ impl State {
         self.bar.forget_output(&output.name());
         self.forget_monitor_power(output);
         self.forget_screencopy_output(output);
+        if self.menu.as_ref().is_some_and(|m| &m.output == output) {
+            self.menu = None;
+        }
 
         if self.monitors.is_empty() {
             self.active_mon = 0;
@@ -540,8 +549,15 @@ impl State {
         if n < 2 {
             return;
         }
+        self.move_window_to_monitor(step(self.active_mon, n, dir));
+    }
+
+    /// Send the focused window to monitor `target`'s current workspace.
+    pub fn move_window_to_monitor(&mut self, target: usize) {
+        if target >= self.monitors.len() || target == self.active_mon {
+            return;
+        }
         let Some(w) = self.ws().focus.clone() else { return };
-        let target = step(self.active_mon, n, dir);
         let floating = self.ws().entry(&w).and_then(|e| e.floating);
         self.ws_mut().remove(&w);
         // Keep a floating window at the same spot relative to its monitor.
@@ -937,6 +953,10 @@ impl State {
             )
             .map(|(s, p)| (s, (p + output_loc).to_f64()));
         }
+        // The compositor's own menu is above everything.
+        if self.over_menu(pos) {
+            return None;
+        }
         // Before taking the layer map lock: over_bar() locks it too, and the lock isn't re-entrant.
         let on_bar = self.over_bar(pos);
         let map = layer_map_for_output(output);
@@ -996,6 +1016,7 @@ impl State {
     // ---------- actions ----------
 
     pub fn run_action(&mut self, action: Action) {
+        self.close_menu();
         match action {
             Action::Spawn(cmd) => self.spawn(&cmd),
             Action::Close => {
@@ -1158,6 +1179,8 @@ impl State {
     }
 
     fn apply_config(&mut self, config: Config) {
+        // Painted from the old theme; reopening shows the new one.
+        self.close_menu();
         if config.keyboard != self.config.keyboard {
             let kb = &config.keyboard;
             let keyboard = self.keyboard();

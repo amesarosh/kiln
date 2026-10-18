@@ -92,7 +92,8 @@ focused monitor, which follows the mouse (with `focus_follows_mouse`) or the las
 When a monitor is unplugged, its windows move to the same-numbered workspaces of the focused one.
 
 Each monitor also gets the built-in bar (`[bar]` in the config). Click a workspace or tab to switch
-to it, middle-click a tab to close that window, click the layout name to cycle layouts, and scroll
+to it, middle-click a tab to close that window, right-click a tab for its window menu (float,
+fullscreen, move to a workspace or monitor, close), click the layout name to cycle layouts, and scroll
 over the bar or empty desktop to change workspace. It works alongside waybar; set
 `bar.enabled = false` to use waybar alone.
 

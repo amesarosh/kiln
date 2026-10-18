@@ -76,8 +76,8 @@ border_width = 2   # colors come from border_focused, border and base in [theme.
 
 # The clickable bar: workspace buttons, one tab per window, a layout button
 # and a + button. Click a workspace or tab to switch to it, middle-click a tab
-# to close that window, and scroll over the bar or empty desktop to change
-# workspace.
+# to close that window, right-click a tab for a menu (float, fullscreen, move,
+# close), and scroll over the bar or empty desktop to change workspace.
 [bar]
 enabled = true
 position = "top"         # "top", "bottom", "left" or "right"

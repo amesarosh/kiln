@@ -112,6 +112,16 @@ where
         return out;
     }
 
+    // Pop-up menus, above everything but the pointer.
+    if let Some((loc, buffer)) = state.menu_buffer(output, output.current_scale().integer_scale()) {
+        let loc = (loc - output_geo.loc).to_f64().to_physical(scale);
+        match MemoryRenderBufferRenderElement::from_buffer(renderer, loc, &buffer, None, None, None, Kind::Unspecified)
+        {
+            Ok(e) => out.push(OutputElement::Memory(e)),
+            Err(e) => tracing::warn!("menu upload failed: {e:?}"),
+        }
+    }
+
     let mon = state.monitor_index(output);
     let fullscreen = mon.is_some_and(|m| state.monitors[m].ws().fullscreen.is_some());
 

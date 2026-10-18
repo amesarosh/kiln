@@ -592,6 +592,12 @@ impl State {
                     self.arrange();
                 }
             }
+            (Part::Tab(i), BTN_RIGHT) => {
+                if let Some(w) = tab_window(self, i) {
+                    let pos = self.seat.get_pointer().unwrap().current_location();
+                    self.open_window_menu(w, pos);
+                }
+            }
             (Part::Tab(i), BTN_MIDDLE) => {
                 if let Some(w) = tab_window(self, i) {
                     crate::state::close_window(&w);
