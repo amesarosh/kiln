@@ -198,6 +198,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             state.needs_redraw = false;
             state.schedule_redraw();
         }
+        state.refresh_foreign_toplevels();
         let _ = state.display_handle.flush_clients();
     })?;
 

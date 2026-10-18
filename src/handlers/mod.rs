@@ -1,4 +1,5 @@
 mod compositor;
+pub mod foreign_toplevel;
 mod idle;
 mod layer_shell;
 pub mod lock;
@@ -147,7 +148,15 @@ impl smithay::wayland::selection::ext_data_control::DataControlHandler for State
 }
 smithay::delegate_ext_data_control!(State);
 
-impl OutputHandler for State {}
+impl OutputHandler for State {
+    fn output_bound(
+        &mut self,
+        output: smithay::output::Output,
+        wl_output: smithay::reexports::wayland_server::protocol::wl_output::WlOutput,
+    ) {
+        self.foreign_toplevel_output_bound(&output, &wl_output);
+    }
+}
 delegate_output!(State);
 
 // Viewporter lets clients pick the logical size of a buffer; fractional scale tells them the

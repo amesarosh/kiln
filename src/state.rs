@@ -132,6 +132,8 @@ pub struct State {
         smithay::reexports::wayland_protocols_wlr::output_power_management::v1::server::zwlr_output_power_v1::ZwlrOutputPowerV1,
         Output,
     )>,
+    /// The window list shown to taskbars and window switchers.
+    pub foreign_toplevels: crate::handlers::foreign_toplevel::ForeignToplevels,
     /// Copies of the clipboard, kept after the app that copied closes.
     pub clipboard: crate::clipboard::Keeper,
     /// The open pop-up menu, if any.
@@ -215,6 +217,7 @@ impl State {
         let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
         Self::create_output_power_global(&dh);
         Self::create_screencopy_global(&dh);
+        let foreign_toplevels = crate::handlers::foreign_toplevel::ForeignToplevels::new(&dh);
 
         let mut seat_state = SeatState::new();
         let mut seat = seat_state.new_wl_seat(&dh, "seat0");
@@ -276,6 +279,7 @@ impl State {
             idle_power_timer: None,
             output_powers: Vec::new(),
             clipboard: Default::default(),
+            foreign_toplevels,
             menu: None,
             ui_text: None,
             screencopy_pending: Vec::new(),
