@@ -1,10 +1,13 @@
-//! The built-in bar: workspace buttons, one tab per window, a layout button and a launcher button.
+//! The built-in bar: workspace buttons, one tab per window, and a row of buttons at the end
+//! (layout, settings, launcher).
 //!
 //! The bar is painted on the CPU into a single image, and only repainted when what it shows
 //! changes (titles, focus, workspace, hover). Layout is computed the same way for painting and
 //! for hit testing, so clicks always land on what's drawn.
 
 use std::{cell::RefCell, collections::HashMap};
+
+use wt_config::theme::Palette;
 
 use smithay::{
     backend::{
@@ -33,6 +36,17 @@ pub const BTN_MIDDLE: u32 = 0x112;
 const SCROLL_STEP: f64 = 120.0;
 /// Widest a window tab gets, in logical pixels.
 const MAX_TAB_WIDTH: i32 = 260;
+/// Room for a workspace's number on its button, before its window icons.
+const WS_LABEL_W: i32 = 22;
+/// On a side bar the number gets a wider slot, so rows line up.
+const WS_LABEL_W_SIDE: i32 = 28;
+/// Space between window icons on a workspace button.
+const WS_ICON_GAP: i32 = 3;
+/// Most window icons a workspace button shows on a top or bottom bar; past that, the last
+/// slot becomes a "+N" count.
+const WS_MAX_ICONS: usize = 4;
+/// Width of the "+N" count.
+const WS_MORE_W: i32 = 18;
 
 /// A clickable piece of the bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,14 +55,56 @@ pub enum Part {
     /// Index into the active workspace's window list.
     Tab(usize),
     Layout,
+    /// Opens the settings app.
+    Settings,
     Launcher,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WsLook {
-    Active,
-    Occupied,
-    Empty,
+/// The buttons at the end of the bar, in order: left to right on a top or bottom bar, along the
+/// bottom row of a side bar. New buttons go here. `Layout` must stay first: it's the wide one,
+/// and on a side bar it takes whatever room the others leave in their row.
+const END_BUTTONS: [Part; 3] = [Part::Layout, Part::Settings, Part::Launcher];
+
+/// What the settings button runs, and the app id its window has.
+const SETTINGS_APP: &str = "wayland-time-settings";
+
+/// One workspace button.
+#[derive(Debug, Clone, PartialEq)]
+struct Ws {
+    active: bool,
+    /// One entry per window, in order: its app id (or title if it has none), for the icon.
+    apps: Vec<String>,
+}
+
+/// Size of the window icons on workspace buttons, for a bar (or side bar row) `h` high.
+fn ws_icon_size(h: i32) -> i32 {
+    (h - 12).clamp(10, 18)
+}
+
+/// How many window icons fit in `slots`, and how many windows are left over for a "+N".
+fn ws_icons_shown(windows: usize, slots: usize) -> (usize, usize) {
+    if windows <= slots {
+        (windows, 0)
+    } else {
+        let shown = slots.saturating_sub(1);
+        (shown, windows - shown)
+    }
+}
+
+/// Width of a workspace button on a top or bottom bar: square when empty, otherwise wide
+/// enough for its number and window icons.
+fn ws_width(h: i32, ws: &Ws) -> i32 {
+    if ws.apps.is_empty() {
+        return h;
+    }
+    let icon = ws_icon_size(h);
+    let (shown, more) = ws_icons_shown(ws.apps.len(), WS_MAX_ICONS);
+    let mut w = WS_LABEL_W + shown as i32 * (icon + WS_ICON_GAP);
+    if more > 0 {
+        w += WS_MORE_W;
+    }
+    // Padding at the right end, matching the pill's inset plus a little.
+    (w + 7).max(h)
 }
 
 /// Everything the bar's pixels depend on. If this is unchanged, the old image is reused.
@@ -59,7 +115,7 @@ struct Model {
     scale: i32,
     position: BarPosition,
     config: BarConfig,
-    workspaces: Vec<WsLook>,
+    workspaces: Vec<Ws>,
     tabs: Vec<Tab>,
     layout: LayoutKind,
     hover: Option<Part>,
@@ -133,25 +189,28 @@ impl Bar {
         }
     }
 
-    /// Left to right: workspaces, window tabs, layout button, launcher.
+    /// Left to right: workspaces, window tabs, end buttons.
     fn layout_horizontal(m: &Model) -> Vec<(Rect, Part)> {
         let (width, h) = m.size;
         let mut parts = Vec::new();
 
         let mut x = 0;
-        for i in 0..m.workspaces.len() {
-            parts.push((Rect::new(x, 0, h, h), Part::Workspace(i)));
-            x += h;
+        for (i, ws) in m.workspaces.iter().enumerate() {
+            let w = ws_width(h, ws);
+            parts.push((Rect::new(x, 0, w, h), Part::Workspace(i)));
+            x += w;
         }
 
-        let plus_x = width - h;
-        parts.push((Rect::new(plus_x, 0, h, h), Part::Launcher));
-        let layout_w = h + 8;
-        let layout_x = plus_x - layout_w;
-        parts.push((Rect::new(layout_x, 0, layout_w, h), Part::Layout));
+        // End buttons, placed from the right edge inwards.
+        let mut end = width;
+        for part in END_BUTTONS.into_iter().rev() {
+            let w = if part == Part::Layout { h + 8 } else { h };
+            end -= w;
+            parts.push((Rect::new(end, 0, w, h), part));
+        }
 
         // Room for the divider after the workspaces.
-        let (x0, x1) = (x + 10, layout_x - 6);
+        let (x0, x1) = (x + 10, end - 6);
         let n = m.tabs.len() as i32;
         if n > 0 && x1 > x0 {
             let w = ((x1 - x0) / n).min(MAX_TAB_WIDTH);
@@ -162,8 +221,8 @@ impl Bar {
         parts
     }
 
-    /// Top to bottom: workspaces, one row per window, and the layout button and launcher
-    /// sharing the bottom row.
+    /// Top to bottom: workspaces, one row per window, and the end buttons in the bottom row
+    /// (wrapping onto more rows above it if they don't fit).
     fn layout_vertical(m: &Model) -> Vec<(Rect, Part)> {
         let (w, height) = m.size;
         let row = m.config.height;
@@ -177,9 +236,21 @@ impl Bar {
         }
         y += 4;
 
-        let bottom = height - row;
-        parts.push((Rect::new(w - row, bottom, row, row), Part::Launcher));
-        parts.push((Rect::new(0, bottom, w - row, row), Part::Layout));
+        // End buttons, square, placed right to left from the bottom-right corner. The layout
+        // button comes last and fills what's left of its row.
+        let (mut x, mut bottom) = (w, height - row);
+        for part in END_BUTTONS.into_iter().rev() {
+            if x < row && x < w {
+                x = w;
+                bottom -= row;
+            }
+            if part == Part::Layout {
+                parts.push((Rect::new(0, bottom, x, row), part));
+            } else {
+                x -= row;
+                parts.push((Rect::new(x, bottom, row, row), part));
+            }
+        }
 
         y += 9;
         for i in 0..m.tabs.len() {
@@ -256,40 +327,60 @@ impl Bar {
             let hovered = m.hover == Some(part);
             match part {
                 Part::Workspace(i) => {
-                    let look = m.workspaces[i];
+                    let ws = &m.workspaces[i];
                     // Side bars: full-width rows lined up with the window rows below.
                     let pill = if vertical {
                         Rect::new(r.x + 6 * s, r.y + s, r.w - 12 * s, r.h - 2 * s)
                     } else {
                         inset(r, 3 * s)
                     };
-                    let label_color = match look {
-                        WsLook::Active => {
-                            rounded(&mut canvas, pill, p.accent);
-                            p.on_accent
+                    let label_color = if ws.active {
+                        rounded(&mut canvas, pill, p.accent);
+                        p.on_accent
+                    } else {
+                        if hovered {
+                            rounded(&mut canvas, pill, p.hover);
                         }
-                        WsLook::Occupied | WsLook::Empty => {
-                            if hovered {
-                                rounded(&mut canvas, pill, p.hover);
-                            }
-                            if look == WsLook::Occupied { p.text } else { p.subtext }
-                        }
+                        if ws.apps.is_empty() { p.subtext } else { p.text }
                     };
+
+                    // The number, then an icon per window. Empty workspaces on a top bar are
+                    // just the number, centered.
                     let label = (i + 1).to_string();
-                    // A dot on workspaces that have windows: under the number on a horizontal
-                    // bar, beside it on a side bar where rows are short.
-                    let label_rect = if vertical { r } else { Rect::new(r.x, r.y - s, r.w, r.h) };
+                    let label_w = if vertical { WS_LABEL_W_SIDE } else { WS_LABEL_W } * s;
+                    let label_rect = match (vertical, ws.apps.is_empty()) {
+                        (false, true) => r,
+                        (false, false) => Rect::new(r.x + s, r.y, label_w, r.h),
+                        (true, _) => Rect::new(pill.x, r.y, label_w, r.h),
+                    };
                     centered(&mut canvas, &label, label_rect, px * 0.9, label_color);
-                    if look != WsLook::Empty {
-                        let dot = if look == WsLook::Active { p.on_accent } else { p.subtext };
-                        let d = 3 * s;
-                        let (dx, dy) = if vertical {
-                            let tw = text.width(&label, px * 0.9) as i32;
-                            (r.x + (r.w + tw) / 2 + 5 * s, r.y + (r.h - d) / 2)
-                        } else {
-                            (r.x + (r.w - d) / 2, pill.y + pill.h - d - 2 * s)
-                        };
-                        canvas.fill_rounded_rect(dx, dy, d, d, d as f32, dot);
+                    if ws.apps.is_empty() {
+                        continue;
+                    }
+
+                    let icon = ws_icon_size(r.h / s) * s;
+                    let gap = WS_ICON_GAP * s;
+                    let x0 = label_rect.x + label_rect.w;
+                    let slots = if vertical {
+                        // As many as fit in the row, keeping room for the count.
+                        ((pill.x + pill.w - 4 * s - x0) / (icon + gap)).max(1) as usize
+                    } else {
+                        WS_MAX_ICONS
+                    };
+                    let (shown, more) = ws_icons_shown(ws.apps.len(), slots);
+                    let y = r.y + (r.h - icon) / 2;
+                    let mut x = x0;
+                    for app in &ws.apps[..shown] {
+                        self.draw_app_icon(&mut canvas, text, app, (x, y), icon, radius, p);
+                        x += icon + gap;
+                    }
+                    if more > 0 {
+                        let count = format!("+{more}");
+                        let size = px * 0.75;
+                        let color = if ws.active { p.on_accent } else { p.muted };
+                        let baseline = text.centered_baseline(r.y as f32, r.h as f32, size);
+                        let right = pill.x + pill.w;
+                        text.draw(&mut canvas, &count, size, (x as f32, baseline), color, (x, right));
                     }
                 }
                 Part::Tab(i) => {
@@ -327,26 +418,8 @@ impl Bar {
                     let icon_px = ((area.h - 8 * s).max(8 * s) as u32).min(24 * s as u32);
                     let mut x = area.x + pad;
                     let y = area.y + (area.h - icon_px as i32) / 2;
-                    if let Some(icon) = self.icons.borrow_mut().get(&tab.app_id, icon_px) {
-                        canvas.draw_image(x, y, icon.size, &icon.rgba);
-                    } else {
-                        // No icon: the app's first letter on a rounded square.
-                        let side = icon_px as i32;
-                        canvas.fill_rounded_rect(x, y, side, side, radius.min(side as f32 / 3.0), p.hover);
-                        let name = if tab.app_id.is_empty() { &tab.title } else { &tab.app_id };
-                        let letter: String = name
-                            .chars()
-                            .next()
-                            .map(|c| c.to_uppercase().collect())
-                            .unwrap_or_default();
-                        centered(
-                            &mut canvas,
-                            &letter,
-                            Rect::new(x, y, side, side),
-                            side as f32 * 0.7,
-                            p.text,
-                        );
-                    }
+                    let name = if tab.app_id.is_empty() { &tab.title } else { &tab.app_id };
+                    self.draw_app_icon(&mut canvas, text, name, (x, y), icon_px as i32, radius, p);
                     x += icon_px as i32 + 6 * s;
                     let right = area.x + area.w - pad;
                     if right > x {
@@ -356,30 +429,58 @@ impl Bar {
                         text.draw(&mut canvas, &label, px, (x as f32, baseline), color, (x, right));
                     }
                 }
-                Part::Layout => {
-                    let pill = inset(r, 3 * s);
+                Part::Layout | Part::Settings | Part::Launcher => {
                     if hovered {
-                        rounded(&mut canvas, pill, p.hover);
+                        rounded(&mut canvas, inset(r, 3 * s), p.hover);
                     }
                     let color = if hovered { p.text } else { p.muted };
-                    draw_layout_glyph(&mut canvas, m.layout, r, s, color);
-                }
-                Part::Launcher => {
-                    let pill = inset(r, 3 * s);
-                    if hovered {
-                        rounded(&mut canvas, pill, p.hover);
-                    }
-                    // A plus sign from two rounded bars.
-                    let (len, th) = (12 * s, 2 * s);
                     let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
-                    let color = if hovered { p.text } else { p.muted };
-                    canvas.fill_rounded_rect(cx - len / 2, cy - th / 2, len, th, s as f32, color);
-                    canvas.fill_rounded_rect(cx - th / 2, cy - len / 2, th, len, s as f32, color);
+                    match part {
+                        Part::Layout => draw_layout_glyph(&mut canvas, m.layout, r, s, color),
+                        Part::Settings => draw_gear(&mut canvas, cx as f32, cy as f32, s as f32, color),
+                        _ => {
+                            // A plus sign from two rounded bars.
+                            let (len, th) = (12 * s, 2 * s);
+                            canvas.fill_rounded_rect(cx - len / 2, cy - th / 2, len, th, s as f32, color);
+                            canvas.fill_rounded_rect(cx - th / 2, cy - len / 2, th, len, s as f32, color);
+                        }
+                    }
                 }
             }
         }
 
         canvas
+    }
+
+    /// An app's icon as a `side`-pixel square at `at`; without one, the first letter of `name`
+    /// on a rounded square.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_app_icon(
+        &self,
+        canvas: &mut Canvas,
+        text: &Text,
+        name: &str,
+        at: (i32, i32),
+        side: i32,
+        radius: f32,
+        p: &Palette,
+    ) {
+        let (x, y) = at;
+        if let Some(icon) = self.icons.borrow_mut().get(name, side as u32) {
+            canvas.draw_image(x, y, icon.size, &icon.rgba);
+            return;
+        }
+        canvas.fill_rounded_rect(x, y, side, side, radius.min(side as f32 / 3.0), p.hover);
+        let letter: String = name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().collect())
+            .unwrap_or_default();
+        let size = side as f32 * 0.7;
+        let tw = text.width(&letter, size);
+        let tx = x as f32 + (side as f32 - tw) / 2.0;
+        let baseline = text.centered_baseline(y as f32, side as f32, size);
+        text.draw(canvas, &letter, size, (tx, baseline), p.text, (x, x + side));
     }
 
     /// Turn scroll input into whole workspace steps (+1 = next, -1 = previous).
@@ -416,7 +517,50 @@ fn draw_layout_glyph(canvas: &mut Canvas, layout: LayoutKind, r: Rect, s: i32, c
     }
 }
 
+/// A gear: a ring with eight teeth, centered on (cx, cy), anti-aliased.
+fn draw_gear(canvas: &mut Canvas, cx: f32, cy: f32, s: f32, color: Color) {
+    const TEETH: f32 = 8.0;
+    // Tip of the teeth, rim of the body, and the hole, in logical pixels.
+    let (tip, rim, hole) = (7.5 * s, 5.5 * s, 2.25 * s);
+    let reach = tip.ceil() as i32 + 1;
+    let (x0, y0) = (cx.floor() as i32, cy.floor() as i32);
+    for y in y0 - reach..=y0 + reach {
+        for x in x0 - reach..=x0 + reach {
+            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+            let r = (dx * dx + dy * dy).sqrt();
+            // Where this pixel is around the gear, 0..1 within one tooth period, tooth centered.
+            let turn = (dy.atan2(dx) / std::f32::consts::TAU * TEETH + 0.5).rem_euclid(1.0);
+            // Teeth narrow towards the tip; their half-width as a fraction of the period.
+            let along = ((r - rim) / (tip - rim)).clamp(0.0, 1.0);
+            let half = 0.27 - 0.09 * along;
+            // Distance inside the tooth's sides (measured along the circle) and its tip.
+            let side = (half - (turn - 0.5).abs()) * std::f32::consts::TAU * r / TEETH;
+            let tooth = (side.min(tip - r) + 0.5).clamp(0.0, 1.0);
+            let body = (rim - r + 0.5).clamp(0.0, 1.0);
+            let coverage = body.max(tooth) * (r - hole + 0.5).clamp(0.0, 1.0);
+            if coverage > 0.0 {
+                canvas.blend(x, y, color, coverage);
+            }
+        }
+    }
+}
+
 impl State {
+    /// Opens the settings app, or brings it forward if it's already open.
+    fn open_settings(&mut self) {
+        let open = self
+            .monitors
+            .iter()
+            .flat_map(|m| &m.workspaces)
+            .flat_map(|ws| &ws.entries)
+            .find(|e| toplevel_ids(&e.window).0.as_deref() == Some(SETTINGS_APP))
+            .map(|e| e.window.clone());
+        match open {
+            Some(w) => self.activate_window(&w),
+            None => self.spawn(SETTINGS_APP),
+        }
+    }
+
     /// Area left on a monitor after bars and panels from other programs, in global coordinates.
     fn layer_zone(&self, mon: usize) -> Option<Rectangle<i32, Logical>> {
         let output = &self.monitors.get(mon)?.output;
@@ -497,10 +641,16 @@ impl State {
             .workspaces
             .iter()
             .enumerate()
-            .map(|(i, w)| match (i == m.active_ws, w.entries.is_empty()) {
-                (true, _) => WsLook::Active,
-                (false, false) => WsLook::Occupied,
-                (false, true) => WsLook::Empty,
+            .map(|(i, w)| Ws {
+                active: i == m.active_ws,
+                apps: w
+                    .entries
+                    .iter()
+                    .map(|e| {
+                        let (app_id, title) = toplevel_ids(&e.window);
+                        app_id.filter(|a| !a.is_empty()).or(title).unwrap_or_default()
+                    })
+                    .collect(),
             })
             .collect();
         let tabs = ws
@@ -609,6 +759,7 @@ impl State {
                 }
             }
             (Part::Layout, BTN_LEFT | BTN_RIGHT) => self.run_action(Action::Layout(LayoutChoice::Next)),
+            (Part::Settings, BTN_LEFT) => self.open_settings(),
             (Part::Launcher, BTN_LEFT) => {
                 let cmd = self.config.bar.launcher.clone();
                 if !cmd.is_empty() {
@@ -655,13 +806,19 @@ mod tests {
             scale: 1,
             position,
             config: Config::default().bar,
-            workspaces: vec![
-                WsLook::Occupied,
-                WsLook::Active,
-                WsLook::Empty,
-                WsLook::Occupied,
-                WsLook::Empty,
-            ],
+            workspaces: [
+                (false, &["Alacritty", "vivaldi-stable"][..]),
+                (true, &["Alacritty", "vivaldi-stable", "code", "XClock"][..]),
+                (false, &[][..]),
+                (false, &["steam", "Alacritty", "code", "a", "b", "c"][..]),
+                (false, &[][..]),
+            ]
+            .iter()
+            .map(|(active, apps)| Ws {
+                active: *active,
+                apps: apps.iter().map(|a| a.to_string()).collect(),
+            })
+            .collect(),
             tabs: tabs
                 .iter()
                 .map(|(t, f)| Tab {
@@ -700,6 +857,9 @@ mod tests {
                 }
             }
             assert_eq!(parts.iter().filter(|(_, p)| matches!(p, Part::Tab(_))).count(), 3);
+            for button in END_BUTTONS {
+                assert_eq!(parts.iter().filter(|(_, p)| *p == button).count(), 1, "{button:?}");
+            }
         }
     }
 

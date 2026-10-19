@@ -4,8 +4,9 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 
 - **Dynamic tiling** (master/stack and monocle), toggleable floating, fullscreen, 1–32 workspaces
 - **Multiple monitors**, each with its own set of workspaces (like dwm), placed left to right
-- **Built-in clickable bar** per monitor (top, bottom, left or right): workspaces, one tab per window with its app icon, layout switcher and a launcher button
+- **Built-in clickable bar** per monitor (top, bottom, left or right): workspaces, one tab per window with its app icon, layout switcher, a settings button (opens the settings app, or brings it forward if it is already open) and a launcher button
 - **One TOML file** for keybinds, gaps, borders, colors, keyboard layout and window rules, **reloaded on save**
+- **Settings app** (`wayland-time-settings`) that edits that file for you, with every change applied as you make it
 - **Idle costs nothing:** frames are only drawn when something changes, and only damaged regions are repainted
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
 - Runs nested for development or **on real hardware from a TTY**, with hardware cursor planes, direct scanout and GPU buffer sharing (linux-dmabuf)
@@ -25,7 +26,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 ## Build and run
 
 ```sh
-cargo build --release
+cargo build --release        # the compositor and its apps
 ./target/release/wayland-time -e alacritty
 ```
 
@@ -58,6 +59,9 @@ To pick it from a login screen (GDM, SDDM…), install the binary and session fi
 ```sh
 sudo install -m755 target/release/wayland-time /usr/local/bin/
 sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
+# The settings app, and its launcher entry:
+sudo install -m755 target/release/wayland-time-settings /usr/local/bin/
+sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applications/
 ```
 
 ## Default keys
@@ -165,6 +169,27 @@ its own table, e.g. `[bar.colors]`.
 If you define `[binds]`, it replaces the default binds entirely. See [`resources/default-config.toml`](resources/default-config.toml) for every option and action.
 A config with errors is rejected as a whole and the last working config stays active; all problems are logged at once.
 
+### Settings app
+
+`wayland-time-settings` edits the config file with a window instead of a text editor: general
+behavior, appearance and every theme color, tiling and gaps, the bar, each monitor (mode, scale,
+position, rotation, bar, layout, picked from the monitors that are connected), keyboard layout and
+repeat, mouse and touchpad, keybinds, window rules and sessions. A search box finds settings
+by name.
+
+Changes apply as you make them: shortly after each edit the file is checked with the
+compositor's own config loader and saved, and the compositor reloads it. A change that doesn't
+load (a color typo, a keyboard layout that doesn't exist) is shown in the window and isn't saved,
+so the desktop never picks up a broken config. Comments and layout in your file are kept, and
+edits made in a text editor at the same time are picked up. The few settings that only apply at
+the next login (autostart, Xwayland, session restore) are marked as such. The app follows
+`[theme]` itself, so color and font changes show up in it right away.
+
+```
+-c, --config <PATH>   edit a different config file
+-p, --page <NAME>     open at a page, e.g. monitors or keybinds
+```
+
 ### Sessions
 
 Open windows are saved to `~/.local/state/wayland-time/session.toml` a few seconds after anything
@@ -215,6 +240,18 @@ is on screen.
 
 ## Code map
 
+The repository is a Cargo workspace:
+
+| Directory | Purpose |
+|---|---|
+| `src/` | the compositor (`wayland-time`) |
+| `crates/wt-config/` | the config file and theme, shared by the compositor and the apps: defaults, parsing, validation, keybind and action parsing, color palette, font lookup (unit tested) |
+| `crates/wt-ui/` | the shared look for apps: turns `[theme]` into egui styling and fonts, and opens app windows |
+| `apps/settings/` | the settings app (`wayland-time-settings`) |
+
+New apps go in `apps/`, use `wt-ui` for their window and look, and `wt-config` for anything
+in the config file.
+
 | File | Purpose |
 |---|---|
 | `src/main.rs` | CLI, startup, event loop, redraw scheduling |
@@ -224,8 +261,11 @@ is on screen.
 | `src/text.rs` | CPU text and shape drawing for compositor-drawn UI |
 | `src/layout.rs` | pure tiling math (unit tested); add new layouts here |
 | `src/workspace.rs` | per-workspace window order, focus, floating (unit tested) |
-| `src/config.rs` | TOML parsing, validation, keybind/action parsing (unit tested) |
-| `src/theme.rs` | shared font and color palette; resolves color names and `mix(...)` |
+| `src/config.rs` | re-exports `wt-config`, plus conversions to smithay types |
+| `crates/wt-config/src/config.rs` | TOML parsing, validation, keybind/action parsing (unit tested) |
+| `crates/wt-config/src/theme.rs` | shared color palette; resolves color names and `mix(...)` |
+| `apps/settings/src/doc.rs` | the config file as an editable document: comment-keeping edits, checking, saving |
+| `apps/settings/src/pages/` | the settings pages; plain settings are listed as data in `fields.rs` |
 | `src/handlers/xwayland.rs` | Xwayland: starting it, managing X11 windows, sharing the clipboard with X11 |
 | `src/focus.rs` | keyboard focus target: a Wayland surface or an X11 window |
 | `src/icons.rs` | app icons for the bar: .desktop lookup, icon theme search, PNG/SVG loading |
@@ -241,7 +281,7 @@ is on screen.
 | `src/backend/mod.rs` | backend switch, linux-dmabuf (GPU buffer sharing) |
 | `src/cursor.rs` | XCursor theme loading for the hardware backend |
 
-`cargo test` runs the unit tests.
+`cargo test --workspace` runs the unit tests.
 
 To try multi-monitor behaviour without extra screens, split the nested window into several fake
 monitors: `WAYLAND_TIME_NESTED_OUTPUTS=2 cargo run -- -b winit`.

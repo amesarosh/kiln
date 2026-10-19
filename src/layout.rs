@@ -1,7 +1,5 @@
 //! Pure tiling math. No Wayland types here so it stays easy to test and extend.
 
-use serde::{Deserialize, Serialize};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect {
     pub x: i32,
@@ -26,24 +24,7 @@ impl Rect {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum LayoutKind {
-    /// Master area on the left, remaining windows stacked on the right.
-    #[default]
-    Tile,
-    /// Every window takes the full area; only the focused one is visible.
-    Monocle,
-}
-
-impl LayoutKind {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Tile => Self::Monocle,
-            Self::Monocle => Self::Tile,
-        }
-    }
-}
+pub use wt_config::LayoutKind;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Params {
@@ -52,6 +33,17 @@ pub struct Params {
     pub gaps_inner: i32,
     pub gaps_outer: i32,
     pub smart_gaps: bool,
+}
+
+/// The tiling settings from the config, with negative gaps treated as none.
+pub fn params(c: &wt_config::Config) -> Params {
+    Params {
+        master_ratio: c.layout.master_ratio,
+        master_count: c.layout.master_count,
+        gaps_inner: c.layout.gaps_inner.max(0),
+        gaps_outer: c.layout.gaps_outer.max(0),
+        smart_gaps: c.layout.smart_gaps,
+    }
 }
 
 /// Compute one rectangle per tiled window, in order. `weights` has one entry per window:

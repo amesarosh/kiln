@@ -180,7 +180,7 @@ impl State {
                         return FilterResult::Intercept(None);
                     }
                     let sym = normalize_keysym(sym);
-                    let pressed = Mods::from_state(mods);
+                    let pressed = crate::config::mods_from_state(mods);
                     let mod_key = state.mod_key();
                     if is_mod_sym(sym, mod_key) && pressed == Mods::only_mod(mod_key) {
                         state.mod_tap = Some(code);

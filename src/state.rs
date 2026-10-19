@@ -845,7 +845,7 @@ impl State {
     /// Where the tiled windows of a monitor's workspace go, in tiling order (borders included).
     pub fn tile_rects(&self, mon: usize, area: Rectangle<i32, Logical>) -> Vec<Rect> {
         let ws = self.monitors[mon].ws();
-        let mut params = self.config.layout_params();
+        let mut params = layout::params(&self.config);
         params.master_ratio = ws.master_ratio;
         params.master_count = ws.master_count;
         layout::arrange(
@@ -1335,15 +1335,29 @@ impl State {
             m.active_ws = m.active_ws.min(want - 1);
         }
 
+        // Only reset what changed, so saving an unrelated setting (the settings app saves on
+        // every edit) keeps the layouts and sizes picked per workspace.
+        let (old, new) = (&self.config.layout, &config.layout);
+        let layout_changed = old.default != new.default || old.per_output != new.per_output;
+        let ratio_changed = old.master_ratio != new.master_ratio;
+        let count_changed = old.master_count != new.master_count;
         for ws in self.all_workspaces_mut() {
-            ws.layout = config.layout.default;
-            ws.master_ratio = config.layout.master_ratio;
-            ws.master_count = config.layout.master_count;
+            if layout_changed {
+                ws.layout = config.layout.default;
+            }
+            if ratio_changed {
+                ws.master_ratio = config.layout.master_ratio;
+            }
+            if count_changed {
+                ws.master_count = config.layout.master_count;
+            }
         }
-        for m in &mut self.monitors {
-            let layout = config.layout.default_for(&m.output.name());
-            for ws in &mut m.workspaces {
-                ws.layout = layout;
+        if layout_changed {
+            for m in &mut self.monitors {
+                let layout = config.layout.default_for(&m.output.name());
+                for ws in &mut m.workspaces {
+                    ws.layout = layout;
+                }
             }
         }
 

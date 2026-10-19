@@ -15,7 +15,7 @@ mod session;
 mod state;
 mod switcher;
 mod text;
-mod theme;
+use wt_config::theme;
 mod workspace;
 
 use std::{fs::File, path::PathBuf, sync::Mutex};

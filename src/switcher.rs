@@ -170,7 +170,7 @@ impl State {
         let h = visible as i32 * row_h + 2 * PAD;
         let loc = Point::from((geo.loc.x + (geo.size.w - w) / 2, geo.loc.y + (geo.size.h - h) / 2));
 
-        let mut hold = Mods::from_state(&self.keyboard().modifier_state());
+        let mut hold = crate::config::mods_from_state(&self.keyboard().modifier_state());
         hold.shift = false;
         let n = rows.len();
         self.switcher = Some(Switcher {
@@ -232,7 +232,7 @@ impl State {
             // Opened without modifiers: only Enter, a click or Escape close it.
             return;
         }
-        let m = Mods::from_state(&self.keyboard().modifier_state());
+        let m = crate::config::mods_from_state(&self.keyboard().modifier_state());
         let still = (hold.alt && m.alt) || (hold.logo && m.logo) || (hold.ctrl && m.ctrl);
         if !still {
             self.switcher_pick();

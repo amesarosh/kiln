@@ -15,15 +15,17 @@ use std::collections::BTreeMap;
 use crate::config::Color;
 
 macro_rules! palette {
-    ($($(#[$doc:meta])* $name:ident),* $(,)?) => {
+    ($(#[doc = $doc:literal] $name:ident),* $(,)?) => {
         /// Every color role the UI uses, fully resolved.
         #[derive(Debug, Clone, Copy, PartialEq)]
         pub struct Palette {
-            $($(#[$doc])* pub $name: Color,)*
+            $(#[doc = $doc] pub $name: Color,)*
         }
 
         impl Palette {
             pub const ROLES: &[&str] = &[$(stringify!($name)),*];
+            /// What each role is used for, from its doc comment, for settings screens.
+            pub const ROLE_DOCS: &[(&str, &str)] = &[$((stringify!($name), $doc.trim_ascii())),*];
 
             fn from_map(map: &BTreeMap<String, Color>) -> Self {
                 Self { $($name: map[stringify!($name)],)* }
@@ -98,6 +100,17 @@ pub fn resolve(defs: &ColorDefs, overrides: &ColorDefs, scope: &str) -> Result<P
     } else {
         Err(problems)
     }
+}
+
+/// Resolve every name in `defs` on its own, including user-added ones, for showing swatches.
+pub fn resolve_each(defs: &ColorDefs) -> BTreeMap<String, Result<Color, String>> {
+    let mut done = BTreeMap::new();
+    defs.keys()
+        .map(|name| {
+            let r = lookup(name, defs, &mut done, &mut Vec::new()).map_err(|e| e.trim_start_matches('@').to_string());
+            (name.clone(), r)
+        })
+        .collect()
 }
 
 fn lookup(

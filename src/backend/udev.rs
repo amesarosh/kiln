@@ -400,7 +400,12 @@ fn describe_modes(info: &connector::Info) -> String {
 /// Push scale and rotation from the config onto an output.
 fn apply_scale_transform(output: &Output, config: &Config) {
     let cfg = config.output(&output.name());
-    output.change_current_state(None, Some(cfg.transform), Some(Scale::Fractional(cfg.scale)), None);
+    output.change_current_state(
+        None,
+        Some(crate::config::smithay_transform(cfg.transform)),
+        Some(Scale::Fractional(cfg.scale)),
+        None,
+    );
 }
 
 /// Re-apply `[[outputs]]` after a config reload.
@@ -502,6 +507,10 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
             model: "Unknown".into(),
         },
     );
+    // List every mode the monitor supports, so tools (like the settings app) can offer them.
+    for m in connector.modes() {
+        output.add_mode(WlMode::from(*m));
+    }
     let global = output.create_global::<State>(&state.display_handle);
 
     // Start right of the others; layout_monitors() puts it in its final place.
@@ -515,7 +524,7 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
     output.set_preferred(mode);
     output.change_current_state(
         Some(mode),
-        Some(cfg.transform),
+        Some(crate::config::smithay_transform(cfg.transform)),
         Some(Scale::Fractional(cfg.scale)),
         Some((x, 0).into()),
     );

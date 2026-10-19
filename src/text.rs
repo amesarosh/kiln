@@ -1,19 +1,8 @@
 //! CPU text and shape drawing for compositor-drawn UI (the bar, and later title bars and menus).
 
-use std::path::{Path, PathBuf};
-
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont, point};
 
 use crate::config::Color;
-
-/// Fonts tried when fontconfig can't resolve the configured name.
-const FALLBACK_FONTS: &[&str] = &[
-    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-    "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
-];
 
 pub struct Text {
     font: FontVec,
@@ -22,10 +11,7 @@ pub struct Text {
 impl Text {
     /// Load a font by fontconfig name ("sans", "Noto Sans") or by file path.
     pub fn load(name: &str) -> Option<Self> {
-        let candidates = resolve(name)
-            .into_iter()
-            .chain(FALLBACK_FONTS.iter().map(PathBuf::from));
-        for path in candidates {
+        for path in wt_config::fonts::candidates(name) {
             let Ok(data) = std::fs::read(&path) else { continue };
             match FontVec::try_from_vec(data) {
                 Ok(font) => {
@@ -105,19 +91,6 @@ impl Text {
             });
         }
     }
-}
-
-/// Ask fontconfig for the file behind a font name.
-fn resolve(name: &str) -> Option<PathBuf> {
-    if name.contains('/') {
-        return Some(PathBuf::from(name));
-    }
-    let out = std::process::Command::new("fc-match")
-        .args(["-f", "%{file}", name])
-        .output()
-        .ok()?;
-    let path = PathBuf::from(String::from_utf8(out.stdout).ok()?.trim());
-    Path::new(&path).is_file().then_some(path)
 }
 
 /// An RGBA image in straight (non-premultiplied) alpha, converted when uploaded.
