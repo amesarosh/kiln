@@ -293,6 +293,14 @@ impl State {
         }
     }
 
+    /// Write the session now, e.g. before restarting the machine. Saving carries on after,
+    /// in case the restart doesn't happen.
+    pub fn save_session_now(&mut self) {
+        if !self.session.finished {
+            self.save_session();
+        }
+    }
+
     fn save_session(&mut self) {
         let Some(path) = self.session.path.clone() else { return };
         let mut snap = self.snapshot();

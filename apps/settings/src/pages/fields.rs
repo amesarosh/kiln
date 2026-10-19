@@ -94,12 +94,20 @@ pub const GENERAL: &[Section] = &[
     Section {
         title: "Power",
         note: "",
-        fields: &[f(
-            &["general", "monitors_off_after"],
-            "Turn monitors off after",
-            "Time without input before monitors turn off. Any key, click or pointer movement turns them back on.",
-            Kind::Seconds,
-        )],
+        fields: &[
+            f(
+                &["general", "monitors_off_after"],
+                "Turn monitors off after",
+                "Time without input before monitors turn off. Any key, click or pointer movement turns them back on.",
+                Kind::Seconds,
+            ),
+            f(
+                &["general", "locker"],
+                "Screen locker",
+                "Used by Lock and Suspend in the power menu. Empty uses the first installed of hyprlock, swaylock, gtklock and waylock.",
+                Kind::Text("automatic"),
+            ),
+        ],
     },
     Section {
         title: "Startup",
@@ -227,7 +235,6 @@ pub const BAR: &[Section] = &[Section {
             Kind::Int(16, 96, "px"),
         ),
         f(&["bar", "width"], "Side bar width", "", Kind::Int(40, 800, "px")),
-        f(&["bar", "launcher"], "+ button runs", "", Kind::Text("command")),
     ],
 }];
 

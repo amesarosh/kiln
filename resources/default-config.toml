@@ -27,6 +27,9 @@ xwayland = true
 # Keep what you copied after the app you copied from closes. The compositor
 # holds its own copy (up to 64 MiB); the middle-click selection isn't kept.
 keep_clipboard = true
+# Screen locker used by Lock and Suspend in the bar's power menu. Empty picks
+# the first one installed of hyprlock, swaylock, gtklock and waylock.
+locker = ""
 
 # The look shared by everything the compositor draws: the bar, window borders,
 # the lock screen, and menus and panels as they are added.
@@ -94,7 +97,6 @@ height = 28              # top/bottom bar height; also the row height of a side 
 width = 180              # left/right bar width
 # font = "sans"          # defaults to [theme] font and font_size
 # font_size = 14
-launcher = "alacritty"   # what the + button runs
 
 [keyboard]
 layout = "us"
@@ -234,6 +236,7 @@ exclude = []
 # position = [0, 0]        # in scaled pixels; unset monitors go to the right of set ones
 # transform = "normal"     # "90", "180", "270", "flipped", "flipped-90", ... (counter-clockwise)
 # bar = "left"            # this monitor's bar: "top", "bottom", "left", "right" or "none"
+# clock = true            # show a 12-hour clock at the bottom (or end) of this bar
 # layout = "monocle"       # this monitor's default layout, instead of [layout] default
 #
 # [[outputs]]

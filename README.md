@@ -4,7 +4,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 
 - **Dynamic tiling** (master/stack and monocle), toggleable floating, fullscreen, 1–32 workspaces
 - **Multiple monitors**, each with its own set of workspaces (like dwm), placed left to right
-- **Built-in clickable bar** per monitor (top, bottom, left or right): workspaces, one tab per window with its app icon, layout switcher, a settings button (opens the settings app, or brings it forward if it is already open) and a launcher button
+- **Built-in clickable bar** per monitor (top, bottom, left or right): workspaces, one tab per window with its app icon, layout switcher, a settings button (opens the settings app, or brings it forward if it is already open) and a power button (lock, suspend, log out, restart, shut down)
 - **One TOML file** for keybinds, gaps, borders, colors, keyboard layout and window rules, **reloaded on save**
 - **Settings app** (`wayland-time-settings`) that edits that file for you, with every change applied as you make it
 - **Idle costs nothing:** frames are only drawn when something changes, and only damaged regions are repainted

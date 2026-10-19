@@ -154,6 +154,8 @@ pub struct State {
     pub focus_history: Vec<Window>,
     /// The open pop-up menu, if any.
     pub menu: Option<crate::menu::Menu>,
+    /// Suspend picked from the power menu: suspend as soon as the locker has locked.
+    pub suspend_when_locked: bool,
     /// The theme font, loaded for menus; reloaded when `[theme] font` changes.
     pub ui_text: Option<(String, crate::text::Text)>,
     /// Screencopy frames waiting for the screen to change.
@@ -299,6 +301,7 @@ impl State {
             x11_unmanaged: Vec::new(),
             startup_commands: Vec::new(),
             lock: LockState::Unlocked,
+            suspend_when_locked: false,
             lock_surfaces: Vec::new(),
             idle_inhibitors: Vec::new(),
             lock_fill_ids: [Id::new(), Id::new()],

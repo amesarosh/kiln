@@ -10,6 +10,7 @@ mod icons;
 mod input;
 mod layout;
 mod menu;
+mod power;
 mod render;
 mod session;
 mod state;
@@ -186,6 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     state.watch_config();
     state.arm_idle_power_off();
+    state.start_clock_timer();
     state.startup_commands = state.config.general.autostart.clone();
     state.startup_commands.extend(args.exec.iter().cloned());
     if state.config.general.xwayland {

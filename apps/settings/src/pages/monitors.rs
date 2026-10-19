@@ -1,4 +1,4 @@
-//! Per-monitor settings (`[[outputs]]`): mode, scale, position, rotation, bar and layout.
+//! Per-monitor settings (`[[outputs]]`): mode, scale, position, rotation, bar, clock and layout.
 
 use toml_edit::{Item, Table, Value};
 use wt_config::theme::Palette;
@@ -208,6 +208,14 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                     ];
                     if widgets::choice(ui, "bar", &mut b, &opts) {
                         edits.push(("bar", (!b.is_empty()).then(|| b.into())));
+                    }
+                });
+
+                widgets::divider(ui, p);
+                widgets::row(ui, p, info("Clock", "A 12-hour clock at the bottom of this bar."), |ui| {
+                    let mut on = get("clock").and_then(|i| i.as_bool()).unwrap_or(false);
+                    if widgets::toggle(ui, p, &mut on).changed() {
+                        edits.push(("clock", on.then(|| true.into())));
                     }
                 });
 

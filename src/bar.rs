@@ -1,5 +1,5 @@
-//! The built-in bar: workspace buttons, one tab per window, and a row of buttons at the end
-//! (layout, settings, launcher).
+//! The built-in bar: workspace buttons, one tab per window, a row of buttons at the end
+//! (layout, settings, power), and optionally a clock.
 //!
 //! The bar is painted on the CPU into a single image, and only repainted when what it shows
 //! changes (titles, focus, workspace, hover). Layout is computed the same way for painting and
@@ -60,7 +60,10 @@ pub enum Part {
     Layout,
     /// Opens the settings app.
     Settings,
-    Launcher,
+    /// Opens the power menu.
+    Power,
+    /// The time. Not a button: clicks do nothing.
+    Clock,
 }
 
 /// A workspace button or window tab being dragged to a new spot.
@@ -77,7 +80,7 @@ pub struct BarDrag {
 /// The buttons at the end of the bar, in order: left to right on a top or bottom bar, along the
 /// bottom row of a side bar. New buttons go here. `Layout` must stay first: it's the wide one,
 /// and on a side bar it takes whatever room the others leave in their row.
-const END_BUTTONS: [Part; 3] = [Part::Layout, Part::Settings, Part::Launcher];
+const END_BUTTONS: [Part; 3] = [Part::Layout, Part::Settings, Part::Power];
 
 /// What the settings button runs, and the app id its window has.
 const SETTINGS_APP: &str = "wayland-time-settings";
@@ -135,6 +138,43 @@ struct Model {
     hover: Option<Part>,
     /// This monitor has keyboard focus; otherwise the focused tab is drawn dimmer.
     active_monitor: bool,
+    /// The time to show, if this bar has the clock. Part of the model, so the bar repaints
+    /// when the minute changes.
+    clock: Option<String>,
+}
+
+/// Width of the clock on a top or bottom bar: room for "12:59 PM" plus padding.
+fn clock_width(font_size: f32) -> i32 {
+    (font_size * 4.8) as i32 + 16
+}
+
+/// The local time as a 12-hour clock, like "3:07 PM".
+fn clock_text() -> String {
+    let (hour, min) = local_hour_min();
+    let h12 = if hour % 12 == 0 { 12 } else { hour % 12 };
+    format!("{h12}:{min:02} {}", if hour < 12 { "AM" } else { "PM" })
+}
+
+/// Hour (0-23) and minute in the local time zone.
+fn local_hour_min() -> (i32, i32) {
+    // SAFETY: `time(NULL)` only returns the time, and `localtime_r` writes into our own `tm`.
+    unsafe {
+        let now = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&now, &mut tm).is_null() {
+            return (0, 0);
+        }
+        (tm.tm_hour, tm.tm_min)
+    }
+}
+
+/// Time left until the next minute starts, plus a little so the clock never lands just short.
+fn until_next_minute() -> std::time::Duration {
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let into_minute = since_epoch.as_millis() % 60_000;
+    std::time::Duration::from_millis((60_000 - into_minute) as u64 + 50)
 }
 
 /// One window in the bar's list.
@@ -227,6 +267,11 @@ impl Bar {
             end -= w;
             parts.push((Rect::new(end, 0, w, h), part));
         }
+        if m.clock.is_some() {
+            let w = clock_width(m.config.font_size);
+            end -= w;
+            parts.push((Rect::new(end, 0, w, h), Part::Clock));
+        }
 
         // Room for the divider after the workspaces.
         let (x0, x1) = (x + 10, end - 6);
@@ -240,8 +285,8 @@ impl Bar {
         parts
     }
 
-    /// Top to bottom: workspaces, one row per window, and the end buttons in the bottom row
-    /// (wrapping onto more rows above it if they don't fit).
+    /// Top to bottom: workspaces, one row per window, the end buttons in the bottom row
+    /// (wrapping onto more rows above it if they don't fit), and the clock under everything.
     fn layout_vertical(m: &Model) -> Vec<(Rect, Part)> {
         let (w, height) = m.size;
         let row = m.config.height;
@@ -257,7 +302,12 @@ impl Bar {
 
         // End buttons, square, placed right to left from the bottom-right corner. The layout
         // button comes last and fills what's left of its row.
-        let (mut x, mut bottom) = (w, height - row);
+        let mut bottom = height - row;
+        if m.clock.is_some() {
+            parts.push((Rect::new(0, bottom, w, row), Part::Clock));
+            bottom -= row;
+        }
+        let mut x = w;
         for part in END_BUTTONS.into_iter().rev() {
             if x < row && x < w {
                 x = w;
@@ -448,7 +498,15 @@ impl Bar {
                         text.draw(&mut canvas, &label, px, (x as f32, baseline), color, (x, right));
                     }
                 }
-                Part::Layout | Part::Settings | Part::Launcher => {
+                Part::Clock => {
+                    let Some(time) = &m.clock else { continue };
+                    if vertical {
+                        // A short rule above it, like the one under the workspaces.
+                        canvas.fill_rect(r.x + 8 * s, r.y, r.w - 16 * s, s, p.separator);
+                    }
+                    centered(&mut canvas, time, r, px, p.text);
+                }
+                Part::Layout | Part::Settings | Part::Power => {
                     if hovered {
                         rounded(&mut canvas, inset(r, 3 * s), p.hover);
                     }
@@ -457,12 +515,7 @@ impl Bar {
                     match part {
                         Part::Layout => draw_layout_glyph(&mut canvas, m.layout, r, s, color),
                         Part::Settings => draw_gear(&mut canvas, cx as f32, cy as f32, s as f32, color),
-                        _ => {
-                            // A plus sign from two rounded bars.
-                            let (len, th) = (12 * s, 2 * s);
-                            canvas.fill_rounded_rect(cx - len / 2, cy - th / 2, len, th, s as f32, color);
-                            canvas.fill_rounded_rect(cx - th / 2, cy - len / 2, th, len, s as f32, color);
-                        }
+                        _ => draw_power(&mut canvas, cx as f32, cy as f32, s as f32, color),
                     }
                 }
             }
@@ -564,7 +617,56 @@ fn draw_gear(canvas: &mut Canvas, cx: f32, cy: f32, s: f32, color: Color) {
     }
 }
 
+/// The power symbol: a ring open at the top with a bar through the gap, centered on
+/// (cx, cy), anti-aliased.
+fn draw_power(canvas: &mut Canvas, cx: f32, cy: f32, s: f32, color: Color) {
+    // Ring radius and stroke half-width, in logical pixels; the gap's half-angle.
+    let (ring, half) = (5.5 * s, 1.0 * s);
+    let gap = 0.75f32;
+    let reach = (ring + half).ceil() as i32 + 2;
+    let (x0, y0) = (cx.floor() as i32, cy.floor() as i32);
+    for y in y0 - reach..=y0 + reach {
+        for x in x0 - reach..=x0 + reach {
+            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+            let r = (dx * dx + dy * dy).sqrt();
+            // Angle away from straight up; the ring stops `gap` either side of it, with round ends.
+            let from_top = dx.atan2(-dy).abs();
+            let ring_d = if from_top >= gap {
+                (r - ring).abs()
+            } else {
+                let end = (cx + ring * gap.sin() * dx.signum(), cy - ring * gap.cos());
+                ((x as f32 + 0.5 - end.0).powi(2) + (y as f32 + 0.5 - end.1).powi(2)).sqrt()
+            };
+            // The bar: from the centre up past the ring's top, with round ends.
+            let (top, bottom) = (cy - ring - 0.5 * s, cy - 0.5 * s);
+            let ny = (y as f32 + 0.5).clamp(top, bottom);
+            let bar_d = (dx.powi(2) + (y as f32 + 0.5 - ny).powi(2)).sqrt();
+            let coverage = (half - ring_d.min(bar_d) + 0.5).clamp(0.0, 1.0);
+            if coverage > 0.0 {
+                canvas.blend(x, y, color, coverage);
+            }
+        }
+    }
+}
+
 impl State {
+    /// Wake at the start of every minute so a bar with the clock repaints. Bars without one
+    /// compare equal to their cached image, so this costs next to nothing.
+    pub fn start_clock_timer(&mut self) {
+        use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+        let result = self
+            .loop_handle
+            .insert_source(Timer::from_duration(until_next_minute()), |_, _, state| {
+                if state.config.bar.enabled && !state.config.bar.clock_outputs.is_empty() {
+                    state.needs_redraw = true;
+                }
+                TimeoutAction::ToDuration(until_next_minute())
+            });
+        if let Err(e) = result {
+            tracing::warn!("clock timer: {e}");
+        }
+    }
+
     /// Opens the settings app, or brings it forward if it's already open.
     fn open_settings(&mut self) {
         let open = self
@@ -699,6 +801,7 @@ impl State {
             layout: ws.layout,
             hover: self.bar.hover.as_ref().filter(|(n, _)| *n == name).map(|(_, p)| *p),
             active_monitor: mon == self.active_mon,
+            clock: self.config.bar.clock_on(&name).then(clock_text),
         }
     }
 
@@ -788,11 +891,9 @@ impl State {
             }
             (Part::Layout, BTN_LEFT | BTN_RIGHT) => self.run_action(Action::Layout(LayoutChoice::Next)),
             (Part::Settings, BTN_LEFT) => self.open_settings(),
-            (Part::Launcher, BTN_LEFT) => {
-                let cmd = self.config.bar.launcher.clone();
-                if !cmd.is_empty() {
-                    self.spawn(&cmd);
-                }
+            (Part::Power, BTN_LEFT | BTN_RIGHT) => {
+                let pos = self.seat.get_pointer().unwrap().current_location();
+                self.open_power_menu(mon, pos);
             }
             _ => {}
         }
@@ -968,6 +1069,7 @@ mod tests {
             layout: LayoutKind::Tile,
             hover,
             active_monitor: true,
+            clock: None,
         }
     }
 
@@ -979,12 +1081,17 @@ mod tests {
     fn layout_parts_do_not_overlap() {
         let bar = Bar::new(&Config::default().bar);
         let tabs = [("one", true), ("two", false), ("three", false)];
-        for (size, position) in [
+        for ((size, position), clock) in [
             ((1200, 28), BarPosition::Top),
             ((180, 1400), BarPosition::Left),
             ((180, 1400), BarPosition::Right),
-        ] {
-            let parts = bar.layout(&model(size, position, &tabs, None));
+        ]
+        .into_iter()
+        .flat_map(|c| [(c, false), (c, true)])
+        {
+            let mut m = model(size, position, &tabs, None);
+            m.clock = clock.then(|| "12:59 PM".into());
+            let parts = bar.layout(&m);
             for (i, (a, pa)) in parts.iter().enumerate() {
                 assert!(
                     a.x >= 0 && a.y >= 0 && a.x + a.w <= size.0 && a.y + a.h <= size.1,
@@ -997,6 +1104,14 @@ mod tests {
             assert_eq!(parts.iter().filter(|(_, p)| matches!(p, Part::Tab(_))).count(), 3);
             for button in END_BUTTONS {
                 assert_eq!(parts.iter().filter(|(_, p)| *p == button).count(), 1, "{button:?}");
+            }
+            let clocks: Vec<_> = parts.iter().filter(|(_, p)| *p == Part::Clock).collect();
+            assert_eq!(clocks.len(), clock as usize);
+            if position.vertical()
+                && let Some((r, _)) = clocks.first()
+            {
+                // The very bottom of the bar.
+                assert_eq!(r.y + r.h, size.1);
             }
         }
     }
@@ -1051,6 +1166,7 @@ mod tests {
             Some(Part::Tab(1)),
         );
         let mut m = m;
+        m.clock = Some(clock_text());
         for (tab, app) in m.tabs.iter_mut().zip(["Alacritty", "vivaldi-stable", "code", "XClock"]) {
             tab.app_id = app.into();
         }

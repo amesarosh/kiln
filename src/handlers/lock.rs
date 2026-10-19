@@ -94,6 +94,7 @@ impl State {
         locker.lock();
         self.lock = LockState::Locked { lock };
         tracing::info!("session locked");
+        self.locked_for_suspend();
     }
 
     /// Monitors changed size or scale: lock surfaces must match their monitor exactly.

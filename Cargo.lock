@@ -3457,6 +3457,7 @@ dependencies = [
  "ab_glyph_rasterizer",
  "bitflags 2.13.2",
  "inotify",
+ "libc",
  "png 0.18.1",
  "resvg",
  "rustix 1.1.5",

@@ -115,6 +115,8 @@ pub struct General {
     pub xwayland: bool,
     /// Keep the clipboard after the app that copied closes.
     pub keep_clipboard: bool,
+    /// Command the power menu locks the screen with; empty picks an installed locker.
+    pub locker: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -197,7 +199,11 @@ struct RawBar {
     foreground: Option<String>,
     accent: Option<String>,
     dim: Option<String>,
-    launcher: String,
+    /// What the old + button ran. It's the power button now; still accepted so older
+    /// config files load.
+    #[serde(default)]
+    #[allow(dead_code)]
+    launcher: Option<String>,
     #[serde(default)]
     colors: ColorDefs,
 }
@@ -255,6 +261,9 @@ struct RawOutput {
     transform: Option<String>,
     /// Where this monitor's bar goes, overriding `[bar] position`; "none" hides it.
     bar: Option<String>,
+    /// Show a clock at the end of this monitor's bar.
+    #[serde(default)]
+    clock: bool,
     /// This monitor's default layout, overriding `[layout] default`.
     layout: Option<LayoutKind>,
 }
@@ -320,6 +329,11 @@ impl BarConfig {
             None => Some(self.position),
         }
     }
+
+    /// Whether the bar on the monitor with this connector name shows the clock.
+    pub fn clock_on(&self, output: &str) -> bool {
+        self.clock_outputs.iter().any(|n| n.eq_ignore_ascii_case(output))
+    }
 }
 
 /// The built-in clickable bar.
@@ -333,14 +347,14 @@ pub struct BarConfig {
     pub width: i32,
     /// Per-monitor positions from `[[outputs]]`, by name; `None` means no bar there.
     pub per_output: Vec<(String, Option<BarPosition>)>,
+    /// Monitors whose bar shows the clock, from `clock = true` in `[[outputs]]`.
+    pub clock_outputs: Vec<String>,
     pub font: String,
     pub font_size: f32,
     pub palette: Palette,
     /// From `[theme]`, so the bar repaints when they change.
     pub radius: f32,
     pub icon_theme: String,
-    /// Command run by the bar's + button.
-    pub launcher: String,
 }
 
 #[derive(Debug, Clone)]
@@ -703,6 +717,7 @@ impl Config {
             height: rb.height,
             width: rb.width,
             per_output,
+            clock_outputs: raw.outputs.iter().filter(|o| o.clock).map(|o| o.name.clone()).collect(),
             font: rb.font.clone().unwrap_or_else(|| theme.font.clone()),
             font_size: rb.font_size.unwrap_or(theme.font_size),
             radius: theme.radius,
@@ -718,7 +733,6 @@ impl Config {
                 "bar",
                 &mut problems,
             ),
-            launcher: rb.launcher.clone(),
         };
 
         let mut layout = raw.layout;
@@ -1287,6 +1301,10 @@ mod tests {
         assert_eq!(c.bar.position_for("dp-4"), Some(BarPosition::Left));
         assert_eq!(c.bar.position_for("DP-5"), None);
         assert_eq!(c.bar.position_for("HDMI-A-5"), Some(BarPosition::Top));
+        assert!(!c.bar.clock_on("DP-4"));
+        let c = Config::parse_user("[[outputs]]\nname = \"DP-4\"\nclock = true\n").unwrap();
+        assert!(c.bar.clock_on("dp-4"));
+        assert!(!c.bar.clock_on("DP-5"));
         assert!(Config::parse_user("[[outputs]]\nname = \"DP-4\"\nbar = \"middle\"\n").is_err());
     }
 

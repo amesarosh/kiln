@@ -1,5 +1,5 @@
-//! Pop-up menus drawn by the compositor, starting with the window menu (right-click a tab in
-//! the bar). Painted on the CPU like the bar, from the theme's font, palette and radius, and
+//! Pop-up menus drawn by the compositor: the window menu (right-click a tab in the bar) and
+//! the power menu (the power button at the end of the bar). Painted on the CPU like the bar, from the theme's font, palette and radius, and
 //! drawn above everything except the pointer.
 //!
 //! Mouse: click an item, or press-drag-release from where the menu opened. Click elsewhere to
@@ -17,6 +17,7 @@ use smithay::{
 use crate::{
     config::{Action, Color},
     layout::Rect,
+    power::PowerAction,
     state::{State, close_window, toplevel_ids},
     text::{Canvas, Text},
     theme::Theme,
@@ -41,6 +42,13 @@ pub enum MenuAction {
     MoveToWorkspace(usize),
     /// Monitor index.
     MoveToMonitor(usize),
+    Power(PowerAction),
+}
+
+/// What a menu is for.
+pub enum MenuTarget {
+    Window(Window),
+    Power,
 }
 
 enum Entry {
@@ -81,7 +89,7 @@ pub enum MenuKey {
 }
 
 pub struct Menu {
-    pub window: Window,
+    pub target: MenuTarget,
     pub output: Output,
     /// Top-left corner, in global logical coordinates.
     pub loc: Point<i32, Logical>,
@@ -185,7 +193,11 @@ impl Panel {
 
     fn action(&self, hit: Hit) -> Option<MenuAction> {
         match hit {
-            Hit::Workspace(n) => Some(MenuAction::MoveToWorkspace(n)),
+            Hit::Workspace(n) => self
+                .entries
+                .iter()
+                .any(|e| matches!(e, Entry::Workspaces { occupied, .. } if n < occupied.len()))
+                .then_some(MenuAction::MoveToWorkspace(n)),
             Hit::Item(i) => match self.entries.get(i)? {
                 Entry::Item { action, .. } => Some(*action),
                 _ => None,
@@ -342,12 +354,27 @@ fn ws_buttons(row: Rect, count: usize, row_h: i32) -> Vec<Rect> {
         .collect()
 }
 
+fn power_entries() -> Vec<Entry> {
+    let item = |label: &str, action: PowerAction| Entry::Item {
+        label: label.into(),
+        action: MenuAction::Power(action),
+        danger: false,
+    };
+    vec![
+        item("Lock", PowerAction::Lock),
+        item("Suspend", PowerAction::Suspend),
+        Entry::Separator,
+        item("Log out", PowerAction::Logout),
+        Entry::Separator,
+        item("Restart", PowerAction::Restart),
+        item("Shut down", PowerAction::Shutdown),
+    ]
+}
+
 impl State {
     /// Right-click on a window's tab: open its menu at the pointer.
     pub fn open_window_menu(&mut self, window: Window, pos: Point<f64, Logical>) {
         let Some(mon) = self.monitor_of(&window) else { return };
-        self.load_ui_text();
-        let Some((_, text)) = &self.ui_text else { return };
 
         let m = &self.monitors[mon];
         let ws = m.ws();
@@ -403,15 +430,30 @@ impl State {
         });
 
         let output = self.monitors[mon].output.clone();
+        self.show_menu(MenuTarget::Window(window), output, entries, pos);
+    }
+
+    /// The power button: lock, suspend, log out, restart, shut down.
+    pub fn open_power_menu(&mut self, mon: usize, pos: Point<f64, Logical>) {
+        let entries = power_entries();
+        let Some(output) = self.monitors.get(mon).map(|m| m.output.clone()) else {
+            return;
+        };
+        self.show_menu(MenuTarget::Power, output, entries, pos);
+    }
+
+    /// Open a menu at the pointer, pushed back inside the monitor if it would hang off an edge.
+    fn show_menu(&mut self, target: MenuTarget, output: Output, entries: Vec<Entry>, pos: Point<f64, Logical>) {
+        self.load_ui_text();
+        let Some((_, text)) = &self.ui_text else { return };
         let panel = Panel::new(text, &self.config.theme, entries);
         let mut menu = Menu {
-            window,
+            target,
             output: output.clone(),
             loc: pos.to_i32_round(),
             opened_at: pos,
             panel,
         };
-        // Open at the pointer, pushed back inside the monitor if it would hang off an edge.
         if let Some(geo) = self.space.output_geometry(&output) {
             let (w, h) = menu.panel.size;
             let x = (pos.x as i32).min(geo.loc.x + geo.size.w - w).max(geo.loc.x);
@@ -447,9 +489,11 @@ impl State {
     /// The open menu, unless its window closed or left the screen (then it's hidden, and
     /// ignores input until it's closed).
     fn live_menu(&self) -> Option<&Menu> {
-        self.menu.as_ref().filter(|m| {
-            self.monitor_showing(&m.window)
-                .is_some_and(|mon| self.monitors[mon].output == m.output)
+        self.menu.as_ref().filter(|m| match &m.target {
+            MenuTarget::Window(w) => self
+                .monitor_showing(w)
+                .is_some_and(|mon| self.monitors[mon].output == m.output),
+            MenuTarget::Power => self.monitors.iter().any(|mon| mon.output == m.output),
         })
     }
 
@@ -521,7 +565,10 @@ impl State {
         let Some(menu) = self.menu.take() else { return };
         self.needs_redraw = true;
         let Some(action) = menu.panel.action(hit) else { return };
-        let w = menu.window;
+        if let MenuAction::Power(p) = action {
+            return self.power(p);
+        }
+        let MenuTarget::Window(w) = menu.target else { return };
         let Some(mon) = self.monitor_showing(&w) else { return };
         // Every action works on the focused window, so focus the menu's window first.
         self.active_mon = mon;
@@ -533,6 +580,7 @@ impl State {
             MenuAction::ToggleFullscreen => self.run_action(Action::ToggleFullscreen),
             MenuAction::MoveToWorkspace(n) => self.run_action(Action::MoveToWorkspace(n + 1)),
             MenuAction::MoveToMonitor(target) => self.move_window_to_monitor(target),
+            MenuAction::Power(_) => {}
         }
     }
 
@@ -643,6 +691,19 @@ mod tests {
     }
 
     #[test]
+    fn power_menu_picks_its_actions_and_ignores_workspace_keys() {
+        let text = Text::load("sans").expect("font");
+        let theme = crate::config::Config::default().theme;
+        let panel = Panel::new(&text, &theme, power_entries());
+        assert_eq!(panel.action(Hit::Item(0)), Some(MenuAction::Power(PowerAction::Lock)));
+        assert_eq!(
+            panel.action(Hit::Item(6)),
+            Some(MenuAction::Power(PowerAction::Shutdown))
+        );
+        assert_eq!(panel.action(Hit::Workspace(0)), None);
+    }
+
+    #[test]
     fn hits_match_rows() {
         let Some(text) = Text::load("sans") else { return };
         let theme = crate::config::Config::default().theme;
@@ -666,8 +727,13 @@ mod tests {
         };
         let text = Text::load("sans").expect("font");
         let theme = crate::config::Config::default().theme;
-        let mut panel = sample(&theme, &text);
-        panel.hover = Some(Hit::Item(2));
+        // MENU_PREVIEW_POWER shows the power menu instead of the window menu.
+        let mut panel = if std::env::var_os("MENU_PREVIEW_POWER").is_some() {
+            Panel::new(&text, &theme, power_entries())
+        } else {
+            sample(&theme, &text)
+        };
+        panel.hover = Some(Hit::Item(1));
         let scale = std::env::var("MENU_PREVIEW_SCALE")
             .ok()
             .and_then(|s| s.parse().ok())
