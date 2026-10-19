@@ -3,6 +3,14 @@
 //! Glyphs are hinted (snapped to the pixel grid by the font's own instructions, or the
 //! autohinter) and placed at whole pixels, so stems come out as solid lines instead of
 //! being smeared across two pixels. `ab_glyph` supplies the metrics and kerning.
+//!
+//! When fontconfig sets a subpixel order (as most desktops do), glyphs are drawn at three
+//! times the width and each color stripe of a pixel gets its own coverage, like FreeType's
+//! LCD rendering. Small text keeps its shape that way instead of turning to gray mush.
+//!
+//! Text is mixed into the background with a gamma curve and a slight contrast push (see
+//! `text_coverage`), as FreeType and Skia do, so light text on a dark bar keeps solid edges
+//! instead of looking thin and faint.
 
 use std::cell::RefCell;
 
@@ -15,6 +23,10 @@ use skrifa::{
 };
 
 use crate::config::Color;
+use wt_config::fonts::Subpixel;
+
+/// FreeType's default LCD filter, spreading each subpixel over its neighbours to tame color fringes.
+const LCD_FILTER: [f32; 5] = [0x08 as f32 / 256.0, 0x4D as f32 / 256.0, 0x56 as f32 / 256.0, 0x4D as f32 / 256.0, 0x08 as f32 / 256.0];
 
 pub struct Text {
     font: FontVec,
@@ -22,6 +34,7 @@ pub struct Text {
     data: Vec<u8>,
     /// Hinting set up for the last pixel size drawn; rebuilding it runs the font's setup programs.
     hinting: RefCell<Option<(f32, HintingInstance)>>,
+    subpixel: Subpixel,
 }
 
 impl Text {
@@ -35,8 +48,9 @@ impl Text {
             }
             match FontVec::try_from_vec(data.clone()) {
                 Ok(font) => {
-                    tracing::info!("ui font: {}", path.display());
-                    return Some(Self { font, data, hinting: RefCell::new(None) });
+                    let subpixel = wt_config::fonts::subpixel(name);
+                    tracing::info!("ui font: {} (subpixel: {subpixel:?})", path.display());
+                    return Some(Self { font, data, hinting: RefCell::new(None), subpixel });
                 }
                 Err(e) => tracing::warn!("{}: not a usable font: {e}", path.display()),
             }
@@ -100,7 +114,7 @@ impl Text {
         let mut hinting = self.hinting.borrow_mut();
         if hinting.as_ref().is_none_or(|(size, _)| *size != ppem) {
             let options = HintingOptions::from(Target::Smooth {
-                mode: SmoothMode::Normal,
+                mode: if self.subpixel == Subpixel::None { SmoothMode::Normal } else { SmoothMode::Lcd },
                 symmetric_rendering: true,
                 // Keep the font's own advances, so `width` (from ab_glyph) stays exact.
                 preserve_linear_metrics: true,
@@ -131,11 +145,19 @@ impl Text {
             if glyph.draw(settings, &mut path).is_err() {
                 continue;
             }
-            path.fill(origin, baseline, |px_x, px_y, coverage| {
-                if px_x >= clip.0 && px_x < clip.1 {
-                    canvas.blend(px_x, px_y, color, coverage);
-                }
-            });
+            match self.subpixel {
+                Subpixel::None => path.fill(origin, baseline, |px_x, px_y, coverage| {
+                    if px_x >= clip.0 && px_x < clip.1 {
+                        canvas.blend_text(px_x, px_y, color, coverage);
+                    }
+                }),
+                order => path.fill_lcd(origin, baseline, |px_x, px_y, [a, b, c]| {
+                    if px_x >= clip.0 && px_x < clip.1 {
+                        let rgb = if order == Subpixel::Bgr { [c, b, a] } else { [a, b, c] };
+                        canvas.blend_text_lcd(px_x, px_y, color, rgb);
+                    }
+                }),
+            }
         }
     }
 }
@@ -159,8 +181,8 @@ impl Path {
         self.segments.clear();
     }
 
-    /// Rasterize with the glyph origin at pixel (`x`, `baseline`), calling `put` per covered pixel.
-    fn fill(&self, x: f32, baseline: f32, mut put: impl FnMut(i32, i32, f32)) {
+    /// Bounds of the outline in pixels as (x0, y0, x1, y1), y pointing down; None if empty.
+    fn bounds(&self) -> Option<(f32, f32, f32, f32)> {
         let points = self.segments.iter().flat_map(|s| match s {
             Segment::Line(p) => p.as_slice(),
             Segment::Quad(p) => p.as_slice(),
@@ -173,12 +195,10 @@ impl Path {
             y0 = y0.min(-py);
             y1 = y1.max(-py);
         }
-        if x0 > x1 || y0 > y1 {
-            return; // nothing drawn, e.g. a space
-        }
-        let (left, top) = (x0.floor(), y0.floor());
-        let (w, h) = ((x1.ceil() - left) as usize + 1, (y1.ceil() - top) as usize + 1);
-        let to = |&(px, py): &(f32, f32)| -> Point { point(px - left, -py - top) };
+        (x0 <= x1 && y0 <= y1).then_some((x0, y0, x1, y1))
+    }
+
+    fn rasterize(&self, w: usize, h: usize, to: impl Fn(&(f32, f32)) -> Point) -> Rasterizer {
         let mut r = Rasterizer::new(w, h);
         for s in &self.segments {
             match s {
@@ -187,6 +207,47 @@ impl Path {
                 Segment::Cubic([a, b, c, d]) => r.draw_cubic(to(a), to(b), to(c), to(d)),
             }
         }
+        r
+    }
+
+    /// Like `fill`, but with a coverage per subpixel stripe (left, middle, right) of each pixel.
+    /// `x` must be a whole pixel.
+    fn fill_lcd(&self, x: f32, baseline: f32, mut put: impl FnMut(i32, i32, [f32; 3])) {
+        let Some((x0, y0, x1, y1)) = self.bounds() else { return };
+        // One spare pixel each side: the filter spreads coverage two subpixels outwards.
+        let (left, top) = (x0.floor() - 1.0, y0.floor());
+        let wpx = (x1.ceil() - left) as usize + 2;
+        let (w, h) = (wpx * 3, (y1.ceil() - top) as usize + 1);
+        let r = self.rasterize(w, h, |&(px, py)| point((px - left) * 3.0, -py - top));
+        let mut cov = vec![0.0f32; w * h];
+        r.for_each_pixel_2d(|gx, gy, c| cov[gy as usize * w + gx as usize] = c.min(1.0));
+
+        let (ox, oy) = ((x + left) as i32, (baseline + top) as i32);
+        let mut row = vec![0.0f32; w];
+        for gy in 0..h {
+            let line = &cov[gy * w..(gy + 1) * w];
+            for (i, out) in row.iter_mut().enumerate() {
+                *out = LCD_FILTER
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(k, f)| (i + k).checked_sub(2).and_then(|j| line.get(j)).map(|c| c * f))
+                    .sum();
+            }
+            for p in 0..wpx {
+                let rgb = [row[p * 3], row[p * 3 + 1], row[p * 3 + 2]];
+                if rgb.iter().any(|&c| c > 0.0) {
+                    put(ox + p as i32, oy + gy as i32, rgb);
+                }
+            }
+        }
+    }
+
+    /// Rasterize with the glyph origin at pixel (`x`, `baseline`), calling `put` per covered pixel.
+    fn fill(&self, x: f32, baseline: f32, mut put: impl FnMut(i32, i32, f32)) {
+        let Some((x0, y0, x1, y1)) = self.bounds() else { return }; // e.g. a space
+        let (left, top) = (x0.floor(), y0.floor());
+        let (w, h) = ((x1.ceil() - left) as usize + 1, (y1.ceil() - top) as usize + 1);
+        let r = self.rasterize(w, h, |&(px, py)| point(px - left, -py - top));
         let (ox, oy) = ((x + left) as i32, (baseline + top) as i32);
         r.for_each_pixel_2d(|gx, gy, coverage| {
             if coverage > 0.0 {
@@ -225,6 +286,30 @@ impl OutlinePen for Path {
     }
 }
 
+/// Gamma text is mixed in. 2.2 is true linear light; a bit lower keeps light-on-dark text
+/// from looking bold, as FreeType's and Skia's text gamma do.
+const TEXT_GAMMA: f32 = 1.8;
+/// How much partly covered pixels are pushed towards solid, for crisper edges.
+const TEXT_CONTRAST: f32 = 0.2;
+/// Extra darkening for dark text, which mixing in linear light otherwise thins out.
+const DARK_TEXT_BOOST: f32 = 0.4;
+
+fn to_linear(c: f32) -> f32 {
+    c.clamp(0.0, 1.0).powf(TEXT_GAMMA)
+}
+
+fn to_srgb(c: f32) -> f32 {
+    c.clamp(0.0, 1.0).powf(1.0 / TEXT_GAMMA)
+}
+
+/// Glyph coverage adjusted for display: a contrast push, plus more for dark text
+/// (the full boost for black, none for white).
+fn text_coverage(c: f32, src: Color) -> f32 {
+    let lum = 0.2126 * to_linear(src[0]) + 0.7152 * to_linear(src[1]) + 0.0722 * to_linear(src[2]);
+    let c = c.clamp(0.0, 1.0).powf(1.0 / (1.0 + DARK_TEXT_BOOST * (1.0 - lum)));
+    (c + TEXT_CONTRAST * c * (1.0 - c)).min(1.0)
+}
+
 /// An RGBA image in straight (non-premultiplied) alpha, converted when uploaded.
 pub struct Canvas {
     pub w: i32,
@@ -253,6 +338,34 @@ impl Canvas {
         }
         for i in 0..3 {
             dst[i] = (src[i] * a + dst[i] * dst[3] * (1.0 - a)) / out_a;
+        }
+        dst[3] = out_a;
+    }
+
+    /// Blend text: like `blend`, but mixed in linear light with the coverage tuned by
+    /// `text_coverage`, so glyph edges keep their weight on any background.
+    pub fn blend_text(&mut self, x: i32, y: i32, src: Color, coverage: f32) {
+        self.blend_text_lcd(x, y, src, [coverage; 3]);
+    }
+
+    /// Blend text with a separate coverage per color channel (subpixel text). Only an opaque
+    /// pixel can take that; over a see-through one the channels are averaged instead.
+    pub fn blend_text_lcd(&mut self, x: i32, y: i32, src: Color, rgb: [f32; 3]) {
+        if x < 0 || y < 0 || x >= self.w || y >= self.h {
+            return;
+        }
+        let dst = &mut self.px[(y * self.w + x) as usize];
+        let rgb = if dst[3] < 0.999 { [(rgb[0] + rgb[1] + rgb[2]) / 3.0; 3] } else { rgb };
+        let rgb = rgb.map(|c| text_coverage(c, src) * src[3]);
+        // Straight alpha: the channels share one alpha, so use their average for it.
+        let a = (rgb[0] + rgb[1] + rgb[2]) / 3.0;
+        let out_a = a + dst[3] * (1.0 - a);
+        if out_a <= 0.0 {
+            return;
+        }
+        for i in 0..3 {
+            let mixed = to_linear(src[i]) * rgb[i] + to_linear(dst[i]) * dst[3] * (1.0 - rgb[i]);
+            dst[i] = to_srgb(mixed / (rgb[i] + dst[3] * (1.0 - rgb[i])).max(f32::EPSILON));
         }
         dst[3] = out_a;
     }
@@ -330,6 +443,23 @@ mod tests {
         let px = c.to_premultiplied_rgba();
         assert_eq!(px[3], 255);
         assert!((127..=128).contains(&px[0]));
+    }
+
+    #[test]
+    fn light_text_edges_are_brighter_than_plain_mixing() {
+        let mut c = Canvas::new(1, 1, [0.0, 0.0, 0.0, 1.0]);
+        c.blend_text(0, 0, [1.0, 1.0, 1.0, 1.0], 0.5);
+        let px = c.to_premultiplied_rgba();
+        assert_eq!(px[3], 255);
+        assert!(px[0] > 160, "half-covered white on black: {}", px[0]);
+    }
+
+    #[test]
+    fn full_coverage_text_is_exact() {
+        let mut c = Canvas::new(1, 1, [0.2, 0.3, 0.4, 1.0]);
+        c.blend_text(0, 0, [0.9, 0.8, 0.7, 1.0], 1.0);
+        let px = c.to_premultiplied_rgba();
+        assert_eq!(&px[..3], &[230, 204, 179]);
     }
 
     #[test]

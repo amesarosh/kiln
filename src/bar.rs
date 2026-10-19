@@ -1020,13 +1020,15 @@ mod tests {
         assert_eq!(bar.scroll_steps(AxisSource::Finger, 25.0, None), 1);
     }
 
-    /// `BAR_PREVIEW=/path/out.rgba cargo test bar_preview` writes the bar as raw RGBA for a quick look.
+    /// `BAR_PREVIEW=/path/out.rgba cargo test bar_preview` writes the bar as raw RGBA for a quick look
+    /// (`BAR_PREVIEW_FONT` picks the font, `BAR_PREVIEW_VERTICAL` a side bar).
     #[test]
     fn bar_preview() {
         let Some(path) = std::env::var_os("BAR_PREVIEW") else {
             return;
         };
-        let text = Text::load("sans").expect("font");
+        let font = std::env::var("BAR_PREVIEW_FONT").unwrap_or_else(|_| "sans".into());
+        let text = Text::load(&font).expect("font");
         let bar = Bar::new(&Config::default().bar);
         let vertical = std::env::var_os("BAR_PREVIEW_VERTICAL").is_some();
         let (size, position) = if vertical {
