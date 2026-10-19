@@ -47,6 +47,9 @@ const WS_ICON_GAP: i32 = 3;
 const WS_MAX_ICONS: usize = 4;
 /// Width of the "+N" count.
 const WS_MORE_W: i32 = 18;
+/// How far the pointer moves, in logical pixels, before a press on a workspace or tab becomes
+/// a drag.
+const DRAG_THRESHOLD: f64 = 4.0;
 
 /// A clickable piece of the bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +61,17 @@ pub enum Part {
     /// Opens the settings app.
     Settings,
     Launcher,
+}
+
+/// A workspace button or window tab being dragged to a new spot.
+#[derive(Debug, Clone, Copy)]
+pub struct BarDrag {
+    mon: usize,
+    /// What's being dragged, at its current spot.
+    part: Part,
+    start: Point<f64, Logical>,
+    /// Past the threshold, so it's a drag, not just a click.
+    pub moved: bool,
 }
 
 /// The buttons at the end of the bar, in order: left to right on a top or bottom bar, along the
@@ -142,6 +156,8 @@ pub struct Bar {
     pub hover: Option<(String, Part)>,
     /// Buttons pressed on the bar, so their release isn't sent to a client either.
     pub held_buttons: Vec<u32>,
+    /// A workspace or tab being dragged, from left-button press until release.
+    pub drag: Option<BarDrag>,
     scroll: f64,
 }
 
@@ -154,6 +170,7 @@ impl Bar {
             cached: RefCell::new(HashMap::new()),
             hover: None,
             held_buttons: Vec::new(),
+            drag: None,
             scroll: 0.0,
         }
     }
@@ -175,6 +192,8 @@ impl Bar {
     /// Drop the cached image of a monitor that went away.
     pub fn forget_output(&mut self, name: &str) {
         self.cached.borrow_mut().remove(name);
+        // Monitor indices may shift, so a drag in progress could land on the wrong bar.
+        self.drag = None;
         if self.hover.as_ref().is_some_and(|(n, _)| n == name) {
             self.hover = None;
         }
@@ -736,6 +755,15 @@ impl State {
         }
         let tab_window =
             |state: &State, i: usize| -> Option<Window> { state.ws().entries.get(i).map(|e| e.window.clone()) };
+        if button == BTN_LEFT && matches!(part, Part::Workspace(_) | Part::Tab(_)) {
+            let start = self.seat.get_pointer().unwrap().current_location();
+            self.bar.drag = Some(BarDrag {
+                mon,
+                part,
+                start,
+                moved: false,
+            });
+        }
         match (part, button) {
             (Part::Workspace(i), BTN_LEFT) => self.switch_workspace(i),
             (Part::Tab(i), BTN_LEFT) => {
@@ -770,6 +798,92 @@ impl State {
         }
     }
 
+    /// Pointer motion while a workspace or tab is held: once it's moved far enough, move the
+    /// held item to the spot under the pointer.
+    pub fn bar_drag_motion(&mut self, pos: Point<f64, Logical>) {
+        let Some(mut drag) = self.bar.drag else { return };
+        if !drag.moved {
+            let (dx, dy) = (pos.x - drag.start.x, pos.y - drag.start.y);
+            if dx.hypot(dy) < DRAG_THRESHOLD {
+                return;
+            }
+            drag.moved = true;
+            self.bar.drag = Some(drag);
+        }
+        let mon = drag.mon;
+        let (Some(rect), Some(position)) = (self.bar_rect(mon), self.bar_position(mon)) else {
+            return;
+        };
+        let vertical = position.vertical();
+        // Only the position along the bar counts, so the pointer can stray off the bar's edge.
+        let (x, y) = if vertical {
+            (rect.size.w / 2, (pos.y - rect.loc.y as f64) as i32)
+        } else {
+            ((pos.x - rect.loc.x as f64) as i32, rect.size.h / 2)
+        };
+        let model = self.bar_model(mon, (rect.size.w, rect.size.h), 1);
+        let parts = self.bar.layout(&model);
+        let rect_of = |part: Part| parts.iter().find(|(_, p)| *p == part).map(|(r, _)| *r);
+        let Some(from_rect) = rect_of(drag.part) else { return };
+        let Some((to_rect, to)) = parts
+            .iter()
+            .find(|(r, p)| {
+                std::mem::discriminant(p) == std::mem::discriminant(&drag.part)
+                    && x >= r.x
+                    && x < r.x + r.w
+                    && y >= r.y
+                    && y < r.y + r.h
+            })
+            .copied()
+        else {
+            return;
+        };
+        let (from, to_idx) = match (drag.part, to) {
+            (Part::Workspace(a), Part::Workspace(b)) | (Part::Tab(a), Part::Tab(b)) => (a, b),
+            _ => return,
+        };
+        if from == to_idx {
+            return;
+        }
+        // Move only once the pointer would be over the held item at its new spot. Workspace
+        // buttons differ in width, and without this a narrow one dragged over a wide one would
+        // swap back and forth.
+        let (p, size, start, end) = if vertical {
+            (y, from_rect.h, to_rect.y, to_rect.y + to_rect.h)
+        } else {
+            (x, from_rect.w, to_rect.x, to_rect.x + to_rect.w)
+        };
+        let lands = if to_idx > from { p >= end - size } else { p < start + size };
+        if !lands {
+            return;
+        }
+        let m = &mut self.monitors[mon];
+        match drag.part {
+            Part::Workspace(_) => {
+                if to_idx >= m.workspaces.len() {
+                    return;
+                }
+                let ws = m.workspaces.remove(from);
+                m.workspaces.insert(to_idx, ws);
+                m.active_ws = moved_index(m.active_ws, from, to_idx);
+                drag.part = Part::Workspace(to_idx);
+            }
+            _ => {
+                let entries = &mut m.ws_mut().entries;
+                if to_idx >= entries.len() {
+                    return;
+                }
+                let e = entries.remove(from);
+                entries.insert(to_idx, e);
+                drag.part = Part::Tab(to_idx);
+            }
+        }
+        self.bar.drag = Some(drag);
+        // Tabs are the tiling order, so the tiles follow.
+        self.arrange();
+        self.needs_redraw = true;
+    }
+
     /// Scroll over a bar or empty desktop to change that monitor's workspace. Returns true if it was used.
     pub fn bar_scroll(
         &mut self,
@@ -795,9 +909,33 @@ impl State {
     }
 }
 
+/// Where the item at `idx` ends up after the one at `from` is moved to `to`.
+fn moved_index(idx: usize, from: usize, to: usize) -> usize {
+    if idx == from {
+        to
+    } else if from < idx && idx <= to {
+        idx - 1
+    } else if to <= idx && idx < from {
+        idx + 1
+    } else {
+        idx
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moved_index_follows_a_move() {
+        // [a b c d], b moved to the end: [a c d b].
+        assert_eq!(moved_index(1, 1, 3), 3);
+        assert_eq!(moved_index(2, 1, 3), 1);
+        assert_eq!(moved_index(0, 1, 3), 0);
+        // d moved to the front: [d a b c].
+        assert_eq!(moved_index(0, 3, 0), 1);
+        assert_eq!(moved_index(3, 3, 0), 0);
+    }
     use crate::config::Config;
 
     fn model(size: (i32, i32), position: BarPosition, tabs: &[(&str, bool)], hover: Option<Part>) -> Model {

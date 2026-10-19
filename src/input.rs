@@ -5,7 +5,7 @@ use smithay::{
     },
     input::{
         keyboard::{FilterResult, Keysym, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, CursorImageStatus, GrabStartData, MotionEvent, RelativeMotionEvent},
+        pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GrabStartData, MotionEvent, RelativeMotionEvent},
     },
     utils::{Logical, Point, SERIAL_COUNTER},
 };
@@ -231,12 +231,16 @@ impl State {
             pointer.frame(self);
             return;
         }
+        self.bar_drag_motion(pos);
         self.bar_hover(pos);
         self.menu_motion(pos);
         self.switcher_motion(pos);
         if (self.over_bar(pos) || self.over_menu(pos) || self.over_switcher(pos)) && !pointer.is_grabbed() {
             // Clients don't reset the pointer when it leaves them, so show the normal arrow here.
             self.cursor_status = CursorImageStatus::default_named();
+        }
+        if self.bar.drag.is_some_and(|d| d.moved) {
+            self.cursor_status = CursorImageStatus::Named(CursorIcon::Grabbing);
         }
 
         // While a menu is open, hovering doesn't move focus away from what it's for.
@@ -362,6 +366,9 @@ impl State {
             && let Some(i) = self.bar.held_buttons.iter().position(|b| *b == button)
         {
             self.bar.held_buttons.swap_remove(i);
+            if button == BTN_LEFT {
+                self.bar.drag = None;
+            }
             return;
         }
 
