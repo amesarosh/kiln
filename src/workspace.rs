@@ -141,6 +141,28 @@ impl<W: Clone + PartialEq> Workspace<W> {
         self.entries.swap(tiled[pos], other);
     }
 
+    /// Two windows trade places. The slots keep their own height shares, so the layout
+    /// doesn't change size, only which window sits where.
+    pub fn swap_windows(&mut self, a: &W, b: &W) {
+        let (Some(i), Some(j)) = (self.index_of(a), self.index_of(b)) else {
+            return;
+        };
+        let wa = self.entries[i].window.clone();
+        self.entries[i].window = self.entries[j].window.clone();
+        self.entries[j].window = wa;
+    }
+
+    /// Move a window to just before `target` in the order.
+    pub fn move_before(&mut self, w: &W, target: &W) {
+        if w == target || !self.contains(target) {
+            return;
+        }
+        let Some(i) = self.index_of(w) else { return };
+        let entry = self.entries.remove(i);
+        let j = self.index_of(target).unwrap_or(self.entries.len());
+        self.entries.insert(j, entry);
+    }
+
     /// Swap the focused tiled window with the master. If it already is the master, swap with the next one.
     pub fn zoom(&mut self) {
         let Some(focus) = self.focus.clone() else { return };
@@ -260,6 +282,26 @@ mod tests {
         w.zoom();
         assert_eq!(order(&w), vec![2, 3, 1]);
         assert_eq!(w.focus, Some(2));
+    }
+
+    #[test]
+    fn swap_windows_keeps_slot_weights() {
+        let mut w = ws(&[1, 2, 3]);
+        w.entry_mut(&1).unwrap().weight = 2.0;
+        w.swap_windows(&1, &3);
+        assert_eq!(order(&w), vec![3, 2, 1]);
+        assert_eq!(w.tiled_weights(), vec![2.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn move_before_inserts() {
+        let mut w = ws(&[1, 2, 3, 4]);
+        w.move_before(&4, &2);
+        assert_eq!(order(&w), vec![1, 4, 2, 3]);
+        w.move_before(&1, &3);
+        assert_eq!(order(&w), vec![4, 2, 1, 3]);
+        w.move_before(&1, &99);
+        assert_eq!(order(&w), vec![4, 2, 1, 3]);
     }
 
     #[test]

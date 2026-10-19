@@ -22,6 +22,10 @@ impl Rect {
             h: (self.h - 2 * by).max(1),
         }
     }
+
+    pub fn contains(self, x: f64, y: f64) -> bool {
+        x >= self.x as f64 && y >= self.y as f64 && x < (self.x + self.w) as f64 && y < (self.y + self.h) as f64
+    }
 }
 
 pub use wt_config::LayoutKind;

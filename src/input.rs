@@ -11,7 +11,7 @@ use smithay::{
 };
 
 use crate::{
-    bar::{BTN_LEFT, BTN_RIGHT},
+    bar::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT},
     config::{Action, ModKey, Mods, normalize_keysym},
     grabs,
     handlers::pointer_lock::Constraint,
@@ -395,6 +395,16 @@ impl State {
                 } else {
                     grabs::begin_resize(self, &self.seat.clone(), w, start, serial);
                 }
+                return;
+            }
+
+            // Mod+middle-click: float or re-tile. Its release is swallowed too.
+            if let Some(w) = window.clone().filter(|_| self.mod_held(&mods))
+                && button == BTN_MIDDLE
+            {
+                self.bar.held_buttons.push(button);
+                self.focus_window(&w);
+                self.run_action(Action::ToggleFloating);
                 return;
             }
 

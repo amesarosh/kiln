@@ -92,7 +92,9 @@ sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applicatio
 | `Alt+Tab` / `Alt+Shift+Tab` | window switcher: all windows, most recent first; let go of Alt to switch (Escape cancels) |
 | `Mod+v` | pick from clipboard history (cliphist and fuzzel; start `wl-paste --watch cliphist store` in autostart) |
 | `Mod+Shift+e` | quit |
-| `Mod+left drag` / `Mod+right drag` | move / resize (floats the window); drop on another monitor to move it there |
+| `Mod+left drag` | move: a tiled window swaps places with the tile under the pointer and stays tiled, a floating one moves freely; drop on another monitor to move it there |
+| `Mod+right drag` | resize: a tiled window moves the borders it shares with its neighbours, a floating one changes size |
+| `Mod+middle click` | float or re-tile the window under the pointer |
 
 ## Configuration
 

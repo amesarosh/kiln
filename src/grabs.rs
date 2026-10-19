@@ -1,5 +1,6 @@
-//! Interactive move and resize. Moving makes a tiled window floating, like dwm. Resizing a
-//! tiled window keeps it tiled and moves the borders it shares with its neighbours.
+//! Interactive move and resize. Tiled windows stay tiled: moving one swaps it with the tile
+//! under the pointer, and resizing one moves the borders it shares with its neighbours.
+//! Floating windows move and resize freely.
 
 use smithay::{
     desktop::Window,
@@ -62,6 +63,14 @@ pub fn start_x11_grab(state: &mut State, seat: &Seat<State>, window: Window, res
 }
 
 pub fn begin_move(state: &mut State, seat: &Seat<State>, window: Window, start: GrabStartData<State>, serial: Serial) {
+    if is_tiled(state, &window) {
+        state.focus_window(&window);
+        let grab = TileMoveGrab { start, window };
+        if let Some(pointer) = seat.get_pointer() {
+            pointer.set_grab(state, grab, serial, Focus::Clear);
+        }
+        return;
+    }
     let Some(geo) = float_window(state, &window) else {
         return;
     };
@@ -105,6 +114,27 @@ pub fn begin_resize(
     if let Some(pointer) = seat.get_pointer() {
         pointer.set_grab(state, grab, serial, Focus::Clear);
     }
+}
+
+/// Shown in the tiling right now (not floating, not hidden behind a fullscreen window).
+fn is_tiled(state: &State, window: &Window) -> bool {
+    state.monitor_showing(window).is_some_and(|mon| {
+        let ws = state.monitors[mon].ws();
+        ws.fullscreen.is_none() && !ws.is_floating(window)
+    })
+}
+
+/// The tiled window whose slot is under a point. Only the tile layout has slots side by side.
+fn tile_at(state: &State, mon: usize, pos: Point<f64, Logical>) -> Option<Window> {
+    let ws = state.monitors[mon].ws();
+    if ws.layout != LayoutKind::Tile || ws.fullscreen.is_some() {
+        return None;
+    }
+    let rects = state.tile_rects(mon, state.work_area(mon)?);
+    ws.tiled()
+        .zip(rects)
+        .find(|(_, r)| r.contains(pos.x, pos.y))
+        .map(|(w, _)| w.clone())
 }
 
 /// Make the window floating at its current geometry and return that geometry.
@@ -236,6 +266,45 @@ impl TileResizeGrab {
     }
 
     fn on_release(&mut self, _state: &mut State, _location: Point<f64, Logical>) {}
+}
+
+/// Dragging a tiled window: it stays tiled and trades places with whichever tile the
+/// pointer enters.
+struct TileMoveGrab {
+    start: GrabStartData<State>,
+    window: Window,
+}
+
+impl TileMoveGrab {
+    fn on_motion(&mut self, state: &mut State, location: Point<f64, Logical>) {
+        let Some(mon) = state.monitor_showing(&self.window) else {
+            return;
+        };
+        if state.monitor_at(location) != Some(mon) {
+            return;
+        }
+        // After the swap the dragged window sits under the pointer, so this can't flip back.
+        if let Some(other) = tile_at(state, mon, location).filter(|o| *o != self.window) {
+            state.monitors[mon].ws_mut().swap_windows(&self.window, &other);
+            state.arrange();
+        }
+    }
+
+    /// Dropped on another monitor: it moves there, into the slot it was dropped on.
+    fn on_release(&mut self, state: &mut State, location: Point<f64, Logical>) {
+        let (Some(from), Some(to)) = (state.monitor_showing(&self.window), state.monitor_at(location)) else {
+            return;
+        };
+        if from == to {
+            return;
+        }
+        let target = tile_at(state, to, location);
+        state.adopt_dropped_window(&self.window, location);
+        if let Some(t) = target {
+            state.monitors[to].ws_mut().move_before(&self.window, &t);
+            state.arrange();
+        }
+    }
 }
 
 struct MoveGrab {
@@ -420,5 +489,6 @@ macro_rules! impl_grab {
 }
 
 impl_grab!(MoveGrab);
+impl_grab!(TileMoveGrab);
 impl_grab!(ResizeGrab);
 impl_grab!(TileResizeGrab);
