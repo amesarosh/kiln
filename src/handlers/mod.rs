@@ -14,9 +14,13 @@ use smithay::{
     delegate_data_device, delegate_fractional_scale, delegate_output, delegate_primary_selection, delegate_seat,
     delegate_viewporter,
     input::{Seat, SeatHandler, SeatState, keyboard::LedState, pointer::CursorImageStatus},
-    reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
+    reexports::wayland_server::{
+        Resource,
+        protocol::{wl_data_source::WlDataSource, wl_surface::WlSurface},
+    },
+    utils::{Logical, Point},
     wayland::{
-        compositor::with_states,
+        compositor::{SurfaceAttributes, with_states},
         fractional_scale::{FractionalScaleHandler, with_fractional_scale},
         output::OutputHandler,
         selection::{
@@ -125,7 +129,46 @@ impl DataDeviceHandler for State {
         &self.data_device_state
     }
 }
-impl ClientDndGrabHandler for State {}
+
+/// A drag icon: drawn at the pointer, moved by `offset` (set by the app through surface offsets).
+pub struct DndIcon {
+    pub surface: WlSurface,
+    pub offset: Point<i32, Logical>,
+}
+
+impl DndIcon {
+    /// Take the offset change from the icon's latest commit.
+    pub fn take_offset(&mut self) {
+        self.offset += take_buffer_delta(&self.surface);
+    }
+}
+
+fn take_buffer_delta(surface: &WlSurface) -> Point<i32, Logical> {
+    with_states(surface, |s| {
+        s.cached_state
+            .get::<SurfaceAttributes>()
+            .current()
+            .buffer_delta
+            .take()
+            .unwrap_or_default()
+    })
+}
+
+impl ClientDndGrabHandler for State {
+    fn started(&mut self, _source: Option<WlDataSource>, icon: Option<WlSurface>, _seat: Seat<Self>) {
+        // The app may have set the icon's offset before starting the drag, so count it too.
+        self.dnd_icon = icon.map(|surface| DndIcon {
+            offset: take_buffer_delta(&surface),
+            surface,
+        });
+        self.needs_redraw = true;
+    }
+
+    fn dropped(&mut self, _target: Option<WlSurface>, _validated: bool, _seat: Seat<Self>) {
+        self.dnd_icon = None;
+        self.needs_redraw = true;
+    }
+}
 impl ServerDndGrabHandler for State {}
 delegate_data_device!(State);
 

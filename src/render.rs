@@ -102,6 +102,17 @@ where
             _ => {}
         }
     }
+    // A drag icon, just under the pointer. Drawn on every monitor it may overlap.
+    if let Some(icon) = state.dnd_icon.as_ref().filter(|i| i.surface.is_alive()) {
+        let loc = (pointer - output_geo.loc.to_f64() + icon.offset.to_f64())
+            .to_physical(scale)
+            .to_i32_round();
+        out.extend(
+            render_elements_from_surface_tree(renderer, &icon.surface, loc, scale, 1.0, Kind::Unspecified)
+                .into_iter()
+                .map(OutputElement::Surface),
+        );
+    }
     // A turned-off monitor (only drawn when nested; on hardware it isn't rendered at all).
     if !state.monitor_powered(output) {
         push_fill(output, &state.lock_fill_ids[0], [0.0, 0.0, 0.0, 1.0], &mut out);
@@ -340,6 +351,25 @@ pub fn send_frames(state: &mut State, output: &Output) {
     }
     if let CursorImageStatus::Surface(surface) = &state.cursor_status {
         smithay::desktop::utils::send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
+            Some(output.clone())
+        });
+    }
+    // X11 menus and tooltips. Xwayland holds back new content until told to draw, so without
+    // this a menu stays stuck on its first (often blank) frame.
+    let output_geo = state.space.output_geometry(output);
+    for x in &state.x11_unmanaged {
+        let Some(surface) = x.wl_surface() else {
+            continue;
+        };
+        if output_geo.is_some_and(|o| o.overlaps(x.geometry())) {
+            smithay::desktop::utils::send_frames_surface_tree(&surface, output, time, Some(Duration::ZERO), |_, _| {
+                Some(output.clone())
+            });
+            smithay::desktop::utils::with_surfaces_surface_tree(&surface, hint);
+        }
+    }
+    if let Some(icon) = &state.dnd_icon {
+        smithay::desktop::utils::send_frames_surface_tree(&icon.surface, output, time, Some(Duration::ZERO), |_, _| {
             Some(output.clone())
         });
     }

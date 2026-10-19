@@ -42,6 +42,9 @@ impl CompositorHandler for State {
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
         self.needs_redraw = true;
+        if let Some(icon) = self.dnd_icon.as_mut().filter(|i| i.surface == *surface) {
+            icon.take_offset();
+        }
 
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();

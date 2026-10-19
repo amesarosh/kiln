@@ -187,6 +187,8 @@ pub struct State {
     pub mod_tap: Option<Keycode>,
     pub backend: Option<Backend>,
     pub cursor_status: CursorImageStatus,
+    /// The picture an app drags along under the pointer (a file, a tab...), while a drag is on.
+    pub dnd_icon: Option<crate::handlers::DndIcon>,
     pub dmabuf_state: DmabufState,
     pub dmabuf_global: Option<DmabufGlobal>,
     pub needs_redraw: bool,
@@ -321,6 +323,7 @@ impl State {
             mod_tap: None,
             backend: None,
             cursor_status: CursorImageStatus::default_named(),
+            dnd_icon: None,
             dmabuf_state: DmabufState::new(),
             dmabuf_global: None,
             needs_redraw: true,

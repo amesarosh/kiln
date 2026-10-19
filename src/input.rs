@@ -215,8 +215,9 @@ impl State {
         let pointer = self.seat.get_pointer().unwrap();
         let under = self.surface_under(pos);
         let serial = SERIAL_COUNTER.next_serial();
-        // The hardware backend draws the pointer, so moving it is a visible change.
-        self.needs_redraw |= self.draws_cursor();
+        // The hardware backend draws the pointer, so moving it is a visible change. So does a
+        // drag icon, which we draw on either backend.
+        self.needs_redraw |= self.draws_cursor() || self.dnd_icon.is_some();
         if self.is_locked() {
             pointer.motion(
                 self,
