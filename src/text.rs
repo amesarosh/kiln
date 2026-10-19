@@ -1,11 +1,27 @@
-//! CPU text and shape drawing for compositor-drawn UI (the bar, and later title bars and menus).
+//! CPU text and shape drawing for compositor-drawn UI (the bar, the switcher and menus).
+//!
+//! Glyphs are hinted (snapped to the pixel grid by the font's own instructions, or the
+//! autohinter) and placed at whole pixels, so stems come out as solid lines instead of
+//! being smeared across two pixels. `ab_glyph` supplies the metrics and kerning.
 
-use ab_glyph::{Font, FontVec, PxScale, ScaleFont, point};
+use std::cell::RefCell;
+
+use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
+use ab_glyph_rasterizer::{Point, Rasterizer, point};
+use skrifa::{
+    FontRef, GlyphId, MetadataProvider,
+    instance::{LocationRef, Size},
+    outline::{DrawSettings, HintingInstance, HintingOptions, OutlinePen, SmoothMode, Target},
+};
 
 use crate::config::Color;
 
 pub struct Text {
     font: FontVec,
+    /// The raw font file, for hinted outlines.
+    data: Vec<u8>,
+    /// Hinting set up for the last pixel size drawn; rebuilding it runs the font's setup programs.
+    hinting: RefCell<Option<(f32, HintingInstance)>>,
 }
 
 impl Text {
@@ -13,10 +29,14 @@ impl Text {
     pub fn load(name: &str) -> Option<Self> {
         for path in wt_config::fonts::candidates(name) {
             let Ok(data) = std::fs::read(&path) else { continue };
-            match FontVec::try_from_vec(data) {
+            if FontRef::from_index(&data, 0).is_err() {
+                tracing::warn!("{}: not a usable font", path.display());
+                continue;
+            }
+            match FontVec::try_from_vec(data.clone()) {
                 Ok(font) => {
                     tracing::info!("ui font: {}", path.display());
-                    return Some(Self { font });
+                    return Some(Self { font, data, hinting: RefCell::new(None) });
                 }
                 Err(e) => tracing::warn!("{}: not a usable font: {e}", path.display()),
             }
@@ -25,16 +45,21 @@ impl Text {
         None
     }
 
+    /// Kerning before `id` and its advance after, both rounded so every glyph starts on a
+    /// whole pixel. `width` and `draw` must agree on these.
+    fn spacing(font: &ab_glyph::PxScaleFont<&FontVec>, prev: Option<ab_glyph::GlyphId>, id: ab_glyph::GlyphId) -> (f32, f32) {
+        let kern = prev.map_or(0.0, |p| font.kern(p, id));
+        (kern.round(), font.h_advance(id).round())
+    }
+
     pub fn width(&self, text: &str, px: f32) -> f32 {
         let font = self.font.as_scaled(PxScale::from(px));
         let mut w = 0.0;
         let mut prev = None;
         for c in text.chars() {
             let id = font.glyph_id(c);
-            if let Some(p) = prev {
-                w += font.kern(p, id);
-            }
-            w += font.h_advance(id);
+            let (kern, advance) = Self::spacing(&font, prev, id);
+            w += kern + advance;
             prev = Some(id);
         }
         w
@@ -65,31 +90,138 @@ impl Text {
 
     /// Draw `text` with its left edge and baseline at `at`, clipped to `clip` (x0, x1).
     pub fn draw(&self, canvas: &mut Canvas, text: &str, px: f32, at: (f32, f32), color: Color, clip: (i32, i32)) {
-        let (x, baseline) = at;
-        let scale = PxScale::from(px);
-        let font = self.font.as_scaled(scale);
+        let (x, baseline) = (at.0.round(), at.1.round());
+        let font = self.font.as_scaled(PxScale::from(px));
+        let Ok(sk) = FontRef::from_index(&self.data, 0) else { return };
+        let outlines = sk.outline_glyphs();
+        // ab_glyph sizes text by ascent-to-descent height; skrifa by the em square.
+        let ppem = px * self.font.units_per_em().unwrap_or(1000.0) / self.font.height_unscaled();
+
+        let mut hinting = self.hinting.borrow_mut();
+        if hinting.as_ref().is_none_or(|(size, _)| *size != ppem) {
+            let options = HintingOptions::from(Target::Smooth {
+                mode: SmoothMode::Normal,
+                symmetric_rendering: true,
+                // Keep the font's own advances, so `width` (from ab_glyph) stays exact.
+                preserve_linear_metrics: true,
+            });
+            *hinting = HintingInstance::new(&outlines, Size::new(ppem), LocationRef::default(), options)
+                .map(|h| (ppem, h))
+                .inspect_err(|e| tracing::warn!("text hinting unavailable: {e}"))
+                .ok();
+        }
+
         let mut caret = x;
         let mut prev = None;
+        let mut path = Path::default();
         for c in text.chars() {
             let id = font.glyph_id(c);
-            if let Some(p) = prev {
-                caret += font.kern(p, id);
-            }
-            let glyph = id.with_scale_and_position(scale, point(caret, baseline));
-            caret += font.h_advance(id);
+            let (kern, advance) = Self::spacing(&font, prev, id);
+            caret += kern;
+            let origin = caret;
+            caret += advance;
             prev = Some(id);
-            let Some(outline) = self.font.outline_glyph(glyph) else {
-                continue;
+
+            let Some(glyph) = outlines.get(GlyphId::new(id.0 as u32)) else { continue };
+            let settings = match hinting.as_ref() {
+                Some((_, h)) => DrawSettings::hinted(h, false),
+                None => DrawSettings::unhinted(Size::new(ppem), LocationRef::default()),
             };
-            let b = outline.px_bounds();
-            outline.draw(|gx, gy, coverage| {
-                let px_x = b.min.x as i32 + gx as i32;
-                let px_y = b.min.y as i32 + gy as i32;
+            path.clear();
+            if glyph.draw(settings, &mut path).is_err() {
+                continue;
+            }
+            path.fill(origin, baseline, |px_x, px_y, coverage| {
                 if px_x >= clip.0 && px_x < clip.1 {
                     canvas.blend(px_x, px_y, color, coverage);
                 }
             });
         }
+    }
+}
+
+/// One glyph's outline in pixels, y pointing up from the baseline.
+#[derive(Default)]
+struct Path {
+    segments: Vec<Segment>,
+    start: (f32, f32),
+    last: (f32, f32),
+}
+
+enum Segment {
+    Line([(f32, f32); 2]),
+    Quad([(f32, f32); 3]),
+    Cubic([(f32, f32); 4]),
+}
+
+impl Path {
+    fn clear(&mut self) {
+        self.segments.clear();
+    }
+
+    /// Rasterize with the glyph origin at pixel (`x`, `baseline`), calling `put` per covered pixel.
+    fn fill(&self, x: f32, baseline: f32, mut put: impl FnMut(i32, i32, f32)) {
+        let points = self.segments.iter().flat_map(|s| match s {
+            Segment::Line(p) => p.as_slice(),
+            Segment::Quad(p) => p.as_slice(),
+            Segment::Cubic(p) => p.as_slice(),
+        });
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for &(px, py) in points {
+            x0 = x0.min(px);
+            x1 = x1.max(px);
+            y0 = y0.min(-py);
+            y1 = y1.max(-py);
+        }
+        if x0 > x1 || y0 > y1 {
+            return; // nothing drawn, e.g. a space
+        }
+        let (left, top) = (x0.floor(), y0.floor());
+        let (w, h) = ((x1.ceil() - left) as usize + 1, (y1.ceil() - top) as usize + 1);
+        let to = |&(px, py): &(f32, f32)| -> Point { point(px - left, -py - top) };
+        let mut r = Rasterizer::new(w, h);
+        for s in &self.segments {
+            match s {
+                Segment::Line([a, b]) => r.draw_line(to(a), to(b)),
+                Segment::Quad([a, b, c]) => r.draw_quad(to(a), to(b), to(c)),
+                Segment::Cubic([a, b, c, d]) => r.draw_cubic(to(a), to(b), to(c), to(d)),
+            }
+        }
+        let (ox, oy) = ((x + left) as i32, (baseline + top) as i32);
+        r.for_each_pixel_2d(|gx, gy, coverage| {
+            if coverage > 0.0 {
+                put(ox + gx as i32, oy + gy as i32, coverage);
+            }
+        });
+    }
+}
+
+impl OutlinePen for Path {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.start = (x, y);
+        self.last = (x, y);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.segments.push(Segment::Line([self.last, (x, y)]));
+        self.last = (x, y);
+    }
+
+    fn quad_to(&mut self, cx0: f32, cy0: f32, x: f32, y: f32) {
+        self.segments.push(Segment::Quad([self.last, (cx0, cy0), (x, y)]));
+        self.last = (x, y);
+    }
+
+    fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+        self.segments.push(Segment::Cubic([self.last, (cx0, cy0), (cx1, cy1), (x, y)]));
+        self.last = (x, y);
+    }
+
+    fn close(&mut self) {
+        if self.last != self.start {
+            self.segments.push(Segment::Line([self.last, self.start]));
+        }
+        self.last = self.start;
     }
 }
 
@@ -208,3 +340,4 @@ mod tests {
         assert_eq!(c.to_premultiplied_rgba().len(), 16);
     }
 }
+

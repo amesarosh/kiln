@@ -81,6 +81,10 @@ impl SeatHandler for State {
 }
 delegate_seat!(State);
 
+// Required by cursor-shape; tablets get the default behaviour.
+impl smithay::wayland::tablet_manager::TabletSeatHandler for State {}
+smithay::delegate_cursor_shape!(State);
+
 // Selections are shared with Xwayland so copy and paste works between X11 and Wayland apps.
 impl SelectionHandler for State {
     type SelectionUserData = crate::clipboard::SelectionData;

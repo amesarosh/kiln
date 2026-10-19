@@ -21,6 +21,8 @@ toml = { version = "1", default-features = false, features = ["parse", "display"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ab_glyph = "0.2"
+ab_glyph_rasterizer = "0.1"
+skrifa = "0.42"
 png = "0.18"
 resvg = { version = "0.45", default-features = false }
 rustix = { version = "1", features = ["pipe", "fs"] }

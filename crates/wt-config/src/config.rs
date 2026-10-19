@@ -145,6 +145,9 @@ impl LayoutConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawTheme {
+    /// A saved theme from the themes folder; its values sit between the defaults and this table.
+    #[serde(default)]
+    name: Option<String>,
     font: String,
     font_size: f32,
     radius: f32,
@@ -474,7 +477,7 @@ impl Config {
     /// Load from disk. A missing file is created with the defaults so users have something to edit.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         match std::fs::read_to_string(path) {
-            Ok(text) => Self::parse_user(&text),
+            Ok(text) => Self::parse_user_at(&text, path),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 if let Some(dir) = path.parent() {
                     let _ = std::fs::create_dir_all(dir);
@@ -489,10 +492,55 @@ impl Config {
         }
     }
 
+    /// Read a config without creating it; a missing file means the defaults.
+    pub fn read(path: &Path) -> Result<Self, ConfigError> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => Self::parse_user_at(&text, path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) => Err(err(format!("reading {}: {e}", path.display()))),
+        }
+    }
+
+    /// Parse the text of the config file at `path`, reading its theme from the themes folder
+    /// next to it.
+    pub fn parse_user_at(text: &str, path: &Path) -> Result<Self, ConfigError> {
+        Self::parse_user_with(text, |name| {
+            let file = theme_path(path, name);
+            std::fs::read_to_string(&file).map_err(|e| format!("can't read {}: {e}", file.display()))
+        })
+    }
+
     /// Parse a user file, filling any missing sections or keys from the built-in defaults.
+    /// A `[theme] name` is an error here, since there's no themes folder to read it from.
     pub fn parse_user(text: &str) -> Result<Self, ConfigError> {
+        Self::parse_user_with(text, |_| Err("no themes folder to read it from".into()))
+    }
+
+    /// Parse a user file. `theme_text` gives the contents of a saved theme by name.
+    pub fn parse_user_with(
+        text: &str,
+        theme_text: impl FnOnce(&str) -> Result<String, String>,
+    ) -> Result<Self, ConfigError> {
         let user: PartialConfig = toml::from_str(text).map_err(|e| err(e.to_string()))?;
         let mut base: toml::Table = toml::from_str(DEFAULT_CONFIG).expect("default config parses");
+
+        // A saved theme goes on top of the default theme, and the file's own [theme] on top of it.
+        let name = user.theme.as_ref().and_then(|t| t.get("name"));
+        if let Some(name) = name {
+            let name = name.as_str().ok_or_else(|| err("theme.name must be text"))?;
+            if !valid_theme_name(name) {
+                return Err(err(format!("theme.name \"{name}\" can't be used as a file name")));
+            }
+            let text = theme_text(name).map_err(|e| err(format!("theme \"{name}\": {e}")))?;
+            let table: toml::Table =
+                toml::from_str(&text).map_err(|e| err(format!("theme \"{name}\": {e}")))?;
+            if table.contains_key("name") {
+                return Err(err(format!("theme \"{name}\": a theme file can't pick another theme")));
+            }
+            if let Some(toml::Value::Table(dst)) = base.get_mut("theme") {
+                merge_tables(dst, table);
+            }
+        }
 
         let mut merge = |name: &str, over: Option<toml::Table>| {
             if let (Some(over), Some(toml::Value::Table(dst))) = (over, base.get_mut(name)) {
@@ -594,6 +642,7 @@ impl Config {
             problems.push("theme.radius must be between 0 and 24".into());
         }
         let theme = Theme {
+            name: rt.name.clone(),
             font: rt.font.clone(),
             font_size: rt.font_size,
             radius: rt.radius,
@@ -993,6 +1042,41 @@ fn parse_transform(s: &str) -> Result<Transform, String> {
 }
 
 /// Copy `over` into `dst`, merging nested tables key by key instead of replacing them.
+/// The folder saved themes live in: `themes/` next to the config file.
+pub fn themes_dir(config_path: &Path) -> PathBuf {
+    config_path.parent().unwrap_or(Path::new(".")).join("themes")
+}
+
+/// Where the theme called `name` is saved.
+pub fn theme_path(config_path: &Path, name: &str) -> PathBuf {
+    themes_dir(config_path).join(format!("{name}.toml"))
+}
+
+/// Saved theme names, sorted.
+pub fn theme_names(config_path: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(themes_dir(config_path)) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let stem = name.strip_suffix(".toml")?;
+            valid_theme_name(stem).then(|| stem.to_string())
+        })
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names
+}
+
+/// A theme name has to work as a file name: no slashes, not hidden, not too long.
+pub fn valid_theme_name(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && !name.chars().any(|c| c == '/' || c == '\\' || c.is_control())
+}
+
 fn merge_tables(dst: &mut toml::Table, over: toml::Table) {
     for (k, v) in over {
         match (dst.get_mut(&k), v) {
@@ -1211,6 +1295,34 @@ mod tests {
         let c = Config::parse_user("[[outputs]]\nname = \"DP-4\"\nlayout = \"monocle\"\n").unwrap();
         assert_eq!(c.layout.default_for("dp-4"), LayoutKind::Monocle);
         assert_eq!(c.layout.default_for("DP-5"), LayoutKind::Tile);
+    }
+
+    #[test]
+    fn saved_themes_layer_between_defaults_and_config() {
+        let theme = "font_size = 20\nradius = 2\n[colors]\naccent = \"#ff0000\"\n";
+        let user = "[theme]\nname = \"Red\"\nradius = 9\n";
+        let c = Config::parse_user_with(user, |n| {
+            assert_eq!(n, "Red");
+            Ok(theme.into())
+        })
+        .unwrap();
+        assert_eq!(c.theme.name.as_deref(), Some("Red"));
+        assert_eq!(c.theme.font_size, 20.0);
+        assert_eq!(c.theme.radius, 9.0);
+        assert_eq!(c.theme.palette.accent, [1.0, 0.0, 0.0, 1.0]);
+        // Unset values still come from the defaults.
+        assert_eq!(c.theme.palette.text, Config::default().theme.palette.text);
+    }
+
+    #[test]
+    fn bad_saved_themes_are_errors() {
+        let user = "[theme]\nname = \"X\"\n";
+        assert!(Config::parse_user(user).is_err());
+        assert!(Config::parse_user_with(user, |_| Ok("bogus = 1\n".into())).is_err());
+        assert!(Config::parse_user_with(user, |_| Ok("name = \"Y\"\n".into())).is_err());
+        assert!(Config::parse_user_with("[theme]\nname = \"../x\"\n", |_| Ok(String::new())).is_err());
+        assert!(valid_theme_name("Catppuccin Latte"));
+        assert!(!valid_theme_name(".hidden"));
     }
 
     #[test]

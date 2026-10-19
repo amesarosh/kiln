@@ -217,6 +217,8 @@ pub fn mix(a: Color, b: Color, t: f32) -> Color {
 /// The shared font and palette.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
+    /// The saved theme in use, if any.
+    pub name: Option<String>,
     /// fontconfig name, or a path to a font file.
     pub font: String,
     pub font_size: f32,

@@ -114,6 +114,9 @@ pub struct State {
     pub pointer_constraints_state: smithay::wayland::pointer_constraints::PointerConstraintsState,
     #[allow(dead_code)]
     pub relative_pointer_state: smithay::wayland::relative_pointer::RelativePointerManagerState,
+    /// Lets apps ask for a named cursor, so every app shows the same theme and size.
+    #[allow(dead_code)]
+    pub cursor_shape_state: smithay::wayland::cursor_shape::CursorShapeManagerState,
     pub activation_state: smithay::wayland::xdg_activation::XdgActivationState,
     /// Set when keyboard focus changes; the main loop then re-checks pointer constraints.
     pub keyboard_focus_moved: bool,
@@ -234,6 +237,7 @@ impl State {
             smithay::wayland::pointer_constraints::PointerConstraintsState::new::<Self>(&dh);
         let relative_pointer_state = smithay::wayland::relative_pointer::RelativePointerManagerState::new::<Self>(&dh);
         let activation_state = smithay::wayland::xdg_activation::XdgActivationState::new::<Self>(&dh);
+        let cursor_shape_state = smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
         Self::create_output_power_global(&dh);
         Self::create_screencopy_global(&dh);
         let foreign_toplevels = crate::handlers::foreign_toplevel::ForeignToplevels::new(&dh);
@@ -287,6 +291,7 @@ impl State {
             xwayland_shell_state,
             pointer_constraints_state,
             relative_pointer_state,
+            cursor_shape_state,
             activation_state,
             keyboard_focus_moved: false,
             xwm: None,
@@ -1435,12 +1440,20 @@ impl State {
             Ok(i) => i,
             Err(e) => return tracing::warn!("config hot reload disabled: {e}"),
         };
-        if let Err(e) = inotify
-            .watches()
-            .add(dir, WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO | WatchMask::CREATE)
-        {
+        let mask = WatchMask::CLOSE_WRITE | WatchMask::MOVED_TO | WatchMask::CREATE;
+        if let Err(e) = inotify.watches().add(dir, mask) {
             return tracing::warn!("config hot reload disabled: cannot watch {}: {e}", dir.display());
         }
+        // Saved themes: reload when the one in use changes. Created up front so it can be watched.
+        let themes = wt_config::themes_dir(&path);
+        let _ = std::fs::create_dir_all(&themes);
+        let themes_watch = match inotify.watches().add(&themes, mask) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                tracing::warn!("theme hot reload disabled: cannot watch {}: {e}", themes.display());
+                None
+            }
+        };
 
         let source = Generic::new(inotify, Interest::READ, Mode::Level);
         let result = self.loop_handle.insert_source(source, move |_, inotify, state| {
@@ -1450,9 +1463,14 @@ impl State {
             let mut hit = false;
             while let Ok(events) = inotify.read_events(&mut buf) {
                 let mut any = false;
+                let theme_file = state.config.theme.name.as_ref().map(|n| format!("{n}.toml"));
                 for ev in events {
                     any = true;
-                    hit |= ev.name == Some(name.as_os_str());
+                    hit |= if Some(&ev.wd) == themes_watch.as_ref() {
+                        theme_file.is_some() && ev.name.and_then(|n| n.to_str()) == theme_file.as_deref()
+                    } else {
+                        ev.name == Some(name.as_os_str())
+                    };
                 }
                 if !any {
                     break;

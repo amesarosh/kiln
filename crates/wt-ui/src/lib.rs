@@ -46,7 +46,8 @@ pub fn run<A: eframe::App + 'static>(
 /// Keeps an app's look in step with the config file's `[theme]`.
 pub struct Look {
     path: Option<PathBuf>,
-    modified: Option<SystemTime>,
+    /// Modification times of the config and of the saved theme it uses.
+    modified: [Option<SystemTime>; 2],
     last_check: Instant,
     /// The theme currently applied.
     pub theme: Theme,
@@ -59,7 +60,7 @@ impl Look {
     pub fn new(ctx: &egui::Context, path: Option<PathBuf>) -> Self {
         let mut look = Self {
             path,
-            modified: None,
+            modified: [None; 2],
             last_check: Instant::now(),
             theme: Config::default().theme,
             font_loaded: None,
@@ -72,7 +73,7 @@ impl Look {
     pub fn poll(&mut self, ctx: &egui::Context) {
         if self.last_check.elapsed() >= Duration::from_millis(500) {
             self.last_check = Instant::now();
-            if modified(self.path.as_deref()) != self.modified {
+            if self.stamps() != self.modified {
                 self.reload(ctx);
             }
         }
@@ -81,17 +82,21 @@ impl Look {
 
     /// Re-read the config file and apply its theme. A broken config keeps the current look.
     pub fn reload(&mut self, ctx: &egui::Context) {
-        self.modified = modified(self.path.as_deref());
         let Some(path) = &self.path else {
             return self.set(ctx, Config::default().theme);
         };
-        let config = match std::fs::read_to_string(path) {
-            Ok(text) => Config::parse_user(&text),
-            Err(_) => Ok(Config::default()),
-        };
-        if let Ok(config) = config {
+        if let Ok(config) = Config::read(path) {
             self.set(ctx, config.theme);
         }
+        self.modified = self.stamps();
+    }
+
+    fn stamps(&self) -> [Option<SystemTime>; 2] {
+        let theme = self.theme.name.as_ref().zip(self.path.as_ref());
+        [
+            modified(self.path.as_deref()),
+            modified(theme.map(|(name, path)| wt_config::theme_path(path, name)).as_deref()),
+        ]
     }
 
     /// Apply `theme` now.

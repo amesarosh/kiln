@@ -30,6 +30,10 @@ keep_clipboard = true
 
 # The look shared by everything the compositor draws: the bar, window borders,
 # the lock screen, and menus and panels as they are added.
+#
+# Saved themes: name = "Nord" uses ~/.config/wayland-time/themes/Nord.toml, a
+# file with these same keys and a [colors] table. Anything else set here goes
+# on top of it. The settings app can save the current look as a theme.
 [theme]
 font = "sans"     # fontconfig name, or a path to a .ttf/.otf file
 font_size = 14

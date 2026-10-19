@@ -140,7 +140,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.check_config {
         let path = config_path.ok_or("no config path")?;
         let text = std::fs::read_to_string(&path)?;
-        return match Config::parse_user(&text) {
+        return match Config::parse_user_at(&text, &path) {
             Ok(_) => {
                 println!("{}: ok", path.display());
                 Ok(())

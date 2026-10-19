@@ -10,7 +10,7 @@ use wt_ui::{
 
 use crate::{
     doc::{ConfigDoc, Status},
-    pages::{self, Cache, Page, binds::BindsPage, colors::ColorsPage, fields},
+    pages::{self, Cache, Page, binds::BindsPage, colors::ColorsPage, fields, themes::ThemesPage},
     widgets,
 };
 
@@ -21,6 +21,7 @@ pub struct SettingsApp {
     search: String,
     cache: Cache,
     colors: ColorsPage,
+    themes: ThemesPage,
     binds: BindsPage,
 }
 
@@ -36,6 +37,7 @@ impl SettingsApp {
             search: String::new(),
             cache: Cache::default(),
             colors: ColorsPage::default(),
+            themes: ThemesPage::default(),
             binds: BindsPage::default(),
         }
     }
@@ -114,6 +116,7 @@ impl SettingsApp {
         match self.page {
             Page::General => fields::show_sections(ui, p, doc, cache, fields::GENERAL),
             Page::Appearance => {
+                self.themes.show(ui, p, doc);
                 fields::show_sections(ui, p, doc, cache, fields::APPEARANCE);
                 self.colors.show(ui, p, doc);
             }

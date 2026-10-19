@@ -5,6 +5,7 @@ pub mod colors;
 pub mod fields;
 pub mod monitors;
 pub mod rules;
+pub mod themes;
 
 use crate::monitors::Monitor;
 

@@ -19,7 +19,16 @@ pub struct ColorsPage {
 impl ColorsPage {
     pub fn show(&mut self, ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc) {
         let defaults = names(doc.default_item(&PATH));
-        let user = names(doc.user_item(&PATH));
+        // From the saved theme and the config file; the config file wins.
+        let mut user: Vec<(String, String)> = Vec::new();
+        for layer in doc.user_layers(&PATH) {
+            for (k, v) in names(Some(layer)) {
+                match user.iter_mut().find(|(n, _)| *n == k) {
+                    Some(slot) => slot.1 = v,
+                    None => user.push((k, v)),
+                }
+            }
+        }
         // Default order first (palette, then derived shades), then the user's own names.
         let mut order: Vec<String> = defaults.iter().map(|(k, _)| k.clone()).collect();
         order.extend(

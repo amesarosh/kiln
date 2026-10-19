@@ -3,6 +3,9 @@
 //! Edits go into a `toml_edit` document, so the user's comments and layout survive. Shortly after
 //! the last edit the file is checked with the compositor's own config loader and, only if it
 //! loads, written; the compositor reloads it on save, so changes apply right away.
+//!
+//! When `[theme] name` picks a saved theme, theme settings are edited in that theme's file
+//! instead (`themes/<name>.toml`), unless the config file itself sets the value.
 
 use std::{
     path::PathBuf,
@@ -29,9 +32,42 @@ pub enum Status {
     Reloaded(Instant),
 }
 
+/// The saved theme in use: its file, edited alongside the config.
+struct ThemeDoc {
+    name: String,
+    path: PathBuf,
+    doc: DocumentMut,
+    disk_time: Option<SystemTime>,
+    disk_text: String,
+}
+
+impl ThemeDoc {
+    /// A missing file reads as an empty theme (all defaults); it's written on the next save.
+    fn open(config_path: &std::path::Path, name: &str) -> Result<Self, String> {
+        let path = wt_config::theme_path(config_path, name);
+        let disk_time = modified(&path);
+        let text = match std::fs::read_to_string(&path) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(format!("Can't read {}: {e}", path.display())),
+        };
+        let doc = text
+            .parse()
+            .map_err(|e| format!("{} has a syntax error:\n{e}", path.display()))?;
+        Ok(Self {
+            name: name.to_string(),
+            path,
+            doc,
+            disk_time,
+            disk_text: text,
+        })
+    }
+}
+
 pub struct ConfigDoc {
     pub path: PathBuf,
     user: DocumentMut,
+    theme: Option<ThemeDoc>,
     defaults: DocumentMut,
     /// When the last unsaved edit happened.
     pending: Option<Instant>,
@@ -53,6 +89,7 @@ impl ConfigDoc {
         let mut doc = Self {
             path,
             user: DocumentMut::new(),
+            theme: None,
             defaults: DEFAULT_CONFIG.parse().expect("default config parses"),
             pending: None,
             status: Status::Idle,
@@ -83,7 +120,8 @@ impl ConfigDoc {
             Ok(doc) => {
                 self.user = doc;
                 self.broken = None;
-                if let Ok(c) = Config::parse_user(&text) {
+                self.load_theme();
+                if let Ok(c) = self.parse(&text) {
                     self.config = c;
                 }
             }
@@ -93,11 +131,229 @@ impl ConfigDoc {
         self.generation += 1;
     }
 
+    /// Open the theme file `[theme] name` points at, if any.
+    fn load_theme(&mut self) {
+        self.theme = None;
+        let Some(name) = self.theme_name() else { return };
+        if !wt_config::valid_theme_name(&name) {
+            self.broken = Some(format!("theme.name \"{name}\" can't be used as a file name"));
+            return;
+        }
+        match ThemeDoc::open(&self.path, &name) {
+            Ok(t) => self.theme = Some(t),
+            Err(e) => self.broken = Some(e),
+        }
+    }
+
+    /// Parse config text the way the compositor would, with the theme as edited here.
+    fn parse(&self, text: &str) -> Result<Config, wt_config::ConfigError> {
+        let theme = self.theme.as_ref().map(|t| t.doc.to_string());
+        Config::parse_user_with(text, |_| theme.ok_or_else(|| "not loaded".to_string()))
+    }
+
+    // ---------- saved themes ----------
+
+    /// The saved theme in use, or `None` for the built-in one.
+    pub fn theme_name(&self) -> Option<String> {
+        self.user_raw(&["theme", "name"]).and_then(Item::as_str).map(String::from)
+    }
+
+    /// Saved theme names.
+    pub fn theme_names(&self) -> Vec<String> {
+        let mut names = wt_config::theme_names(&self.path);
+        // One just made exists only here until the save lands.
+        if let Some(t) = &self.theme
+            && !names.contains(&t.name)
+        {
+            names.push(t.name.clone());
+            names.sort_by_key(|n| n.to_lowercase());
+        }
+        names
+    }
+
+    /// Theme settings the config file sets itself, which win over any saved theme, as
+    /// dotted names like `font_size` or `colors.accent`.
+    pub fn theme_overrides(&self) -> Vec<String> {
+        let Some(table) = self.user_raw(&["theme"]).and_then(Item::as_table_like) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for (k, v) in table.iter() {
+            match (k, v.as_table_like()) {
+                ("name", _) => {}
+                (_, Some(sub)) => out.extend(sub.iter().map(|(c, _)| format!("{k}.{c}"))),
+                (_, None) => out.push(k.to_string()),
+            }
+        }
+        out
+    }
+
+    /// Switch to a saved theme, or the built-in one with `None`. Changes made on top of the
+    /// built-in theme are first kept as a new theme, whose name is returned.
+    pub fn use_theme(&mut self, name: Option<&str>) -> Option<String> {
+        self.flush();
+        let mut kept = None;
+        if name.is_some() && self.theme.is_none() && self.has_theme_changes() {
+            let keep = self.unused_theme_name("Custom");
+            self.save_theme_as(&keep);
+            self.flush();
+            kept = Some(keep);
+        }
+        match name {
+            Some(n) => self.set_raw(&["theme", "name"], n),
+            None => self.remove_raw(&["theme", "name"]),
+        }
+        self.load_theme();
+        self.generation += 1;
+        self.touch();
+        kept
+    }
+
+    /// Whether the config file changes any theme setting from its default.
+    fn has_theme_changes(&self) -> bool {
+        self.theme_overrides().iter().any(|key| {
+            let path: Vec<&str> = std::iter::once("theme").chain(key.split('.')).collect();
+            self.changed(&path)
+        })
+    }
+
+    /// Save the look in effect as a new theme (built-in values filled in, so the file stands on
+    /// its own) and switch to it. Theme settings in the config file move into it.
+    pub fn save_theme_as(&mut self, name: &str) {
+        let Some(defaults) = self.default_item(&["theme"]).and_then(Item::as_table).cloned() else {
+            return;
+        };
+        let mut out = DocumentMut::new();
+        out.decor_mut().set_prefix(format!("# wayland-time theme \"{name}\"\n\n"));
+        let root = out.as_table_mut();
+        for (k, v) in defaults.iter() {
+            root.insert(k, v.clone());
+        }
+        if let Some(Item::Table(colors)) = root.get_mut("colors") {
+            // Was [theme.colors]; now just [colors].
+            colors.set_position(None);
+            colors.decor_mut().clear();
+        }
+        let layers: Vec<Table> = [
+            self.theme.as_ref().map(|t| t.doc.as_table().clone()),
+            self.user_raw(&["theme"]).and_then(Item::as_table).cloned(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        for layer in &layers {
+            for (k, v) in layer.iter() {
+                match (k, v) {
+                    ("name", _) => {}
+                    (_, Item::Table(sub)) => {
+                        let dst = root.entry(k).or_insert(Item::Table(Table::new()));
+                        if let Some(dst) = dst.as_table_mut() {
+                            for (c, cv) in sub.iter() {
+                                if let Some(cv) = cv.as_value() {
+                                    set_in(dst, c, cv.clone());
+                                }
+                            }
+                        }
+                    }
+                    (_, v) => {
+                        if let Some(v) = v.as_value() {
+                            set_in(root, k, v.clone());
+                        }
+                    }
+                }
+            }
+        }
+        // The config keeps only the choice of theme.
+        if let Some(t) = self.user.get_mut("theme").and_then(Item::as_table_mut) {
+            t.retain(|k, _| k == "name");
+        }
+        self.set_raw(&["theme", "name"], name);
+        self.theme = Some(ThemeDoc {
+            name: name.to_string(),
+            path: wt_config::theme_path(&self.path, name),
+            doc: out,
+            disk_time: None,
+            disk_text: String::new(),
+        });
+        self.generation += 1;
+        self.touch();
+    }
+
+    /// Delete a saved theme. Deleting the one in use switches to the built-in theme.
+    pub fn delete_theme(&mut self, name: &str) -> Result<(), String> {
+        if self.theme_name().as_deref() == Some(name) {
+            self.use_theme(None);
+            self.flush();
+        }
+        let path = wt_config::theme_path(&self.path, name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("Can't delete {}: {e}", path.display())),
+        }
+    }
+
+    /// `base`, or `base 2`, `base 3`... whichever isn't taken.
+    pub fn unused_theme_name(&self, base: &str) -> String {
+        let names = self.theme_names();
+        let taken = |n: &str| names.iter().any(|t| t.eq_ignore_ascii_case(n));
+        (1..)
+            .map(|i| if i == 1 { base.to_string() } else { format!("{base} {i}") })
+            .find(|n| !taken(n))
+            .expect("some number is free")
+    }
+
+    /// Save now if there are unsaved edits.
+    fn flush(&mut self) {
+        if self.pending.take().is_some() {
+            self.save();
+        }
+    }
+
+    /// Where a theme setting is edited: the config file if it sets it (or no saved theme is in
+    /// use), else the theme file. `None` means `path` isn't a theme setting.
+    fn theme_route<'p>(&self, path: &'p [&'p str]) -> Option<(bool, &'p [&'p str])> {
+        if self.theme.is_none() || path.len() < 2 || path[0] != "theme" || path[1] == "name" {
+            return None;
+        }
+        let in_config = self.user_raw(path).is_some();
+        Some((in_config, &path[1..]))
+    }
+
+    fn user_raw(&self, path: &[&str]) -> Option<&Item> {
+        lookup(self.user.as_item(), path)
+    }
+
+    fn set_raw(&mut self, path: &[&str], value: impl Into<Value>) {
+        if let Some(table) = table_mut(&mut self.user, &path[..path.len() - 1]) {
+            set_in(table, path[path.len() - 1], value.into());
+        }
+    }
+
+    fn remove_raw(&mut self, path: &[&str]) {
+        if let Some(table) = table_mut(&mut self.user, &path[..path.len() - 1]) {
+            table.remove(path[path.len() - 1]);
+        }
+    }
+
+    /// The user's tables at `path` from every layer that has one: the saved theme first, then
+    /// the config file. For tables like `[theme.colors]`, whose entries can come from either.
+    pub fn user_layers(&self, path: &[&str]) -> Vec<&Item> {
+        let theme = match (self.theme_route(path), &self.theme) {
+            (Some((_, rest)), Some(t)) => lookup(t.doc.as_item(), rest),
+            _ => None,
+        };
+        theme.into_iter().chain(self.user_raw(path)).collect()
+    }
+
     // ---------- reading values ----------
 
-    /// The user's own value at `path`, if the file sets it.
+    /// The user's own value at `path`, if the file (or the saved theme in use) sets it.
     pub fn user_item(&self, path: &[&str]) -> Option<&Item> {
-        lookup(self.user.as_item(), path)
+        match (self.theme_route(path), &self.theme) {
+            (Some((false, rest)), Some(t)) => lookup(t.doc.as_item(), rest),
+            _ => self.user_raw(path),
+        }
     }
 
     pub fn default_item(&self, path: &[&str]) -> Option<&Item> {
@@ -147,7 +403,12 @@ impl ConfigDoc {
     /// Set a value, keeping any comment written next to it.
     pub fn set(&mut self, path: &[&str], value: impl Into<Value>) {
         let value: Value = value.into();
-        let Some(table) = table_mut(&mut self.user, &path[..path.len() - 1]) else {
+        let route = self.theme_route(path);
+        let table = match (route, &mut self.theme) {
+            (Some((false, rest)), Some(t)) => table_mut(&mut t.doc, &rest[..rest.len() - 1]),
+            _ => table_mut(&mut self.user, &path[..path.len() - 1]),
+        };
+        let Some(table) = table else {
             return;
         };
         let key = path[path.len() - 1];
@@ -158,6 +419,11 @@ impl ConfigDoc {
     /// Put a setting back to its default. The key stays in the file with the default value, so
     /// the comments around it (the whole default config is commented) aren't lost.
     pub fn reset(&mut self, path: &[&str]) {
+        // With a saved theme, writing the default would pin it; dropping the value lets the
+        // theme's own (or the default) show through.
+        if self.theme_route(path).is_some() {
+            return self.remove(path);
+        }
         match self.default_item(path).and_then(Item::as_value).cloned() {
             Some(v) => self.set(path, v),
             None => self.remove(path),
@@ -165,6 +431,12 @@ impl ConfigDoc {
     }
 
     pub fn remove(&mut self, path: &[&str]) {
+        if let (Some((_, rest)), Some(t)) = (self.theme_route(path), &mut self.theme) {
+            if let Some(table) = table_mut(&mut t.doc, &rest[..rest.len() - 1]) {
+                table.remove(rest[rest.len() - 1]);
+            }
+            // Fall through: a value in the config file would still win.
+        }
         if let Some(table) = table_mut(&mut self.user, &path[..path.len() - 1]) {
             table.remove(path[path.len() - 1]);
             self.touch();
@@ -201,10 +473,11 @@ impl ConfigDoc {
         }
         if self.pending.is_none() && self.last_check.elapsed() >= Duration::from_secs(1) {
             self.last_check = Instant::now();
-            if modified(&self.path) != self.disk_time {
-                let before = self.disk_text.clone();
+            let theme_moved = self.theme.as_ref().is_some_and(|t| modified(&t.path) != t.disk_time);
+            if modified(&self.path) != self.disk_time || theme_moved {
+                let before = (self.disk_text.clone(), self.theme.as_ref().map(|t| t.disk_text.clone()));
                 self.read();
-                if self.disk_text != before {
+                if (self.disk_text.clone(), self.theme.as_ref().map(|t| t.disk_text.clone())) != before {
                     self.status = Status::Reloaded(Instant::now());
                     return true;
                 }
@@ -220,7 +493,7 @@ impl ConfigDoc {
 
     fn save(&mut self) -> bool {
         let text = self.user.to_string();
-        let config = match Config::parse_user(&text) {
+        let config = match self.parse(&text) {
             Ok(c) => c,
             Err(e) => {
                 self.status = Status::Invalid(e.0);
@@ -232,6 +505,18 @@ impl ConfigDoc {
             return false;
         }
         self.config = config;
+        // The theme first, so when the compositor sees the config change the theme is there.
+        if let Some(t) = &mut self.theme {
+            let theme_text = t.doc.to_string();
+            if theme_text != t.disk_text || t.disk_time.is_none() {
+                if let Err(e) = write(&t.path, &theme_text) {
+                    self.status = Status::WriteFailed(format!("Can't save {}: {e}", t.path.display()));
+                    return true;
+                }
+                t.disk_text = theme_text;
+                t.disk_time = modified(&t.path);
+            }
+        }
         if text == self.disk_text {
             self.status = Status::Saved(Instant::now());
             return true;
@@ -257,7 +542,9 @@ fn write(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     if path.is_symlink() {
         return std::fs::write(path, text);
     }
-    let tmp = path.with_extension("toml.saving");
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".saving");
+    let tmp = PathBuf::from(tmp);
     std::fs::write(&tmp, text)?;
     std::fs::rename(&tmp, path)
 }
@@ -409,6 +696,89 @@ mod tests {
         d.last_check = Instant::now() - Duration::from_secs(2);
         assert!(d.tick());
         assert_eq!(d.int(&["layout", "gaps_inner"]), 3);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn temp_config(tag: &str, text: &str) -> (PathBuf, ConfigDoc) {
+        let dir = std::env::temp_dir().join(format!("wt-settings-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        (dir, ConfigDoc::open(path))
+    }
+
+    fn save_now(d: &mut ConfigDoc) {
+        d.flush();
+        assert!(!matches!(d.status, Status::Invalid(_) | Status::WriteFailed(_)));
+    }
+
+    #[test]
+    fn themes_save_switch_and_delete() {
+        let (dir, mut d) = temp_config("themes", "# mine\n[theme]\nradius = 2\n[theme.colors]\naccent = \"#ff0000\"\n");
+        let red = [1.0, 0.0, 0.0, 1.0];
+
+        // Saving moves the config's theme settings into the new file.
+        d.save_theme_as("Red");
+        save_now(&mut d);
+        let config_text = std::fs::read_to_string(&d.path).unwrap();
+        assert!(config_text.contains("name = \"Red\""), "{config_text}");
+        assert!(!config_text.contains("radius"), "{config_text}");
+        assert!(config_text.contains("# mine"));
+        let theme_text = std::fs::read_to_string(dir.join("themes/Red.toml")).unwrap();
+        assert!(theme_text.contains("radius = 2"), "{theme_text}");
+        assert!(theme_text.contains("[colors]"), "{theme_text}");
+        let c = Config::read(&d.path).unwrap();
+        assert_eq!((c.theme.radius, c.theme.palette.accent), (2.0, red));
+
+        // Edits now go to the theme file.
+        d.set(&["theme", "radius"], 7);
+        save_now(&mut d);
+        assert!(std::fs::read_to_string(dir.join("themes/Red.toml")).unwrap().contains("radius = 7"));
+        assert!(!std::fs::read_to_string(&d.path).unwrap().contains("radius"));
+        assert!(d.changed(&["theme", "radius"]));
+
+        // Back to built-in, then a change there is kept when switching away.
+        assert_eq!(d.use_theme(None), None);
+        save_now(&mut d);
+        assert_eq!(Config::read(&d.path).unwrap().theme.radius, 6.0);
+        d.set(&["theme", "radius"], 11);
+        assert_eq!(d.use_theme(Some("Red")).as_deref(), Some("Custom"));
+        save_now(&mut d);
+        assert_eq!(d.theme_names(), ["Custom", "Red"]);
+        let c = Config::read(&d.path).unwrap();
+        assert_eq!((c.theme.name.as_deref(), c.theme.radius), (Some("Red"), 7.0));
+        d.use_theme(Some("Custom"));
+        save_now(&mut d);
+        assert_eq!(Config::read(&d.path).unwrap().theme.radius, 11.0);
+
+        // Deleting the theme in use falls back to built-in.
+        d.delete_theme("Custom").unwrap();
+        assert_eq!(d.theme_name(), None);
+        assert_eq!(d.theme_names(), ["Red"]);
+        assert_eq!(Config::read(&d.path).unwrap().theme.radius, 6.0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn config_values_win_over_the_theme() {
+        let (dir, mut d) = temp_config("override", "[theme]\nname = \"T\"\nfont_size = 20\n");
+        std::fs::create_dir_all(dir.join("themes")).unwrap();
+        std::fs::write(dir.join("themes/T.toml"), "font_size = 10\nradius = 3\n").unwrap();
+        d.read();
+        assert_eq!(d.float(&["theme", "font_size"]), 20.0);
+        assert_eq!(d.float(&["theme", "radius"]), 3.0);
+        assert_eq!(d.theme_overrides(), ["font_size"]);
+        // Editing it changes the value that's in effect: the config's.
+        d.set(&["theme", "font_size"], 18);
+        save_now(&mut d);
+        assert_eq!(Config::read(&d.path).unwrap().theme.font_size, 18.0);
+        // Moving it into the theme leaves the config with just the name.
+        d.save_theme_as("T");
+        save_now(&mut d);
+        assert!(d.theme_overrides().is_empty());
+        let c = Config::read(&d.path).unwrap();
+        assert_eq!((c.theme.font_size, c.theme.radius), (18.0, 3.0));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

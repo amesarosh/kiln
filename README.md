@@ -54,7 +54,8 @@ For X11 apps, install `xwayland` (turn it off with `xwayland = false` under `[ge
 
 When run from a TTY, logs go to `~/.local/state/wayland-time/wayland-time.log` (previous run: `.log.old`).
 
-To pick it from a login screen (GDM, SDDM…), install the binary and session file:
+To pick it from a login screen (GDM, SDDM…), install the binary and session file.
+`./install.sh` builds everything and does all of this for you (it asks for sudo); by hand:
 
 ```sh
 sudo install -m755 target/release/wayland-time /usr/local/bin/
@@ -165,6 +166,13 @@ colors from `[theme]`. Colors are named once in `[theme.colors]` and referred to
 shades like `hover = "mix(surface, text, 0.1)"` are built from them, so changing `surface` or
 `accent` updates every part that uses it. A section can override colors for itself alone with
 its own table, e.g. `[bar.colors]`.
+
+Themes can be saved and switched. A saved theme is a file in `~/.config/wayland-time/themes/`
+holding the same keys as `[theme]` (`font`, `font_size`, `radius`, `icon_theme` and a `[colors]`
+table), and `[theme] name = "Nord"` uses `themes/Nord.toml`. Its values go on top of the built-in
+theme, and anything else set in `[theme]` goes on top of the saved theme. Editing the theme file
+in use reloads it like the config. The settings app's Appearance page can pick a theme, save the
+current look as a new one, and delete one.
 
 If you define `[binds]`, it replaces the default binds entirely. See [`resources/default-config.toml`](resources/default-config.toml) for every option and action.
 A config with errors is rejected as a whole and the last working config stays active; all problems are logged at once.
