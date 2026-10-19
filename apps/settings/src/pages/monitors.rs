@@ -100,12 +100,14 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                     changed: false,
                     restart: false,
                 };
+                widgets::divider(ui, p);
                 widgets::row(ui, p, info("On", "At least one monitor always stays on."), |ui| {
                     if widgets::toggle(ui, p, &mut enabled).changed() {
                         edits.push(("enabled", (!enabled).then(|| false.into())));
                     }
                 });
 
+                widgets::divider(ui, p);
                 widgets::row(ui, p, info("Resolution", ""), |ui| {
                     let mut mode = get("mode")
                         .and_then(|i| i.as_str().map(String::from))
@@ -133,11 +135,12 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                         opts.push((mode.as_str(), mode.as_str()));
                     }
                     let mut m = mode.clone();
-                    if widgets::choice(ui, "mode", &mut m, &opts, ui.available_width().min(280.0)) {
+                    if widgets::choice(ui, "mode", &mut m, &opts) {
                         edits.push(("mode", (!m.is_empty()).then(|| m.into())));
                     }
                 });
 
+                widgets::divider(ui, p);
                 widgets::row(ui, p, info("Scale", "Whole numbers look sharpest."), |ui| {
                     let mut scale = get("scale").and_then(|i| crate::doc::as_number(&i)).unwrap_or(1.0);
                     let r = ui.add(
@@ -153,6 +156,7 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                     }
                 });
 
+                widgets::divider(ui, p);
                 widgets::row(
                     ui,
                     p,
@@ -179,15 +183,17 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                     },
                 );
 
+                widgets::divider(ui, p);
                 widgets::row(ui, p, info("Rotation", "Counter-clockwise."), |ui| {
                     let mut t = get("transform")
                         .and_then(|i| i.as_str().map(String::from))
                         .unwrap_or_else(|| "normal".into());
-                    if widgets::choice(ui, "transform", &mut t, TRANSFORMS, 200.0) {
+                    if widgets::choice(ui, "transform", &mut t, TRANSFORMS) {
                         edits.push(("transform", (t != "normal").then(|| t.into())));
                     }
                 });
 
+                widgets::divider(ui, p);
                 widgets::row(ui, p, info("Bar", ""), |ui| {
                     let mut b = get("bar")
                         .and_then(|i| i.as_str().map(String::from))
@@ -200,11 +206,12 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                         ("right", "Right"),
                         ("none", "Hidden"),
                     ];
-                    if widgets::choice(ui, "bar", &mut b, &opts, 200.0) {
+                    if widgets::choice(ui, "bar", &mut b, &opts) {
                         edits.push(("bar", (!b.is_empty()).then(|| b.into())));
                     }
                 });
 
+                widgets::divider(ui, p);
                 widgets::row(ui, p, info("Layout", "What its workspaces start with."), |ui| {
                     let mut l = get("layout")
                         .and_then(|i| i.as_str().map(String::from))
@@ -214,7 +221,7 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                         ("tile", "Tile"),
                         ("monocle", "Monocle"),
                     ];
-                    if widgets::choice(ui, "layout", &mut l, &opts, 200.0) {
+                    if widgets::choice(ui, "layout", &mut l, &opts) {
                         edits.push(("layout", (!l.is_empty()).then(|| l.into())));
                     }
                 });

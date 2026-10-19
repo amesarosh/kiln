@@ -45,11 +45,11 @@ impl ThemesPage {
                     let options: Vec<(&str, &str)> = std::iter::once(("", "Built-in"))
                         .chain(names.iter().map(|n| (n.as_str(), n.as_str())))
                         .collect();
-                    if widgets::choice(ui, "theme-in-use", &mut picked, &options, ui.available_width().min(260.0))
-                    {
+                    if widgets::choice(ui, "theme-in-use", &mut picked, &options) {
                         let kept = doc.use_theme((!picked.is_empty()).then_some(picked.as_str()));
                         self.confirm_delete = None;
-                        self.message = kept.map(|k| Ok(format!("Your changes to the built-in theme were saved as \"{k}\".")));
+                        self.message =
+                            kept.map(|k| Ok(format!("Your changes to the built-in theme were saved as \"{k}\".")));
                     }
                 });
 

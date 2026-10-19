@@ -4,7 +4,7 @@ use toml_edit::Item;
 use wt_config::theme::{self, ColorDefs, Palette};
 use wt_ui::{
     color,
-    egui::{self, Align, Color32, Layout, RichText, Ui, color_picker::Alpha, vec2},
+    egui::{self, Align, Color32, Layout, RichText, Ui},
 };
 
 use crate::{doc::ConfigDoc, widgets};
@@ -57,48 +57,38 @@ impl ColorsPage {
                     let path = [PATH[0], PATH[1], name.as_str()];
                     let changed = doc.changed(&path);
                     let mut action = None;
-                    ui.horizontal(|ui| {
-                        let current = resolved.get(name).and_then(|r| r.as_ref().ok()).copied();
-                        let mut c = current.map_or(Color32::TRANSPARENT, color);
-                        let r = egui::color_picker::color_edit_button_srgba(ui, &mut c, Alpha::OnlyBlend);
-                        if r.changed() {
-                            action = Some(Some(hex(c)));
+                    let trailing = if is_default {
+                        widgets::Trailing::Reset(changed)
+                    } else {
+                        widgets::Trailing::Remove
+                    };
+                    let left = |ui: &mut Ui| {
+                        ui.label(RichText::new(name).monospace().color(color(p.text)));
+                        let role = Palette::ROLE_DOCS.iter().find(|(r, _)| r == name);
+                        let note = match role {
+                            Some((_, text)) => text.replace('`', ""),
+                            None if !is_default => "Your own color".to_string(),
+                            None => String::new(),
+                        };
+                        if !note.is_empty() {
+                            ui.label(RichText::new(note).small().color(color(p.subtext)));
                         }
-                        // Outline it, so colors close to the card's (base, surface) still show.
-                        ui.painter().rect_stroke(
-                            r.rect,
-                            ui.visuals().widgets.inactive.corner_radius,
-                            egui::Stroke::new(1.0, color(p.separator)),
-                            egui::StrokeKind::Outside,
-                        );
-                        ui.allocate_ui_with_layout(vec2(170.0, 0.0), Layout::top_down(Align::Min), |ui| {
-                            ui.set_width(170.0);
-                            ui.label(RichText::new(name).monospace().color(color(p.text)));
-                            if let Some((_, doc)) = Palette::ROLE_DOCS.iter().find(|(r, _)| r == name) {
-                                ui.label(RichText::new(doc.replace('`', "")).small().color(color(p.subtext)));
-                            } else if !is_default {
-                                ui.label(RichText::new("Your own color").small().color(color(p.subtext)));
-                            }
-                        });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if is_default {
-                                let r = ui
-                                    .add_visible(
-                                        changed,
-                                        egui::Button::new(RichText::new("Reset").small()).frame(false),
-                                    )
-                                    .on_hover_text("Back to the default");
-                                if r.clicked() {
-                                    action = Some(None);
-                                }
-                            } else if ui.add(egui::Button::new("Remove").small()).clicked() {
-                                action = Some(None);
+                    };
+                    let control = |ui: &mut Ui| {
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            let current = resolved.get(name).and_then(|r| r.as_ref().ok()).copied();
+                            let mut c = current.map_or(Color32::TRANSPARENT, color);
+                            if widgets::swatch(ui, p, &mut c).changed() {
+                                action = Some(Some(hex(c)));
                             }
                             if widgets::text(ui, &mut expr, "#rrggbb").changed() {
                                 action = Some(Some(expr.clone()));
                             }
                         });
-                    });
+                    };
+                    if widgets::row_with(ui, p, trailing, false, left, control) {
+                        action = Some(None);
+                    }
                     if let Some(Err(e)) = resolved.get(name) {
                         widgets::error(ui, p, e);
                     }

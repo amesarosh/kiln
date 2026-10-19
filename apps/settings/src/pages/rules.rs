@@ -75,12 +75,15 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                     );
                     changed
                 };
+                widgets::divider(ui, p);
                 if text_row(ui, "App id", "", &mut app_id, "e.g. pavucontrol") {
                     edits.push(("app_id", (!app_id.is_empty()).then(|| app_id.clone().into())));
                 }
+                widgets::divider(ui, p);
                 if text_row(ui, "Title contains", "", &mut title, "any title") {
                     edits.push(("title", (!title.is_empty()).then(|| title.clone().into())));
                 }
+                widgets::divider(ui, p);
                 widgets::row(
                     ui,
                     p,
@@ -92,11 +95,12 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                     },
                     |ui| {
                         let opts = [("", "Don't change"), ("float", "Float"), ("tile", "Tile")];
-                        if widgets::choice(ui, "floating", &mut floating, &opts, 200.0) {
+                        if widgets::choice(ui, "floating", &mut floating, &opts) {
                             edits.push(("floating", (!floating.is_empty()).then(|| (floating == "float").into())));
                         }
                     },
                 );
+                widgets::divider(ui, p);
                 widgets::row(
                     ui,
                     p,
@@ -111,11 +115,12 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                         let opts: Vec<(&str, &str)> = std::iter::once(("", "Current"))
                             .chain(numbers.iter().map(|n| (n.as_str(), n.as_str())))
                             .collect();
-                        if widgets::choice(ui, "workspace", &mut workspace, &opts, 200.0) {
+                        if widgets::choice(ui, "workspace", &mut workspace, &opts) {
                             edits.push(("workspace", workspace.parse::<i64>().ok().map(Into::into)));
                         }
                     },
                 );
+                widgets::divider(ui, p);
                 widgets::row(
                     ui,
                     p,
@@ -132,7 +137,7 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                             opts.push((output.as_str(), output.as_str()));
                         }
                         let mut o = output.clone();
-                        if widgets::choice(ui, "output", &mut o, &opts, 200.0) {
+                        if widgets::choice(ui, "output", &mut o, &opts) {
                             edits.push(("output", (!o.is_empty()).then(|| o.into())));
                         }
                     },

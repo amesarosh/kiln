@@ -46,11 +46,12 @@ impl SettingsApp {
         ui.add_space(12.0);
         ui.label(RichText::new("Settings").heading().color(color(p.text)));
         ui.add_space(8.0);
-        ui.add(
+        ui.add(widgets::padded(
+            ui,
             egui::TextEdit::singleline(&mut self.search)
                 .hint_text("Search settings")
                 .desired_width(ui.available_width()),
-        );
+        ));
         ui.add_space(8.0);
         for page in Page::ALL {
             let selected = self.page == *page && self.search.is_empty();

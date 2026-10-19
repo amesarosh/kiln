@@ -4,7 +4,7 @@
 use wt_config::theme::Palette;
 use wt_ui::{
     color,
-    egui::{self, Align, Layout, Response, RichText, Sense, StrokeKind, Ui, vec2},
+    egui::{self, Align, Color32, Layout, Rect, Response, RichText, Sense, StrokeKind, TextStyle, Ui, UiBuilder, vec2},
 };
 
 /// A titled group of settings, drawn as a card in `surface` so controls (in `raised`) stand out.
@@ -20,7 +20,7 @@ pub fn card<R>(ui: &mut Ui, p: &Palette, title: &str, note: &str, add: impl FnOn
     egui::Frame::new()
         .fill(color(p.surface))
         .corner_radius(ui.visuals().widgets.noninteractive.corner_radius)
-        .inner_margin(egui::Margin::symmetric(14, 10))
+        .inner_margin(egui::Margin::symmetric(16, 12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             add(ui)
@@ -30,12 +30,15 @@ pub fn card<R>(ui: &mut Ui, p: &Palette, title: &str, note: &str, add: impl FnOn
 
 /// A thin line between rows in a card.
 pub fn divider(ui: &mut Ui, p: &Palette) {
-    ui.add_space(4.0);
+    ui.add_space(6.0);
     let w = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(w, 1.0), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, color(p.separator));
-    ui.add_space(4.0);
+    ui.add_space(6.0);
 }
+
+/// Width of the controls on the right of a row, so their left edges line up down the page.
+const CONTROL_WIDTH: f32 = 260.0;
 
 /// What a row should show next to its label.
 pub struct RowInfo<'a> {
@@ -50,38 +53,171 @@ pub struct RowInfo<'a> {
 /// One setting: label and help on the left, the control on the right. Returns true if the
 /// reset button was clicked.
 pub fn row(ui: &mut Ui, p: &Palette, info: RowInfo<'_>, control: impl FnOnce(&mut Ui)) -> bool {
-    let mut reset = false;
-    ui.horizontal(|ui| {
-        let total = ui.available_width();
-        let right = (total * 0.48).clamp(200.0, 380.0);
-        let left = (total - right - 12.0).max(80.0);
-        ui.allocate_ui_with_layout(vec2(left, 0.0), Layout::top_down(Align::Min), |ui| {
-            ui.set_width(left);
-            ui.label(RichText::new(info.label).color(color(p.text)));
-            if !info.help.is_empty() {
-                ui.label(RichText::new(info.help).small().color(color(p.subtext)));
-            }
-            if info.restart {
-                ui.label(
-                    RichText::new("Applies the next time you log in")
-                        .small()
-                        .color(color(p.accent)),
-                );
-            }
-        });
-        ui.allocate_ui_with_layout(vec2(right, 0.0), Layout::right_to_left(Align::Center), |ui| {
-            let r = ui
-                .add_visible(info.changed, reset_button(p))
-                .on_hover_text("Back to the default");
-            reset = r.clicked();
-            control(ui);
-        });
-    });
-    reset
+    let single_line = info.help.is_empty() && !info.restart;
+    let left = |ui: &mut Ui| {
+        ui.label(RichText::new(info.label).color(color(p.text)));
+        if !info.help.is_empty() {
+            ui.label(RichText::new(info.help).small().color(color(p.subtext)));
+        }
+        if info.restart {
+            ui.label(
+                RichText::new("Applies the next time you log in")
+                    .small()
+                    .color(color(p.accent)),
+            );
+        }
+    };
+    row_with(ui, p, Trailing::Reset(info.changed), single_line, left, control)
 }
 
-fn reset_button(p: &Palette) -> egui::Button<'static> {
-    egui::Button::new(RichText::new("Reset").small().color(color(p.muted))).frame(false)
+/// The small button at the far right of a row.
+pub enum Trailing {
+    /// "Reset", shown when the setting differs from the default. Its space is kept either way.
+    Reset(bool),
+    Remove,
+}
+
+/// A row with any content on the left. `single_line` content is centered against the control;
+/// taller content has the control centered against it. Returns true if the trailing button
+/// was clicked.
+pub fn row_with(
+    ui: &mut Ui,
+    p: &Palette,
+    trailing: Trailing,
+    single_line: bool,
+    left: impl FnOnce(&mut Ui),
+    control: impl FnOnce(&mut Ui),
+) -> bool {
+    let mut clicked = false;
+    let control_h = ui.spacing().interact_size.y;
+    let gap = ui.spacing().item_spacing.x;
+    let top_left = ui.cursor().min;
+    let total = ui.available_width();
+    let right = (total * 0.5).clamp(180.0, 360.0);
+    let left_w = (total - right - gap).max(80.0);
+
+    // The left side first, to learn the row's height, then the control centered in that height.
+    let pad = if single_line {
+        ((control_h - ui.text_style_height(&TextStyle::Body)) / 2.0).max(0.0)
+    } else {
+        0.0
+    };
+    let left_rect = Rect::from_min_size(top_left + vec2(0.0, pad), vec2(left_w, f32::INFINITY));
+    let left_h = ui
+        .scope_builder(
+            UiBuilder::new()
+                .max_rect(left_rect)
+                .layout(Layout::top_down(Align::Min)),
+            left,
+        )
+        .response
+        .rect
+        .height();
+    let height = (pad + left_h).max(control_h);
+
+    let right_rect = Rect::from_min_size(top_left + vec2(total - right, 0.0), vec2(right, height));
+    let right_layout = Layout::right_to_left(Align::Center);
+    let right_used = ui
+        .scope_builder(UiBuilder::new().max_rect(right_rect).layout(right_layout), |ui| {
+            // A fixed slot, so controls line up whether or not their button shows.
+            let slot = vec2(ui.text_style_height(&TextStyle::Small) * 4.0, height);
+            ui.allocate_ui_with_layout(slot, right_layout, |ui| {
+                ui.set_width(slot.x);
+                let (label, visible, hint) = match trailing {
+                    Trailing::Reset(changed) => ("Reset", changed, "Back to the default"),
+                    Trailing::Remove => ("Remove", true, "Remove"),
+                };
+                let button = egui::Button::new(RichText::new(label).small().color(color(p.muted))).frame(false);
+                clicked = ui.add_visible(visible, button).on_hover_text(hint).clicked();
+            });
+            let w = ui.available_width().min(CONTROL_WIDTH);
+            ui.allocate_ui_with_layout(vec2(w, height), right_layout, |ui| {
+                ui.set_width(w);
+                control(ui);
+            });
+        })
+        .response
+        .rect;
+    let bottom = (top_left.y + height).max(right_used.bottom());
+    ui.advance_cursor_after_rect(Rect::from_min_max(top_left, egui::pos2(top_left.x + total, bottom)));
+    clicked
+}
+
+/// A slider with its value in an editable box beside it, filling the width it's given.
+/// Returns a response that is `changed()` when the value changed.
+pub fn slider(
+    ui: &mut Ui,
+    p: &Palette,
+    value: &mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    decimals: usize,
+    unit: &str,
+) -> Response {
+    let (min, max) = (*range.start(), *range.end());
+    let step = 10f64.powi(-(decimals as i32));
+    let snap = |v: f64| ((v / step).round() * step).clamp(min, max);
+    let h = ui.spacing().interact_size.y;
+    let width = ui.available_width();
+    let box_w = (ui.text_style_height(&TextStyle::Body) * 4.0).max(56.0);
+    ui.allocate_ui_with_layout(vec2(width, h), Layout::left_to_right(Align::Center), |ui| {
+        let track_w = (width - box_w - ui.spacing().item_spacing.x).max(40.0);
+        let (rect, mut response) = ui.allocate_exact_size(vec2(track_w, h), Sense::click_and_drag());
+        let knob_r = (h * 0.3).round();
+        let x_range = (rect.left() + knob_r)..=(rect.right() - knob_r);
+
+        let mut v = *value;
+        if let Some(pos) = response.interact_pointer_pos() {
+            let t = egui::remap_clamp(pos.x, x_range.clone(), 0.0..=1.0) as f64;
+            v = snap(min + t * (max - min));
+        }
+        if response.has_focus() {
+            let (down, up) = ui.input(|i| {
+                let down = i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::ArrowDown);
+                let up = i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::ArrowUp);
+                (down, up)
+            });
+            v = snap(v + step * (up as i32 - down as i32) as f64);
+        }
+        if v != *value {
+            *value = v;
+            response.mark_changed();
+        }
+
+        if ui.is_rect_visible(rect) {
+            let t = if max > min {
+                ((*value - min) / (max - min)).clamp(0.0, 1.0) as f32
+            } else {
+                0.0
+            };
+            let x = egui::lerp(x_range, t);
+            let rail_h = (h * 0.22).round().max(4.0);
+            let rail = egui::Rect::from_center_size(rect.center(), vec2(rect.width(), rail_h));
+            let active = response.hovered() || response.dragged() || response.has_focus();
+            let painter = ui.painter();
+            painter.rect_filled(rail, rail_h / 2.0, color(if active { p.hover } else { p.raised }));
+            let fill = egui::Rect::from_min_max(rail.min, egui::pos2(x, rail.max.y));
+            painter.rect_filled(fill, rail_h / 2.0, color(p.accent));
+            let r = if active { knob_r + 1.0 } else { knob_r };
+            painter.circle_filled(egui::pos2(x, rect.center().y), r, color(p.text));
+        }
+
+        let suffix = if unit.is_empty() {
+            String::new()
+        } else {
+            format!(" {unit}")
+        };
+        let speed = ((max - min) / 300.0).max(step);
+        let typed = ui.add_sized(
+            vec2(box_w, h),
+            egui::DragValue::new(value)
+                .range(min..=max)
+                .speed(speed)
+                .fixed_decimals(decimals)
+                .suffix(suffix),
+        );
+        response | typed
+    })
+    .inner
 }
 
 /// An on/off switch.
@@ -107,13 +243,13 @@ pub fn toggle(ui: &mut Ui, p: &Palette, on: &mut bool) -> Response {
     response
 }
 
-/// A drop-down of fixed choices: (value, label). Returns true when the choice changed.
+/// A drop-down of fixed choices: (value, label), filling the width it's given. Returns true
+/// when the choice changed.
 pub fn choice(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
     value: &mut String,
     options: &[(&str, &str)],
-    width: f32,
 ) -> bool {
     let current = options
         .iter()
@@ -122,7 +258,7 @@ pub fn choice(
     let before = value.clone();
     egui::ComboBox::from_id_salt(id)
         .selected_text(current)
-        .width(width)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (v, label) in options {
                 ui.selectable_value(value, v.to_string(), *label);
@@ -133,11 +269,49 @@ pub fn choice(
 
 /// A single-line text field filling the width it's given.
 pub fn text(ui: &mut Ui, value: &mut String, hint: &str) -> Response {
-    ui.add(
-        egui::TextEdit::singleline(value)
-            .hint_text(hint)
-            .desired_width(ui.available_width()),
-    )
+    let edit = egui::TextEdit::singleline(value)
+        .hint_text(hint)
+        .desired_width(f32::INFINITY);
+    ui.add(padded(ui, edit))
+}
+
+/// A text field as tall as the other controls, with its text clear of the rounded ends.
+pub fn padded<'t>(ui: &Ui, edit: egui::TextEdit<'t>) -> egui::TextEdit<'t> {
+    let h = ui.spacing().interact_size.y;
+    let radius = f32::from(ui.visuals().widgets.inactive.corner_radius.nw).min(h / 2.0);
+    let x = (radius * 0.6).max(8.0).round() as i8;
+    edit.margin(egui::Margin::symmetric(x, 2))
+        .min_size(vec2(0.0, h))
+        .vertical_align(Align::Center)
+}
+
+/// A color chip that opens a color picker when clicked. `changed()` when a color was picked.
+pub fn swatch(ui: &mut Ui, p: &Palette, c: &mut Color32) -> Response {
+    let h = ui.spacing().interact_size.y;
+    let (rect, mut response) = ui.allocate_exact_size(vec2(h * 1.6, h), Sense::click());
+    let radius = ui.visuals().widgets.inactive.corner_radius;
+    if ui.is_rect_visible(rect) {
+        // Outlined, so colors close to the card's still show.
+        let outline = if response.hovered() { p.muted } else { p.separator };
+        ui.painter().rect(
+            rect,
+            radius,
+            *c,
+            egui::Stroke::new(1.0, color(outline)),
+            StrokeKind::Inside,
+        );
+    }
+    let mut picked = false;
+    egui::Popup::menu(&response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.spacing_mut().slider_width = 275.0;
+            picked = egui::color_picker::color_picker_color32(ui, c, egui::color_picker::Alpha::OnlyBlend);
+        });
+    if picked {
+        response.mark_changed();
+    }
+    response
 }
 
 /// An editable list of strings (commands, app ids...). Returns true when it changed.

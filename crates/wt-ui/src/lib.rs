@@ -166,7 +166,8 @@ fn apply_style(ctx: &egui::Context, theme: &Theme) {
         v.menu_corner_radius = radius;
         v.faint_bg_color = c(p.raised);
         v.extreme_bg_color = c(p.base);
-        v.text_edit_bg_color = Some(c(p.base));
+        // Fields look like the other controls (drop-downs, buttons) rather than holes in the card.
+        v.text_edit_bg_color = Some(c(p.raised));
         v.code_bg_color = c(p.raised);
         v.hyperlink_color = c(p.accent);
         v.warn_fg_color = c(p.urgent);

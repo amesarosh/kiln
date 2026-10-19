@@ -54,11 +54,12 @@ impl BindsPage {
             }
             let mut add = false;
             ui.horizontal(|ui| {
-                ui.add(
+                ui.add(widgets::padded(
+                    ui,
                     egui::TextEdit::singleline(&mut self.new_combo)
                         .hint_text("Mod+Shift+b")
                         .desired_width(170.0),
-                );
+                ));
                 action_editor(ui, "new-action", &mut self.new_action);
                 let ok =
                     !self.new_combo.is_empty() && combo_err.is_none() && check_bind("Mod", &self.new_action).is_ok();
@@ -89,11 +90,12 @@ impl BindsPage {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Keybinds").strong().color(color(p.text)));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add(
+                ui.add(widgets::padded(
+                    ui,
                     egui::TextEdit::singleline(&mut self.filter)
                         .hint_text("Search")
                         .desired_width(200.0),
-                );
+                ));
             });
         });
         if !own {
@@ -130,7 +132,10 @@ impl BindsPage {
                         let mut action_buf = action.clone();
                         let mut combo_err = None;
                         ui.horizontal(|ui| {
-                            let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(170.0));
+                            let r = ui.add(widgets::padded(
+                                ui,
+                                egui::TextEdit::singleline(&mut buf).desired_width(170.0),
+                            ));
                             if r.changed() {
                                 self.editing.insert(combo.clone(), buf.clone());
                             }
@@ -213,11 +218,12 @@ fn action_editor(ui: &mut Ui, id: &str, action: &mut String) -> bool {
         });
     let hint = known.map_or("", |(_, a, _)| *a);
     if !hint.is_empty() || !arg.is_empty() {
-        ui.add(
+        ui.add(widgets::padded(
+            ui,
             egui::TextEdit::singleline(&mut new_arg)
                 .hint_text(hint)
                 .desired_width((ui.available_width() - 80.0).max(80.0)),
-        );
+        ));
     }
     if new_name != name {
         // A different action takes a different argument; start from its first example.

@@ -371,51 +371,43 @@ pub fn show_field(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cac
             }
         }
         Kind::Int(min, max, unit) => {
-            let mut v = doc.int(path);
-            let mut slider = egui::Slider::new(&mut v, *min..=*max);
-            if !unit.is_empty() {
-                slider = slider.suffix(format!(" {unit}"));
-            }
-            if ui.add(slider).changed() {
-                doc.set(path, v);
+            let mut v = doc.int(path) as f64;
+            if widgets::slider(ui, p, &mut v, *min as f64..=*max as f64, 0, unit).changed() {
+                doc.set(path, v.round() as i64);
             }
         }
         Kind::Float(min, max, decimals) => {
             let mut v = doc.float(path);
-            let step = 10f64.powi(-(*decimals as i32));
-            let r = ui.add(
-                egui::Slider::new(&mut v, *min..=*max)
-                    .step_by(step)
-                    .fixed_decimals(*decimals),
-            );
-            if r.changed() {
+            if widgets::slider(ui, p, &mut v, *min..=*max, *decimals, "").changed() {
                 set_number(doc, path, v, *decimals);
             }
         }
         Kind::Seconds => {
-            let mut v = doc.int(path);
-            let mut never = v == 0;
-            ui.horizontal(|ui| {
-                if !never {
-                    let r = ui.add(
-                        egui::DragValue::new(&mut v)
-                            .range(1..=86_400)
-                            .speed(5)
-                            .custom_formatter(|n, _| duration(n as i64))
-                            .custom_parser(parse_duration),
-                    );
-                    if r.changed() {
-                        doc.set(path, v);
-                    }
-                }
-                if ui.checkbox(&mut never, "Never").changed() {
-                    doc.set(path, if never { 0 } else { 600 });
-                }
-            });
+            // Picked from a list: dragging or typing a duration is fiddly for a setting like this.
+            let v = doc.int(path);
+            let mut times: Vec<i64> = SECONDS_CHOICES.to_vec();
+            if !times.contains(&v) {
+                times.push(v);
+                times.sort_unstable_by_key(|&t| if t == 0 { i64::MAX } else { t });
+            }
+            let values: Vec<String> = times.iter().map(i64::to_string).collect();
+            let labels: Vec<String> = times
+                .iter()
+                .map(|&t| if t == 0 { "Never".to_string() } else { duration(t) })
+                .collect();
+            let options: Vec<(&str, &str)> = values
+                .iter()
+                .map(String::as_str)
+                .zip(labels.iter().map(String::as_str))
+                .collect();
+            let mut picked = v.to_string();
+            if widgets::choice(ui, path, &mut picked, &options) {
+                doc.set(path, picked.parse::<i64>().unwrap_or(0));
+            }
         }
         Kind::Choice(options) => {
             let mut v = doc.str(path);
-            if widgets::choice(ui, path, &mut v, options, ui.available_width().min(260.0)) {
+            if widgets::choice(ui, path, &mut v, options) {
                 doc.set(path, v);
             }
         }
@@ -437,7 +429,7 @@ pub fn show_field(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cac
             let options: Vec<(&str, &str)> = std::iter::once(("auto", "Same as the desktop"))
                 .chain(themes.iter().map(|t| (t.as_str(), t.as_str())))
                 .collect();
-            if widgets::choice(ui, path, &mut v, &options, ui.available_width().min(260.0)) {
+            if widgets::choice(ui, path, &mut v, &options) {
                 doc.set(path, v);
             }
         }
@@ -483,7 +475,7 @@ fn font_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool {
     let mut filter: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
     egui::ComboBox::from_id_salt("font")
         .selected_text(value.as_str())
-        .width(ui.available_width().min(260.0))
+        .width(ui.available_width())
         .height(320.0)
         .show_ui(ui, |ui| {
             ui.add(egui::TextEdit::singleline(&mut filter).hint_text("Search fonts"))
@@ -503,6 +495,9 @@ fn font_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool {
     *value != before
 }
 
+/// The times offered for `Kind::Seconds` settings, 0 being "Never".
+const SECONDS_CHOICES: &[i64] = &[60, 120, 180, 300, 600, 900, 1200, 1800, 2700, 3600, 7200, 0];
+
 /// "10 min", "1 h 30 min", "45 s".
 fn duration(s: i64) -> String {
     let (h, m, sec) = (s / 3600, s % 3600 / 60, s % 60);
@@ -519,44 +514,6 @@ fn duration(s: i64) -> String {
     parts.join(" ")
 }
 
-/// Accepts "90", "90 s", "10 min", "1h 30min".
-fn parse_duration(text: &str) -> Option<f64> {
-    let text = text.trim().to_lowercase();
-    if let Ok(n) = text.parse::<f64>() {
-        return Some(n);
-    }
-    let mut total = 0.0;
-    let mut num = String::new();
-    let mut unit = String::new();
-    let mut flush = |num: &mut String, unit: &mut String| -> Option<()> {
-        if num.is_empty() {
-            return Some(());
-        }
-        let n: f64 = num.parse().ok()?;
-        total += n * match unit.trim() {
-            "" | "s" | "sec" => 1.0,
-            "m" | "min" => 60.0,
-            "h" | "hr" => 3600.0,
-            _ => return None,
-        };
-        num.clear();
-        unit.clear();
-        Some(())
-    };
-    for c in text.chars() {
-        if c.is_ascii_digit() || c == '.' {
-            if !unit.trim().is_empty() {
-                flush(&mut num, &mut unit)?;
-            }
-            num.push(c);
-        } else {
-            unit.push(c);
-        }
-    }
-    flush(&mut num, &mut unit)?;
-    Some(total)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,10 +522,6 @@ mod tests {
     fn durations() {
         assert_eq!(duration(600), "10 min");
         assert_eq!(duration(5430), "1 h 30 min 30 s");
-        assert_eq!(parse_duration("1h 30min"), Some(5400.0));
-        assert_eq!(parse_duration("90"), Some(90.0));
-        assert_eq!(parse_duration("10 min"), Some(600.0));
-        assert_eq!(parse_duration("3 parsecs"), None);
     }
 
     #[test]
