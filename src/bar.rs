@@ -382,50 +382,48 @@ impl Bar {
         }
         y += 4;
 
-        // End buttons, square, placed right to left from the bottom-right corner. The layout
-        // button comes last and fills what's left of its row.
+        // Status widgets, then the layout, settings and power buttons, packed into rows from
+        // the bottom up. The bottom row takes as many from the end as fit, so a row is only
+        // added above it when there are too many tray icons (or wide widgets) for one.
         let mut bottom = height - row;
         if m.clock.is_some() {
             parts.push((Rect::new(0, bottom, w, row), Part::Clock));
             bottom -= row;
         }
-        let mut x = w;
-        for part in END_BUTTONS.into_iter().rev() {
-            if x < row && x < w {
-                x = w;
-                bottom -= row;
-            }
-            if part == Part::Layout {
-                parts.push((Rect::new(0, bottom, x, row), part));
-            } else {
-                x -= row;
-                parts.push((Rect::new(x, bottom, row, row), part));
-            }
-        }
-
-        // Status widgets in rows above the buttons, as many to a row as fit.
-        let mut rows: Vec<Vec<(i32, Part)>> = Vec::new();
-        let mut used = w;
-        for item in &m.status {
-            let iw = item.w.min(w);
-            if used + iw > w {
-                rows.push(Vec::new());
-                used = 0;
-            }
-            rows.last_mut().unwrap().push((iw, item.part));
-            used += iw;
-        }
-        for r in rows.iter().rev() {
-            if bottom - row < y + row {
+        let mut items: Vec<(i32, Part)> = m.status.iter().map(|i| (i.w.min(w), i.part)).collect();
+        items.extend(END_BUTTONS.map(|p| (row, p)));
+        let mut end = items.len();
+        while end > 0 {
+            // Room for this row, but always room for the bottom one with the buttons.
+            if end < items.len() && bottom < y + row {
                 break;
             }
-            bottom -= row;
-            let mut x = 0;
-            for (iw, part) in r {
-                parts.push((Rect::new(x, bottom, *iw, row), *part));
-                x += iw;
+            let mut start = end;
+            let mut used = 0;
+            while start > 0 && used + items[start - 1].0 <= w {
+                start -= 1;
+                used += items[start].0;
             }
+            // Widgets from the left, buttons against the right edge.
+            let mut x = 0;
+            let mut right = w;
+            for &(iw, part) in items[start..end].iter().rev() {
+                if END_BUTTONS.contains(&part) {
+                    right -= iw;
+                    parts.push((Rect::new(right, bottom, iw, row), part));
+                }
+            }
+            for &(iw, part) in &items[start..end] {
+                if !END_BUTTONS.contains(&part) {
+                    parts.push((Rect::new(x, bottom, iw, row), part));
+                    x += iw;
+                }
+            }
+            end = start;
+            bottom -= row;
         }
+        // `bottom` is now the row above the top one used.
+        bottom += row;
 
         y += 9;
         for i in 0..m.tabs.len() {
@@ -795,7 +793,7 @@ impl Bar {
 /// A small picture of the layout: a master pane and a stack for tile (beside it) and
 /// vertical (under it), one pane for monocle.
 fn draw_layout_glyph(canvas: &mut Canvas, layout: LayoutKind, r: Rect, s: i32, color: Color) {
-    let (w, h) = (16 * s, 12 * s);
+    let (w, h) = (14 * s, 10 * s);
     let (x, y) = (r.x + (r.w - w) / 2, r.y + (r.h - h) / 2);
     let radius = 1.5 * s as f32;
     match layout {
@@ -1558,6 +1556,52 @@ mod tests {
                 // The very bottom of the bar.
                 assert_eq!(r.y + r.h, size.1);
             }
+        }
+    }
+
+    #[test]
+    fn side_bar_packs_widgets_and_buttons_into_one_row() {
+        let bar = Bar::new(&Config::default().bar);
+        let tray = |n: usize| -> Vec<StatusItem> {
+            let mut items: Vec<StatusItem> = (0..n)
+                .map(|i| StatusItem {
+                    part: Part::Tray(i),
+                    w: 28,
+                    look: Look::Bell { unread: false, dnd: false },
+                })
+                .collect();
+            items.push(StatusItem {
+                part: Part::Bell,
+                w: 28,
+                look: Look::Bell { unread: false, dnd: false },
+            });
+            items
+        };
+        let rows = |parts: &[(Rect, Part)]| {
+            let mut ys: Vec<i32> = parts
+                .iter()
+                .filter(|(_, p)| matches!(p, Part::Tray(_) | Part::Bell) || END_BUTTONS.contains(p))
+                .map(|(r, _)| r.y)
+                .collect();
+            ys.sort();
+            ys.dedup();
+            ys.len()
+        };
+        // Two tray icons, the bell and three buttons: 6 x 28 fits in 180.
+        let mut m = model((180, 1400), BarPosition::Left, &[], None);
+        m.status = tray(2);
+        let parts = bar.layout(&m);
+        assert_eq!(rows(&parts), 1);
+        // The buttons sit against the right edge.
+        let power = parts.iter().find(|(_, p)| *p == Part::Power).unwrap().0;
+        assert_eq!(power.x + power.w, 180);
+        // One more tray icon needs a second row; the buttons stay on the bottom one.
+        m.status = tray(3);
+        let parts = bar.layout(&m);
+        assert_eq!(rows(&parts), 2);
+        let bottom = parts.iter().map(|(r, _)| r.y).max().unwrap();
+        for b in END_BUTTONS {
+            assert_eq!(parts.iter().find(|(_, p)| *p == b).unwrap().0.y, bottom);
         }
     }
 
