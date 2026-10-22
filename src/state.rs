@@ -860,13 +860,25 @@ impl State {
             });
         }
 
+        // A rule sent it to another workspace or monitor: follow it there. Not for windows put
+        // back by session restore, or rules with `focus = false`.
+        let follow = restored.is_none()
+            && (rule.workspace.is_some() || rule.output.is_some())
+            && rule.focus != Some(false)
+            && self.monitors.get(target_mon).is_some()
+            && (target_mon != self.active_mon || !visible);
+
         if visible {
             self.arrange();
         } else if let Some(t) = window.toplevel() {
             // Not visible yet; give it a reasonable size so it can map, arrange() fixes it later.
             t.send_configure();
         }
-        self.refocus();
+        if follow {
+            self.activate_window(&window);
+        } else {
+            self.refocus();
+        }
     }
 
     pub fn unmanage_window(&mut self, window: &Window) {
