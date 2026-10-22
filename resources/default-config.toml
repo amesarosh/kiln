@@ -75,8 +75,8 @@ locked = "#000000"                             # lock screen, before the locker 
 lock_failed = "#590000"                        # lock screen if the locker crashed
 
 [layout]
-default = "tile"      # "tile" or "monocle"
-master_ratio = 0.55   # share of width given to the master column
+default = "tile"      # "tile", "vertical" (master on top) or "monocle"
+master_ratio = 0.55   # share of width (height in "vertical") given to the master area
 master_count = 1      # number of windows in the master column
 gaps_inner = 6        # pixels between windows
 gaps_outer = 6        # pixels between windows and screen edge
@@ -130,9 +130,11 @@ exclude = []
 #   focus next|prev           move focus through the window list
 #   swap next|prev            move the focused window through the list
 #   zoom                      swap the focused window with the master
-#   master-ratio +0.05|-0.05  grow/shrink the master column
+#   master-ratio +0.05|-0.05  grow/shrink the master area
 #   master-count +1|-1        add/remove a master window
-#   layout tile|monocle|next  change the workspace layout
+#   layout tile|vertical|monocle|next
+#                             change the workspace layout ("vertical" puts
+#                             the master on top, the rest side by side below)
 #   toggle-floating           float or re-tile the focused window
 #   toggle-fullscreen
 #   workspace <n>             switch to workspace n
@@ -191,6 +193,7 @@ exclude = []
 "Mod+o" = "master-count -1"
 
 "Mod+t" = "layout tile"
+"Mod+Shift+t" = "layout vertical"
 "Mod+m" = "layout monocle"
 "Mod+space" = "layout next"
 "Mod+Shift+space" = "toggle-floating"

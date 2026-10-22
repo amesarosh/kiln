@@ -214,16 +214,22 @@ where
 
     let deco = &state.config.decoration;
     let focus = state.ws().focus.as_ref();
-    for window in state.space.elements().rev() {
-        let Some(loc) = state.space.element_location(window) else {
+    // A dragged tile is drawn above everything else.
+    let dragged = state.anims.dragged.as_ref().map(|d| &d.window);
+    for window in dragged
+        .into_iter()
+        .chain(state.space.elements().rev().filter(|w| Some(*w) != dragged))
+    {
+        // Where it's drawn this frame, which differs from where it is while sliding.
+        let Some(loc) = state.visual_location(window) else {
             continue;
         };
         // Windows on other monitors (a floating one may straddle two and is drawn on both).
-        if !state.space.element_bbox(window).is_some_and(|b| b.overlaps(output_geo)) {
+        if !state.visual_bbox(window).is_some_and(|b| b.overlaps(output_geo)) {
             continue;
         }
         let geo = window.geometry();
-        let render_loc = (loc - geo.loc - output_geo.loc).to_physical_precise_round(scale);
+        let render_loc = (loc - geo.loc.to_f64() - output_geo.loc.to_f64()).to_physical_precise_round(scale);
         out.extend(
             window
                 .render_elements::<WaylandSurfaceRenderElement<R>>(renderer, render_loc, scale, 1.0)
@@ -237,7 +243,7 @@ where
             } else {
                 deco.border_inactive
             };
-            let rect = Rectangle::new(loc - output_geo.loc, geo.size);
+            let rect = Rectangle::new(loc.to_i32_round() - output_geo.loc, geo.size);
             push_border(&mut out, window, rect, deco.border_width, color, scale);
         }
     }

@@ -201,6 +201,8 @@ pub struct State {
     pub dmabuf_state: DmabufState,
     pub dmabuf_global: Option<DmabufGlobal>,
     pub needs_redraw: bool,
+    /// Tiles sliding into place, and the one being dragged.
+    pub anims: crate::anim::Anims,
 }
 
 impl State {
@@ -341,6 +343,7 @@ impl State {
             dmabuf_state: DmabufState::new(),
             dmabuf_global: None,
             needs_redraw: true,
+            anims: Default::default(),
         }
     }
 

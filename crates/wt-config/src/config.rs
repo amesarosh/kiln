@@ -20,6 +20,8 @@ pub enum LayoutKind {
     /// Master area on the left, remaining windows stacked on the right.
     #[default]
     Tile,
+    /// Master area on top, remaining windows side by side underneath.
+    Vertical,
     /// Every window takes the full area; only the focused one is visible.
     Monocle,
 }
@@ -27,7 +29,8 @@ pub enum LayoutKind {
 impl LayoutKind {
     pub fn next(self) -> Self {
         match self {
-            Self::Tile => Self::Monocle,
+            Self::Tile => Self::Vertical,
+            Self::Vertical => Self::Monocle,
             Self::Monocle => Self::Tile,
         }
     }
@@ -938,6 +941,7 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
         ),
         "layout" => Action::Layout(match need_arg()? {
             "tile" => LayoutChoice::Set(LayoutKind::Tile),
+            "vertical" => LayoutChoice::Set(LayoutKind::Vertical),
             "monocle" => LayoutChoice::Set(LayoutKind::Monocle),
             "next" => LayoutChoice::Next,
             o => return Err(format!("unknown layout \"{o}\"")),

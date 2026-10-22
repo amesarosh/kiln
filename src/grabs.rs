@@ -1,5 +1,7 @@
 //! Interactive move and resize. Tiled windows stay tiled: moving one swaps it with the tile
-//! under the pointer, and resizing one moves the borders it shares with its neighbours.
+//! under the pointer (or, at the top or bottom edge of a tile in the other column, joins
+//! that column; with just two tiles, flips them between side by side and stacked), and
+//! resizing one moves the borders it shares with its neighbours.
 //! Floating windows move and resize freely.
 
 use smithay::{
@@ -26,8 +28,12 @@ use crate::{
     state::State,
 };
 
-/// Rows can't be dragged smaller than this.
+/// Rows (columns in the vertical layout) can't be dragged smaller than this.
 const MIN_TILE_HEIGHT: i32 = 50;
+
+/// How far into a tile, as a fraction of its height, its top and bottom drop zones reach.
+/// Dropping there on a tile in the other column moves the window into that column.
+const EDGE_ZONE: f64 = 0.25;
 
 /// Start a move from a client request (title bar drag). Validates the client actually holds a click.
 pub fn start_move(state: &mut State, seat: &Seat<State>, window: Window, serial: Serial) {
@@ -65,7 +71,12 @@ pub fn start_x11_grab(state: &mut State, seat: &Seat<State>, window: Window, res
 pub fn begin_move(state: &mut State, seat: &Seat<State>, window: Window, start: GrabStartData<State>, serial: Serial) {
     if is_tiled(state, &window) {
         state.focus_window(&window);
-        let grab = TileMoveGrab { start, window };
+        state.start_tile_drag(&window, start.location);
+        let grab = TileMoveGrab {
+            start,
+            window,
+            settled_over: None,
+        };
         if let Some(pointer) = seat.get_pointer() {
             pointer.set_grab(state, grab, serial, Focus::Clear);
         }
@@ -124,17 +135,17 @@ fn is_tiled(state: &State, window: &Window) -> bool {
     })
 }
 
-/// The tiled window whose slot is under a point. Only the tile layout has slots side by side.
-fn tile_at(state: &State, mon: usize, pos: Point<f64, Logical>) -> Option<Window> {
+/// The tiled window whose slot is under a point, and that slot. Monocle has no slots side by side.
+fn tile_at(state: &State, mon: usize, pos: Point<f64, Logical>) -> Option<(Window, Rect)> {
     let ws = state.monitors[mon].ws();
-    if ws.layout != LayoutKind::Tile || ws.fullscreen.is_some() {
+    if ws.layout == LayoutKind::Monocle || ws.fullscreen.is_some() {
         return None;
     }
     let rects = state.tile_rects(mon, state.work_area(mon)?);
     ws.tiled()
         .zip(rects)
         .find(|(_, r)| r.contains(pos.x, pos.y))
-        .map(|(w, _)| w.clone())
+        .map(|(w, r)| (w.clone(), r))
 }
 
 /// Make the window floating at its current geometry and return that geometry.
@@ -165,8 +176,11 @@ fn client_grab_start(seat: &Seat<State>, window: &Window, serial: Serial) -> Opt
 }
 
 /// What a drag on a tiled window can change, measured when the drag starts.
+/// Written for the tile layout; the vertical layout is measured with x and y swapped.
 struct TiledResize {
     window: Window,
+    /// The vertical layout: pointer movement is read with x and y swapped.
+    transposed: bool,
     /// Sideways: the master ratio at the start, and the pixel width it is a fraction of.
     split: Option<(f32, f64)>,
     /// Up and down: the border between two rows of one column.
@@ -186,12 +200,18 @@ struct Rows {
 fn tiled_resize(state: &State, window: &Window, start: &GrabStartData<State>) -> Option<TiledResize> {
     let mon = state.monitor_showing(window)?;
     let ws = state.monitors[mon].ws();
-    if ws.layout != LayoutKind::Tile || ws.fullscreen.is_some() || ws.is_floating(window) {
+    if ws.layout == LayoutKind::Monocle || ws.fullscreen.is_some() || ws.is_floating(window) {
         return None;
     }
     let tiled: Vec<Window> = ws.tiled().cloned().collect();
     let i = tiled.iter().position(|w| w == window)?;
-    let rects = state.tile_rects(mon, state.work_area(mon)?);
+    let transposed = ws.layout == LayoutKind::Vertical;
+    let mut rects = state.tile_rects(mon, state.work_area(mon)?);
+    let mut grabbed = start.location;
+    if transposed {
+        rects.iter_mut().for_each(|r| *r = r.transpose());
+        grabbed = (grabbed.y, grabbed.x).into();
+    }
     let weights = ws.tiled_weights();
     let n = tiled.len();
     let masters = ws.master_count.min(n);
@@ -203,7 +223,7 @@ fn tiled_resize(state: &State, window: &Window, start: &GrabStartData<State>) ->
     // end of a column, use the only border there is.
     let column = if i < masters { 0..masters } else { masters..n };
     let r = rects[i];
-    let top_half = start.location.y < (r.y + r.h / 2) as f64;
+    let top_half = grabbed.y < (r.y + r.h / 2) as f64;
     let above = (i > column.start).then(|| i - 1);
     let below = (i + 1 < column.end).then_some(i + 1);
     let other = if top_half { above.or(below) } else { below.or(above) };
@@ -219,6 +239,7 @@ fn tiled_resize(state: &State, window: &Window, start: &GrabStartData<State>) ->
 
     Some(TiledResize {
         window: window.clone(),
+        transposed,
         split,
         rows,
     })
@@ -230,10 +251,15 @@ struct TileResizeGrab {
 }
 
 impl TileResizeGrab {
+    fn on_unset(&mut self, _state: &mut State) {}
+
     /// The borders follow the pointer.
     fn on_motion(&mut self, state: &mut State, location: Point<f64, Logical>) {
-        let delta = location - self.start.location;
+        let mut delta = location - self.start.location;
         let t = &self.tiled;
+        if t.transposed {
+            delta = (delta.y, delta.x).into();
+        }
         let Some(ws) = state.workspace_of_mut(&t.window) else {
             return;
         };
@@ -269,40 +295,91 @@ impl TileResizeGrab {
 }
 
 /// Dragging a tiled window: it stays tiled and trades places with whichever tile the
-/// pointer enters.
+/// pointer enters. Near the top or bottom of a tile in the other column it joins that
+/// column instead, above or below the tile.
 struct TileMoveGrab {
     start: GrabStartData<State>,
     window: Window,
+    /// The tile it just moved next to. That tile may still be under the pointer, so it's
+    /// left alone until the pointer leaves it, or the window would bounce straight back.
+    settled_over: Option<Window>,
 }
 
 impl TileMoveGrab {
+    /// Covers grabs that end without a release, like a VT switch mid-drag.
+    fn on_unset(&mut self, state: &mut State) {
+        state.end_tile_drag();
+    }
+
     fn on_motion(&mut self, state: &mut State, location: Point<f64, Logical>) {
+        state.move_tile_drag(location);
         let Some(mon) = state.monitor_showing(&self.window) else {
             return;
         };
         if state.monitor_at(location) != Some(mon) {
             return;
         }
-        // After the swap the dragged window sits under the pointer, so this can't flip back.
-        if let Some(other) = tile_at(state, mon, location).filter(|o| *o != self.window) {
-            state.monitors[mon].ws_mut().swap_windows(&self.window, &other);
-            state.arrange();
+        let hovered = tile_at(state, mon, location);
+        if hovered.as_ref().map(|(w, _)| w) == self.settled_over.as_ref() {
+            return;
         }
+        self.settled_over = None;
+        let Some((other, r)) = hovered.filter(|(o, _)| *o != self.window) else {
+            return;
+        };
+        let ws = state.monitors[mon].ws_mut();
+        // Rows run across in the vertical layout, so its drop zones are the left and right edges.
+        let (p, start, len) = if ws.layout == LayoutKind::Vertical {
+            (location.x, r.x, r.w)
+        } else {
+            (location.y, r.y, r.h)
+        };
+        let f = (p - start as f64) / len.max(1) as f64;
+        let edge = if f < EDGE_ZONE {
+            Some(false)
+        } else if f > 1.0 - EDGE_ZONE {
+            Some(true)
+        } else {
+            None
+        };
+        if edge.is_some_and(|below| {
+            ws.move_to_column(&self.window, &other, below) || ws.flip_pair(&self.window, &other, below)
+        }) {
+            self.settled_over = Some(other);
+        } else {
+            // After a swap the dragged window sits under the pointer, so this can't flip back.
+            ws.swap_windows(&self.window, &other);
+        }
+        state.arrange_animated();
     }
 
     /// Dropped on another monitor: it moves there, into the slot it was dropped on.
     fn on_release(&mut self, state: &mut State, location: Point<f64, Logical>) {
+        self.drop_on(state, location);
+        state.end_tile_drag();
+    }
+
+    fn drop_on(&mut self, state: &mut State, location: Point<f64, Logical>) {
         let (Some(from), Some(to)) = (state.monitor_showing(&self.window), state.monitor_at(location)) else {
             return;
         };
         if from == to {
             return;
         }
-        let target = tile_at(state, to, location);
+        let target = tile_at(state, to, location).map(|(w, _)| w);
+        let before: Vec<(Window, Point<f64, Logical>)> = state
+            .space
+            .elements()
+            .filter_map(|w| Some((w.clone(), state.visual_location(w)?)))
+            .collect();
         state.adopt_dropped_window(&self.window, location);
         if let Some(t) = target {
             state.monitors[to].ws_mut().move_before(&self.window, &t);
             state.arrange();
+        }
+        // Tiles on both monitors close up or make room.
+        for (w, at) in before {
+            state.slide_from(&w, at);
         }
     }
 }
@@ -320,6 +397,8 @@ struct ResizeGrab {
 }
 
 impl MoveGrab {
+    fn on_unset(&mut self, _state: &mut State) {}
+
     fn on_motion(&mut self, state: &mut State, location: Point<f64, Logical>) {
         let loc = (self.initial.to_f64() + (location - self.start.location)).to_i32_round();
         if let Some(Some(r)) = state
@@ -345,6 +424,8 @@ impl MoveGrab {
 }
 
 impl ResizeGrab {
+    fn on_unset(&mut self, _state: &mut State) {}
+
     fn on_motion(&mut self, state: &mut State, location: Point<f64, Logical>) {
         let delta = location - self.start.location;
         let size: Size<i32, Logical> = (
@@ -483,7 +564,9 @@ macro_rules! impl_grab {
                 &self.start
             }
 
-            fn unset(&mut self, _data: &mut State) {}
+            fn unset(&mut self, data: &mut State) {
+                self.on_unset(data);
+            }
         }
     };
 }

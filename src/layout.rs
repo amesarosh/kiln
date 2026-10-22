@@ -23,6 +23,11 @@ impl Rect {
         }
     }
 
+    /// Swap the x and y axes. Doing it twice gives back the same rect.
+    pub const fn transpose(self) -> Self {
+        Self::new(self.y, self.x, self.h, self.w)
+    }
+
     pub fn contains(self, x: f64, y: f64) -> bool {
         x >= self.x as f64 && y >= self.y as f64 && x < (self.x + self.w) as f64 && y < (self.y + self.h) as f64
     }
@@ -51,7 +56,8 @@ pub fn params(c: &wt_config::Config) -> Params {
 }
 
 /// Compute one rectangle per tiled window, in order. `weights` has one entry per window:
-/// its share of its column's height (all 1.0 means equal rows).
+/// its share of its column's height (all 1.0 means equal rows). In the vertical layout
+/// columns become rows, so a weight is a share of its row's width instead.
 pub fn arrange(kind: LayoutKind, weights: &[f32], area: Rect, p: &Params) -> Vec<Rect> {
     let n = weights.len();
     if n == 0 {
@@ -68,6 +74,11 @@ pub fn arrange(kind: LayoutKind, weights: &[f32], area: Rect, p: &Params) -> Vec
     match kind {
         LayoutKind::Monocle => vec![area; n],
         LayoutKind::Tile => tile(weights, area, p, inner),
+        // The tile layout turned on its side: the master area on top, the stack below.
+        LayoutKind::Vertical => tile(weights, area.transpose(), p, inner)
+            .into_iter()
+            .map(Rect::transpose)
+            .collect(),
     }
 }
 
@@ -196,6 +207,24 @@ mod tests {
         assert_eq!(r[2].h, 190);
         assert_eq!(r[3].y + r[3].h, 790, "column still filled exactly");
         assert_eq!(r[2].y, r[1].y + r[1].h + 10);
+    }
+
+    #[test]
+    fn vertical_puts_master_on_top_and_stack_side_by_side() {
+        let r = arrange(LayoutKind::Vertical, &[1.0; 3], AREA, &params());
+        // usable height 780, minus 10 gap = 770, half = 385; width 980 split into two.
+        assert_eq!(r[0], Rect::new(10, 10, 980, 385));
+        assert_eq!(r[1], Rect::new(10, 405, 485, 385));
+        assert_eq!(r[2], Rect::new(505, 405, 485, 385));
+    }
+
+    #[test]
+    fn vertical_weights_share_a_row() {
+        let r = arrange(LayoutKind::Vertical, &[1.0, 2.0, 1.0, 1.0], AREA, &params());
+        // Stack row: usable width 980 - 2*10 = 960.
+        assert_eq!(r[1].w, 480);
+        assert_eq!(r[2].w, 240);
+        assert_eq!(r[3].x + r[3].w, 990, "row still filled exactly");
     }
 
     #[test]

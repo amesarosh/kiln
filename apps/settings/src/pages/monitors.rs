@@ -227,6 +227,7 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                     let opts = [
                         ("", "Same as the Tiling page"),
                         ("tile", "Tile"),
+                        ("vertical", "Vertical"),
                         ("monocle", "Monocle"),
                     ];
                     if widgets::choice(ui, "layout", &mut l, &opts) {

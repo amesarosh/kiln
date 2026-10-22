@@ -2,7 +2,7 @@
 
 A lightweight, fast, configurable tiling Wayland compositor written in Rust, built on [Smithay](https://github.com/Smithay/smithay).
 
-- **Dynamic tiling** (master/stack and monocle), toggleable floating, fullscreen, 1–32 workspaces
+- **Dynamic tiling** (master/stack side by side or stacked vertically, and monocle), toggleable floating, fullscreen, 1–32 workspaces
 - **Multiple monitors**, each with its own set of workspaces (like dwm), placed left to right
 - **Built-in clickable bar** per monitor (top, bottom, left or right): workspaces, one tab per window with its app icon, layout switcher, a settings button (opens the settings app, or brings it forward if it is already open) and a power button (lock, suspend, log out, restart, shut down)
 - **One TOML file** for keybinds, gaps, borders, colors, keyboard layout and window rules, **reloaded on save**
@@ -79,7 +79,7 @@ sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applicatio
 | `Mod+Shift+Return` | swap with master |
 | `Mod+h` / `Mod+l` | shrink / grow master |
 | `Mod+i` / `Mod+o` | more / fewer master windows |
-| `Mod+t` / `Mod+m` / `Mod+space` | tile / monocle / next layout |
+| `Mod+t` / `Mod+Shift+t` / `Mod+m` / `Mod+space` | tile / vertical (master on top) / monocle / next layout |
 | `Mod+Shift+space` | toggle floating |
 | `Mod+f` | toggle fullscreen |
 | `Mod+1..9` / `Mod+Shift+1..9` | go to / send to workspace (on the focused monitor) |
@@ -92,7 +92,7 @@ sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applicatio
 | `Alt+Tab` / `Alt+Shift+Tab` | window switcher: all windows, most recent first; let go of Alt to switch (Escape cancels) |
 | `Mod+v` | pick from clipboard history (cliphist and fuzzel; start `wl-paste --watch cliphist store` in autostart) |
 | `Mod+Shift+e` | quit |
-| `Mod+left drag` | move: a tiled window swaps places with the tile under the pointer and stays tiled, a floating one moves freely; drop on another monitor to move it there |
+| `Mod+left drag` | move: a tiled window swaps places with the tile under the pointer and stays tiled (drag it to the top or bottom edge of a tile in the other column to stack it above or below that tile), a floating one moves freely; drop on another monitor to move it there |
 | `Mod+right drag` | resize: a tiled window moves the borders it shares with its neighbours, a floating one changes size |
 | `Mod+middle click` | float or re-tile the window under the pointer |
 

@@ -152,6 +152,59 @@ impl<W: Clone + PartialEq> Workspace<W> {
         self.entries[j].window = wa;
     }
 
+    /// Move a tiled window into the other column (master or stack), just above or below
+    /// `target`. The master count changes so the window ends up in `target`'s column.
+    /// Does nothing and returns false if both are already in the same column, or if
+    /// moving would leave the window's own column empty.
+    pub fn move_to_column(&mut self, w: &W, target: &W, below: bool) -> bool {
+        let tiled: Vec<&W> = self.tiled().collect();
+        let n = tiled.len();
+        let (Some(i), Some(j)) = (
+            tiled.iter().position(|t| *t == w),
+            tiled.iter().position(|t| *t == target),
+        ) else {
+            return false;
+        };
+        let masters = self.master_count.min(n);
+        let to_master = j < masters;
+        let from_len = if i < masters { masters } else { n - masters };
+        if (i < masters) == to_master || from_len < 2 {
+            return false;
+        }
+        // Take an average share of the new column, not the size it had in the old one.
+        let col = if to_master { 0..masters } else { masters..n };
+        let weights = self.tiled_weights();
+        let weight = weights[col.clone()].iter().sum::<f32>() / col.len() as f32;
+
+        let Some(k) = self.index_of(w) else { return false };
+        let mut entry = self.entries.remove(k);
+        entry.weight = weight;
+        let Some(t) = self.index_of(target) else { return false };
+        self.entries.insert(t + usize::from(below), entry);
+        self.master_count = if to_master { masters + 1 } else { masters - 1 };
+        true
+    }
+
+    /// With exactly two tiles, one per column, flip between side by side and stacked: the
+    /// window lands just above or below `target` (left or right of it when going from the
+    /// vertical layout back to the tile layout). Returns false when it doesn't apply.
+    pub fn flip_pair(&mut self, w: &W, target: &W, below: bool) -> bool {
+        let tiled: Vec<W> = self.tiled().cloned().collect();
+        if tiled.len() != 2 || self.master_count != 1 || w == target || !tiled.contains(w) || !tiled.contains(target) {
+            return false;
+        }
+        self.layout = match self.layout {
+            LayoutKind::Tile => LayoutKind::Vertical,
+            LayoutKind::Vertical => LayoutKind::Tile,
+            LayoutKind::Monocle => return false,
+        };
+        let is_first = &tiled[0] == w;
+        if is_first == below {
+            self.swap_windows(w, target);
+        }
+        true
+    }
+
     /// Move a window to just before `target` in the order.
     pub fn move_before(&mut self, w: &W, target: &W) {
         if w == target || !self.contains(target) {
@@ -291,6 +344,54 @@ mod tests {
         w.swap_windows(&1, &3);
         assert_eq!(order(&w), vec![3, 2, 1]);
         assert_eq!(w.tiled_weights(), vec![2.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn move_to_column_joins_the_master_column() {
+        // One master on the left, 2 and 3 stacked on the right.
+        let mut w = ws(&[1, 2, 3]);
+        w.master_count = 1;
+        w.entry_mut(&3).unwrap().weight = 1.6;
+        assert!(w.move_to_column(&3, &1, true));
+        assert_eq!(order(&w), vec![1, 3, 2]);
+        assert_eq!(w.master_count, 2);
+        assert_eq!(w.tiled_weights(), vec![1.0, 1.0, 1.0]);
+        // And back out to the stack, above 2.
+        assert!(w.move_to_column(&1, &2, false));
+        assert_eq!(order(&w), vec![3, 1, 2]);
+        assert_eq!(w.master_count, 1);
+    }
+
+    #[test]
+    fn move_to_column_refuses_same_column_or_emptying_one() {
+        let mut w = ws(&[1, 2, 3]);
+        w.master_count = 1;
+        assert!(!w.move_to_column(&2, &3, true), "same column");
+        assert!(!w.move_to_column(&1, &2, true), "would leave no master");
+        let mut two = ws(&[1, 2]);
+        two.master_count = 1;
+        assert!(!two.move_to_column(&2, &1, true), "would leave no stack");
+        assert_eq!(order(&w), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn flip_pair_switches_between_side_by_side_and_stacked() {
+        let mut w = ws(&[1, 2]);
+        w.master_count = 1;
+        // 1 | 2, drop 2 below 1: 1 over 2.
+        assert!(w.flip_pair(&2, &1, true));
+        assert_eq!(w.layout, LayoutKind::Vertical);
+        assert_eq!(order(&w), vec![1, 2]);
+        // Drop 2 left of 1: back to side by side, 2 first.
+        assert!(w.flip_pair(&2, &1, false));
+        assert_eq!(w.layout, LayoutKind::Tile);
+        assert_eq!(order(&w), vec![2, 1]);
+        // Drop 2 below 1 again: 1 on top.
+        assert!(w.flip_pair(&2, &1, true));
+        assert_eq!(order(&w), vec![1, 2]);
+        let mut three = ws(&[1, 2, 3]);
+        three.master_count = 1;
+        assert!(!three.flip_pair(&1, &2, true), "only for two tiles");
     }
 
     #[test]

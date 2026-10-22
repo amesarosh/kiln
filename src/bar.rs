@@ -570,7 +570,8 @@ impl Bar {
     }
 }
 
-/// A small picture of the layout: a master pane and a stack for tile, one pane for monocle.
+/// A small picture of the layout: a master pane and a stack for tile (beside it) and
+/// vertical (under it), one pane for monocle.
 fn draw_layout_glyph(canvas: &mut Canvas, layout: LayoutKind, r: Rect, s: i32, color: Color) {
     let (w, h) = (16 * s, 12 * s);
     let (x, y) = (r.x + (r.w - w) / 2, r.y + (r.h - h) / 2);
@@ -584,6 +585,15 @@ fn draw_layout_glyph(canvas: &mut Canvas, layout: LayoutKind, r: Rect, s: i32, c
             canvas.fill_rounded_rect(x, y, left, h, radius, color);
             canvas.fill_rounded_rect(x + left + gap, y, right, half, radius, color);
             canvas.fill_rounded_rect(x + left + gap, y + half + gap, right, h - half - gap, radius, color);
+        }
+        LayoutKind::Vertical => {
+            let gap = 2 * s;
+            let top = (h - gap) * 3 / 5;
+            let bottom = h - gap - top;
+            let half = (w - gap) / 2;
+            canvas.fill_rounded_rect(x, y, w, top, radius, color);
+            canvas.fill_rounded_rect(x, y + top + gap, half, bottom, radius, color);
+            canvas.fill_rounded_rect(x + half + gap, y + top + gap, w - half - gap, bottom, radius, color);
         }
         LayoutKind::Monocle => canvas.fill_rounded_rect(x, y, w, h, radius, color),
     }

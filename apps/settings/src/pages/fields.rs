@@ -173,13 +173,14 @@ pub const LAYOUT: &[Section] = &[
                 "How workspaces start. A monitor can have its own on the Monitors page.",
                 Kind::Choice(&[
                     ("tile", "Tile: master and stack"),
+                    ("vertical", "Vertical: master on top, stack below"),
                     ("monocle", "Monocle: one window at a time"),
                 ]),
             ),
             f(
                 &["layout", "master_ratio"],
                 "Master width",
-                "Share of the screen given to the master area.",
+                "Share of the screen given to the master area (its width, or its height in the vertical layout).",
                 Kind::Float(0.05, 0.95, 2),
             ),
             f(
