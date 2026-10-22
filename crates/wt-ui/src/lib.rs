@@ -43,6 +43,20 @@ pub fn run<A: eframe::App + 'static>(
     eframe::run_native(app_id, options, Box::new(|cc| Ok(Box::new(make(cc)))))
 }
 
+/// Open a window set up by the caller (size, decorations...), with `app_id` and `title`.
+pub fn run_viewport<A: eframe::App + 'static>(
+    app_id: &str,
+    title: &str,
+    viewport: egui::ViewportBuilder,
+    make: impl FnOnce(&eframe::CreationContext<'_>) -> A + 'static,
+) -> eframe::Result {
+    let options = eframe::NativeOptions {
+        viewport: viewport.with_app_id(app_id).with_title(title),
+        ..Default::default()
+    };
+    eframe::run_native(app_id, options, Box::new(|cc| Ok(Box::new(make(cc)))))
+}
+
 /// Keeps an app's look in step with the config file's `[theme]`.
 pub struct Look {
     path: Option<PathBuf>,

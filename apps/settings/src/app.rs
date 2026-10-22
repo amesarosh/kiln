@@ -121,8 +121,12 @@ impl SettingsApp {
                 fields::show_sections(ui, p, doc, cache, fields::APPEARANCE);
                 self.colors.show(ui, p, doc);
             }
-            Page::Layout => fields::show_sections(ui, p, doc, cache, fields::LAYOUT),
+            Page::Layout => {
+                fields::show_sections(ui, p, doc, cache, fields::LAYOUT);
+                pages::workspaces::show(ui, p, doc);
+            }
             Page::Bar => fields::show_sections(ui, p, doc, cache, fields::BAR),
+            Page::Notifications => fields::show_sections(ui, p, doc, cache, fields::NOTIFICATIONS),
             Page::Monitors => pages::monitors::show(ui, p, doc, cache),
             Page::Keyboard => fields::show_sections(ui, p, doc, cache, fields::KEYBOARD),
             Page::Input => fields::show_sections(ui, p, doc, cache, fields::INPUT),

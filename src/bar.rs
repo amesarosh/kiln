@@ -1,5 +1,6 @@
-//! The built-in bar: workspace buttons, one tab per window, a row of buttons at the end
-//! (layout, settings, power), and optionally a clock.
+//! The built-in bar: workspace buttons, one tab per window, status widgets (tray icons, media,
+//! network, battery, brightness, notifications), a row of buttons at the end (layout,
+//! settings, power), and optionally a clock.
 //!
 //! The bar is painted on the CPU into a single image, and only repainted when what it shows
 //! changes (titles, focus, workspace, hover). Layout is computed the same way for painting and
@@ -64,7 +65,41 @@ pub enum Part {
     Power,
     /// The time. Not a button: clicks do nothing.
     Clock,
+    /// A tray icon, by index into the bus's tray items.
+    Tray(usize),
+    /// What's playing.
+    Media,
+    Network,
+    Battery,
+    Brightness,
+    /// Unread notifications and do not disturb.
+    Bell,
 }
+
+/// A status widget as drawn: which part it is, how wide, and what it shows.
+#[derive(Debug, Clone, PartialEq)]
+struct StatusItem {
+    part: Part,
+    /// Logical width on a top or bottom bar.
+    w: i32,
+    look: Look,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Look {
+    Tray {
+        icon_name: String,
+        theme_path: String,
+        pixmap: Option<(i32, i32, Vec<u8>)>,
+    },
+    /// A symbolic icon, with a short label after it (like "80%").
+    Icon { name: String, label: Option<String> },
+    Media { text: String, playing: bool },
+    Bell { unread: bool, dnd: bool },
+}
+
+/// Widest the media widget gets, in logical pixels.
+const MEDIA_MAX_W: i32 = 240;
 
 /// A workspace button or window tab being dragged to a new spot.
 #[derive(Debug, Clone, Copy)]
@@ -86,11 +121,38 @@ const END_BUTTONS: [Part; 3] = [Part::Layout, Part::Settings, Part::Power];
 const SETTINGS_APP: &str = "wayland-time-settings";
 
 /// One workspace button.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 struct Ws {
     active: bool,
     /// One entry per window, in order: its app id (or title if it has none), for the icon.
     apps: Vec<String>,
+    /// From the config: shown instead of the number when set.
+    name: String,
+    icon: String,
+    /// Width of `name` in logical pixels, measured when the model is built.
+    name_w: i32,
+}
+
+impl Ws {
+    fn labelled(&self) -> bool {
+        !self.name.is_empty() || !self.icon.is_empty()
+    }
+}
+
+/// Room for a workspace's label (its number, or its name and icon) on a bar `h` high.
+fn ws_label_w(h: i32, ws: &Ws, vertical: bool) -> i32 {
+    let number = if vertical { WS_LABEL_W_SIDE } else { WS_LABEL_W };
+    if !ws.labelled() {
+        return number;
+    }
+    let mut w = 8;
+    if !ws.icon.is_empty() {
+        w += ws_icon_size(h);
+        if !ws.name.is_empty() {
+            w += 5;
+        }
+    }
+    (w + ws.name_w + if ws.name.is_empty() { 2 } else { 8 }).max(number)
 }
 
 /// Size of the window icons on workspace buttons, for a bar (or side bar row) `h` high.
@@ -112,11 +174,11 @@ fn ws_icons_shown(windows: usize, slots: usize) -> (usize, usize) {
 /// enough for its number and window icons.
 fn ws_width(h: i32, ws: &Ws) -> i32 {
     if ws.apps.is_empty() {
-        return h;
+        return ws_label_w(h, ws, false).max(h);
     }
     let icon = ws_icon_size(h);
     let (shown, more) = ws_icons_shown(ws.apps.len(), WS_MAX_ICONS);
-    let mut w = WS_LABEL_W + shown as i32 * (icon + WS_ICON_GAP);
+    let mut w = ws_label_w(h, ws, false) + shown as i32 * (icon + WS_ICON_GAP);
     if more > 0 {
         w += WS_MORE_W;
     }
@@ -141,6 +203,8 @@ struct Model {
     /// The time to show, if this bar has the clock. Part of the model, so the bar repaints
     /// when the minute changes.
     clock: Option<String>,
+    /// Status widgets, in order.
+    status: Vec<StatusItem>,
 }
 
 /// Width of the clock on a top or bottom bar: room for "12:59 PM" plus padding.
@@ -229,6 +293,16 @@ impl Bar {
         self.icons.borrow_mut().get(app_id, px)
     }
 
+    /// Any icon by name (status and device icons too), at `px` pixels.
+    pub fn any_icon(&self, name: &str, px: u32, tint: [u8; 4]) -> Option<std::rc::Rc<crate::icons::Icon>> {
+        self.icons.borrow_mut().any(name, px, tint)
+    }
+
+    /// A symbolic icon at `px` pixels, in one color (used by the bar's own painting too).
+    pub fn symbolic(&self, name: &str, px: u32, color: [u8; 4]) -> Option<std::rc::Rc<crate::icons::Icon>> {
+        self.icons.borrow_mut().symbolic(name, px, color)
+    }
+
     /// Drop the cached image of a monitor that went away.
     pub fn forget_output(&mut self, name: &str) {
         self.cached.borrow_mut().remove(name);
@@ -271,6 +345,14 @@ impl Bar {
             let w = clock_width(m.config.font_size);
             end -= w;
             parts.push((Rect::new(end, 0, w, h), Part::Clock));
+        }
+        // Status widgets before the clock, as long as they leave room for the workspaces.
+        for item in m.status.iter().rev() {
+            if end - item.w < x + 40 {
+                break;
+            }
+            end -= item.w;
+            parts.push((Rect::new(end, 0, item.w, h), item.part));
         }
 
         // Room for the divider after the workspaces.
@@ -318,6 +400,30 @@ impl Bar {
             } else {
                 x -= row;
                 parts.push((Rect::new(x, bottom, row, row), part));
+            }
+        }
+
+        // Status widgets in rows above the buttons, as many to a row as fit.
+        let mut rows: Vec<Vec<(i32, Part)>> = Vec::new();
+        let mut used = w;
+        for item in &m.status {
+            let iw = item.w.min(w);
+            if used + iw > w {
+                rows.push(Vec::new());
+                used = 0;
+            }
+            rows.last_mut().unwrap().push((iw, item.part));
+            used += iw;
+        }
+        for r in rows.iter().rev() {
+            if bottom - row < y + row {
+                break;
+            }
+            bottom -= row;
+            let mut x = 0;
+            for (iw, part) in r {
+                parts.push((Rect::new(x, bottom, *iw, row), *part));
+                x += iw;
             }
         }
 
@@ -413,16 +519,37 @@ impl Bar {
                         if ws.apps.is_empty() { p.subtext } else { p.text }
                     };
 
-                    // The number, then an icon per window. Empty workspaces on a top bar are
-                    // just the number, centered.
-                    let label = (i + 1).to_string();
-                    let label_w = if vertical { WS_LABEL_W_SIDE } else { WS_LABEL_W } * s;
+                    // The number (or name and icon), then an icon per window. Empty workspaces
+                    // on a top bar are just the label, centered.
+                    let label_w = ws_label_w(r.h / s, ws, vertical) * s;
                     let label_rect = match (vertical, ws.apps.is_empty()) {
                         (false, true) => r,
                         (false, false) => Rect::new(r.x + s, r.y, label_w, r.h),
                         (true, _) => Rect::new(pill.x, r.y, label_w, r.h),
                     };
-                    centered(&mut canvas, &label, label_rect, px * 0.9, label_color);
+                    if ws.labelled() {
+                        // Centered in an empty button, otherwise from its left edge.
+                        let x = if ws.apps.is_empty() && !vertical {
+                            label_rect.x + (label_rect.w - label_w) / 2 + 8 * s
+                        } else {
+                            label_rect.x + 8 * s
+                        };
+                        let mut x = x;
+                        if !ws.icon.is_empty() {
+                            let icon = ws_icon_size(r.h / s) * s;
+                            let y = r.y + (r.h - icon) / 2;
+                            self.draw_app_icon(&mut canvas, text, &ws.icon, (x, y), icon, radius, p);
+                            x += icon + 5 * s;
+                        }
+                        if !ws.name.is_empty() {
+                            let size = px * 0.9;
+                            let baseline = text.centered_baseline(r.y as f32, r.h as f32, size);
+                            let right = label_rect.x + label_rect.w;
+                            text.draw(&mut canvas, &ws.name, size, (x as f32, baseline), label_color, (x, right));
+                        }
+                    } else {
+                        centered(&mut canvas, &(i + 1).to_string(), label_rect, px * 0.9, label_color);
+                    }
                     if ws.apps.is_empty() {
                         continue;
                     }
@@ -506,6 +633,11 @@ impl Bar {
                     }
                     centered(&mut canvas, time, r, px, p.text);
                 }
+                Part::Tray(_) | Part::Media | Part::Network | Part::Battery | Part::Brightness | Part::Bell => {
+                    if let Some(item) = m.status.iter().find(|i| i.part == part) {
+                        self.paint_status(&mut canvas, text, item, r, hovered, s, m);
+                    }
+                }
                 Part::Layout | Part::Settings | Part::Power => {
                     if hovered {
                         rounded(&mut canvas, inset(r, 3 * s), p.hover);
@@ -553,6 +685,96 @@ impl Bar {
         let tx = x as f32 + (side as f32 - tw) / 2.0;
         let baseline = text.centered_baseline(y as f32, side as f32, size);
         text.draw(canvas, &letter, size, (tx, baseline), p.text, (x, x + side));
+    }
+
+    /// One status widget in its rectangle (already scaled).
+    #[allow(clippy::too_many_arguments)]
+    fn paint_status(&self, canvas: &mut Canvas, text: &Text, item: &StatusItem, r: Rect, hovered: bool, s: i32, m: &Model) {
+        let p = &m.config.palette;
+        let radius = m.config.radius * s as f32;
+        let pill = Rect::new(r.x + 2 * s, r.y + 3 * s, r.w - 4 * s, r.h - 6 * s);
+        if hovered {
+            canvas.fill_rounded_rect(pill.x, pill.y, pill.w, pill.h, radius, p.hover);
+        }
+        let color = if hovered { p.text } else { p.muted };
+        let tint = to_u8(color);
+        let icon_px = ws_icon_size(r.h / s) * s;
+        let px = m.config.font_size * s as f32 * 0.9;
+        let iy = r.y + (r.h - icon_px) / 2;
+        // Icon, then a label, left-aligned from a small inset; or centered without a label.
+        let label = |canvas: &mut Canvas, t: &str, x: i32| {
+            let right = r.x + r.w - 6 * s;
+            if right <= x {
+                return;
+            }
+            let fitted = text.fit(t, px, (right - x) as f32);
+            let baseline = text.centered_baseline(r.y as f32, r.h as f32, px);
+            text.draw(canvas, &fitted, px, (x as f32, baseline), color, (x, right));
+        };
+        match &item.look {
+            Look::Tray {
+                icon_name,
+                theme_path,
+                pixmap,
+            } => {
+                let size = ((r.h / s - 10).clamp(12, 22)) * s;
+                let (x, y) = (r.x + (r.w - size) / 2, r.y + (r.h - size) / 2);
+                let from_path = (!theme_path.is_empty() && !icon_name.is_empty())
+                    .then(|| {
+                        ["png", "svg"].iter().find_map(|ext| {
+                            let f = std::path::Path::new(theme_path).join(format!("{icon_name}.{ext}"));
+                            f.is_file().then(|| f.to_string_lossy().to_string())
+                        })
+                    })
+                    .flatten();
+                let icon = from_path
+                    .and_then(|f| self.icons.borrow_mut().get(&f, size as u32))
+                    .or_else(|| (!icon_name.is_empty()).then(|| self.any_icon(icon_name, size as u32, tint)).flatten())
+                    .or_else(|| {
+                        let (w, h, argb) = pixmap.as_ref()?;
+                        Some(std::rc::Rc::new(wt_icons::scaled(&argb_to_rgba(argb), *w as u32, *h as u32, size as u32)))
+                    });
+                match icon {
+                    Some(icon) => canvas.draw_image(x, y, icon.size, &icon.rgba),
+                    None => canvas.fill_rounded_rect(x, y, size, size, radius.min(size as f32 / 3.0), p.hover),
+                }
+            }
+            Look::Icon { name, label: text_label } => {
+                let icon = self.symbolic(name, icon_px as u32, tint);
+                match (text_label, icon) {
+                    (None, Some(icon)) => canvas.draw_image(r.x + (r.w - icon_px) / 2, iy, icon.size, &icon.rgba),
+                    (Some(t), icon) => {
+                        let mut x = r.x + 7 * s;
+                        if let Some(icon) = icon {
+                            canvas.draw_image(x, iy, icon.size, &icon.rgba);
+                            x += icon_px + 4 * s;
+                        }
+                        label(canvas, t, x);
+                    }
+                    (None, None) => {}
+                }
+            }
+            Look::Media { text: t, playing } => {
+                let name = if *playing { "media-playback-pause-symbolic" } else { "media-playback-start-symbolic" };
+                let mut x = r.x + 7 * s;
+                if let Some(icon) = self.symbolic(name, icon_px as u32, tint) {
+                    canvas.draw_image(x, iy, icon.size, &icon.rgba);
+                }
+                x += icon_px + 6 * s;
+                label(canvas, t, x);
+            }
+            Look::Bell { unread, dnd } => {
+                let name = if *dnd { "notifications-disabled-symbolic" } else { "preferences-system-notifications-symbolic" };
+                let (x, y) = (r.x + (r.w - icon_px) / 2, iy);
+                if let Some(icon) = self.symbolic(name, icon_px as u32, tint) {
+                    canvas.draw_image(x, y, icon.size, &icon.rgba);
+                }
+                if *unread {
+                    let d = 6 * s;
+                    canvas.fill_rounded_rect(x + icon_px - d + s, y - s, d, d, d as f32 / 2.0, p.accent);
+                }
+            }
+        }
     }
 
     /// Turn scroll input into whole workspace steps (+1 = next, -1 = previous).
@@ -782,6 +1004,13 @@ impl State {
                         app_id.filter(|a| !a.is_empty()).or(title).unwrap_or_default()
                     })
                     .collect(),
+                name_w: self
+                    .bar
+                    .text
+                    .as_ref()
+                    .map_or(0, |t| t.width(&w.label.name, self.config.bar.font_size * 0.9).ceil() as i32),
+                name: w.label.name.clone(),
+                icon: w.label.icon.clone(),
             })
             .collect();
         let tabs = ws
@@ -801,6 +1030,15 @@ impl State {
             })
             .collect();
         let name = m.output.name();
+        let cfg = &self.config.bar;
+        // Status widgets sit with the clock; with no clock on any connected monitor, every bar
+        // has them.
+        let any_clock = self.monitors.iter().any(|m| cfg.clock_on(&m.output.name()));
+        let status = if !any_clock || cfg.clock_on(&name) {
+            self.status_items(size.1.min(cfg.height))
+        } else {
+            Vec::new()
+        };
         Model {
             size,
             scale,
@@ -812,7 +1050,116 @@ impl State {
             hover: self.bar.hover.as_ref().filter(|(n, _)| *n == name).map(|(_, p)| *p),
             active_monitor: mon == self.active_mon,
             clock: self.config.bar.clock_on(&name).then(clock_text),
+            status,
         }
+    }
+
+    /// The status widgets to show, for a bar (or side bar row) `h` high.
+    fn status_items(&self, h: i32) -> Vec<StatusItem> {
+        use crate::{config::Widget, status::Network};
+        let px = self.config.bar.font_size * 0.9;
+        let text_w = |t: &str| self.bar.text.as_ref().map_or(0, |x| x.width(t, px).ceil() as i32);
+        let icon = ws_icon_size(h);
+        let labelled = |name: String, label: String| StatusItem {
+            part: Part::Clock,
+            w: 7 + icon + 4 + text_w(&label) + 8,
+            look: Look::Icon {
+                name,
+                label: Some(label),
+            },
+        };
+        let mut out = Vec::new();
+        for w in &self.config.bar.widgets {
+            match w {
+                Widget::Tray => {
+                    for (i, t) in self.bus.tray.iter().enumerate() {
+                        out.push(StatusItem {
+                            part: Part::Tray(i),
+                            w: h,
+                            look: Look::Tray {
+                                icon_name: t.icon_name.clone(),
+                                theme_path: t.icon_theme_path.clone(),
+                                pixmap: t.pixmap.clone(),
+                            },
+                        });
+                    }
+                }
+                Widget::Media => {
+                    if let Some(m) = &self.bus.media {
+                        let text = match (m.artist.is_empty(), m.title.is_empty()) {
+                            (false, false) => format!("{} – {}", m.artist, m.title),
+                            (true, false) => m.title.clone(),
+                            _ => m.player.trim_start_matches(crate::dbus::mpris::PREFIX).to_string(),
+                        };
+                        let w = (7 + icon + 6 + text_w(&text) + 8).min(MEDIA_MAX_W);
+                        out.push(StatusItem {
+                            part: Part::Media,
+                            w,
+                            look: Look::Media {
+                                text,
+                                playing: m.playing,
+                            },
+                        });
+                    }
+                }
+                Widget::Network => {
+                    let name = match self.status.network {
+                        Network::Offline => "network-offline-symbolic",
+                        Network::Wired => "network-wired-symbolic",
+                        Network::Wireless(q) => match q {
+                            0..=19 => "network-wireless-signal-none-symbolic",
+                            20..=39 => "network-wireless-signal-weak-symbolic",
+                            40..=59 => "network-wireless-signal-ok-symbolic",
+                            60..=79 => "network-wireless-signal-good-symbolic",
+                            _ => "network-wireless-signal-excellent-symbolic",
+                        },
+                    };
+                    out.push(StatusItem {
+                        part: Part::Network,
+                        w: h,
+                        look: Look::Icon {
+                            name: name.into(),
+                            label: None,
+                        },
+                    });
+                }
+                Widget::Battery => {
+                    if let Some(b) = self.status.battery {
+                        let level = (b.percent as u32 + 5) / 10 * 10;
+                        let name = match (b.full, b.charging) {
+                            (true, _) => "battery-level-100-charged-symbolic".to_string(),
+                            (false, true) => format!("battery-level-{level}-charging-symbolic"),
+                            (false, false) => format!("battery-level-{level}-symbolic"),
+                        };
+                        out.push(StatusItem {
+                            part: Part::Battery,
+                            ..labelled(name, format!("{}%", b.percent))
+                        });
+                    }
+                }
+                Widget::Brightness => {
+                    if let Some(b) = &self.status.brightness {
+                        out.push(StatusItem {
+                            part: Part::Brightness,
+                            ..labelled("display-brightness-symbolic".into(), format!("{}%", b.percent()))
+                        });
+                    }
+                }
+                Widget::Notifications => {
+                    if self.config.notifications.enabled {
+                        out.push(StatusItem {
+                            part: Part::Bell,
+                            w: h,
+                            look: Look::Bell {
+                                unread: self.notifications.unread() > 0,
+                                dnd: self.notifications.dnd,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// A monitor's bar image at the given integer scale, repainted only when needed.
@@ -830,6 +1177,18 @@ impl State {
         let buffer = self.bar.paint(text, &model);
         cached.insert(name, (model, buffer.clone()));
         Some(buffer)
+    }
+
+    /// The focused monitor's bar parts as "Part x y w h" in global coordinates, for tests.
+    pub fn bar_parts_debug(&self) -> Vec<String> {
+        let mon = self.active_mon;
+        let Some(rect) = self.bar_rect(mon) else { return Vec::new() };
+        let model = self.bar_model(mon, (rect.size.w, rect.size.h), 1);
+        self.bar
+            .layout(&model)
+            .into_iter()
+            .map(|(r, p)| format!("{p:?} {} {} {} {}", r.x + rect.loc.x, r.y + rect.loc.y, r.w, r.h))
+            .collect()
     }
 
     /// The monitor and bar part under a point.
@@ -899,6 +1258,30 @@ impl State {
                     crate::state::close_window(&w);
                 }
             }
+            (Part::Tray(i), _) => {
+                let Some(item) = self.bus.tray.get(i).cloned() else { return };
+                let pos = self.seat.get_pointer().unwrap().current_location();
+                let (x, y) = (pos.x as i32, pos.y as i32);
+                let menu = item.has_menu && (button == BTN_RIGHT || (button == BTN_LEFT && item.item_is_menu));
+                if menu {
+                    self.tray_menu_request = Some((item.id.clone(), pos, mon));
+                    self.bus_command(crate::dbus::Command::TrayMenu { item: item.id });
+                } else if button == BTN_LEFT {
+                    self.bus_command(crate::dbus::Command::TrayActivate { item: item.id, x, y });
+                } else {
+                    self.bus_command(crate::dbus::Command::TraySecondary { item: item.id, x, y });
+                }
+            }
+            (Part::Media, BTN_LEFT) => self.bus_command(crate::dbus::Command::Media(crate::dbus::mpris::MediaCommand::PlayPause)),
+            (Part::Media, BTN_MIDDLE | BTN_RIGHT) => {
+                self.bus_command(crate::dbus::Command::Media(crate::dbus::mpris::MediaCommand::Next))
+            }
+            (Part::Bell, BTN_LEFT) => {
+                let pos = self.seat.get_pointer().unwrap().current_location();
+                self.open_notifications_menu(mon, pos);
+            }
+            (Part::Bell, BTN_RIGHT) => self.toggle_dnd(),
+            (Part::Bell, BTN_MIDDLE) => self.clear_notifications(),
             (Part::Layout, BTN_LEFT | BTN_RIGHT) => self.run_action(Action::Layout(LayoutChoice::Next)),
             (Part::Settings, BTN_LEFT) => self.open_settings(),
             (Part::Power, BTN_LEFT | BTN_RIGHT) => {
@@ -1013,6 +1396,36 @@ impl State {
         }
         let Some(mon) = self.monitor_at(pos) else { return false };
         let steps = self.bar.scroll_steps(source, amount, v120);
+        // Widgets that take scrolling: brightness, media (skip tracks), tray icons.
+        if let Some((_, part)) = self.bar_part_at(pos) {
+            use crate::dbus::{Command, mpris::MediaCommand};
+            match part {
+                Part::Brightness => {
+                    if steps != 0 {
+                        self.change_brightness(-steps);
+                    }
+                    return true;
+                }
+                Part::Media => {
+                    match steps.signum() {
+                        1 => self.bus_command(Command::Media(MediaCommand::Next)),
+                        -1 => self.bus_command(Command::Media(MediaCommand::Previous)),
+                        _ => {}
+                    }
+                    return true;
+                }
+                Part::Tray(i) => {
+                    if steps != 0
+                        && let Some(item) = self.bus.tray.get(i)
+                    {
+                        let item = item.id.clone();
+                        self.bus_command(Command::TrayScroll { item, delta: steps * 120 });
+                    }
+                    return true;
+                }
+                _ => {}
+            }
+        }
         if steps != 0 {
             self.focus_monitor_at(pos);
             let m = &self.monitors[mon];
@@ -1022,6 +1435,22 @@ impl State {
         }
         true
     }
+}
+
+/// A palette color as 0-255 RGBA, for tinting icons.
+fn to_u8(c: Color) -> [u8; 4] {
+    c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+/// Tray icon pixels (ARGB32, big-endian) as premultiplied RGBA.
+fn argb_to_rgba(argb: &[u8]) -> Vec<u8> {
+    argb.chunks_exact(4)
+        .flat_map(|p| {
+            let [a, r, g, b] = [p[0], p[1], p[2], p[3]];
+            let m = |c: u8| ((c as u32 * a as u32 + 127) / 255) as u8;
+            [m(r), m(g), m(b), a]
+        })
+        .collect()
 }
 
 /// Where the item at `idx` ends up after the one at `from` is moved to `to`.
@@ -1070,6 +1499,7 @@ mod tests {
             .map(|(active, apps)| Ws {
                 active: *active,
                 apps: apps.iter().map(|a| a.to_string()).collect(),
+                ..Default::default()
             })
             .collect(),
             tabs: tabs
@@ -1084,6 +1514,7 @@ mod tests {
             hover,
             active_monitor: true,
             clock: None,
+            status: Vec::new(),
         }
     }
 
@@ -1181,6 +1612,12 @@ mod tests {
         );
         let mut m = m;
         m.clock = Some(clock_text());
+        // Two named workspaces, one with an icon too.
+        for (i, name, icon) in [(0, "web", "firefox"), (2, "chat", "")] {
+            m.workspaces[i].name = name.into();
+            m.workspaces[i].icon = icon.into();
+            m.workspaces[i].name_w = text.width(name, m.config.font_size * 0.9).ceil() as i32;
+        }
         for (tab, app) in m.tabs.iter_mut().zip(["Alacritty", "vivaldi-stable", "code", "XClock"]) {
             tab.app_id = app.into();
         }

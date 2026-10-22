@@ -1,7 +1,8 @@
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent, KeyState,
-        KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
+        AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, GestureBeginEvent, GestureEndEvent,
+        GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
+        PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
     },
     input::{
         keyboard::{FilterResult, Keysym, ModifiersState},
@@ -12,6 +13,8 @@ use smithay::{
     utils::{Logical, Point, SERIAL_COUNTER},
 };
 
+use smithay::input::pointer as gestures;
+
 use crate::{
     bar::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT},
     config::{Action, ModKey, Mods, VolumeChange, normalize_keysym},
@@ -20,6 +23,16 @@ use crate::{
     menu::MenuKey,
     state::State,
 };
+
+/// How far (in touchpad units, about a pixel each) a swipe has to go to do something.
+const SWIPE_DISTANCE: f64 = 70.0;
+
+/// A touchpad swipe in progress.
+pub struct Swipe {
+    /// Three or more fingers with gestures on: the compositor's. Otherwise it goes to the app.
+    ours: bool,
+    delta: Point<f64, Logical>,
+}
 
 /// Relative motion details: (accelerated delta, raw delta, timestamp in µs).
 type Relative = (Point<f64, Logical>, Point<f64, Logical>, u64);
@@ -105,19 +118,81 @@ impl State {
             }
             InputEvent::PointerButton { event } => self.on_button::<I>(event),
             InputEvent::PointerAxis { event } => self.on_axis::<I>(event),
+            InputEvent::GestureSwipeBegin { event } => self.on_swipe_begin(event.fingers(), event.time_msec()),
+            InputEvent::GestureSwipeUpdate { event } => self.on_swipe_update(event.delta(), event.time_msec()),
+            InputEvent::GestureSwipeEnd { event } => self.on_swipe_end(event.cancelled(), event.time_msec()),
+            InputEvent::GesturePinchBegin { event } => {
+                let pointer = self.seat.get_pointer().unwrap();
+                pointer.gesture_pinch_begin(
+                    self,
+                    &gestures::GesturePinchBeginEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        fingers: event.fingers(),
+                    },
+                );
+            }
+            InputEvent::GesturePinchUpdate { event } => {
+                let pointer = self.seat.get_pointer().unwrap();
+                pointer.gesture_pinch_update(
+                    self,
+                    &gestures::GesturePinchUpdateEvent {
+                        time: event.time_msec(),
+                        delta: event.delta(),
+                        scale: event.scale(),
+                        rotation: event.rotation(),
+                    },
+                );
+            }
+            InputEvent::GesturePinchEnd { event } => {
+                let pointer = self.seat.get_pointer().unwrap();
+                pointer.gesture_pinch_end(
+                    self,
+                    &gestures::GesturePinchEndEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        cancelled: event.cancelled(),
+                    },
+                );
+            }
+            InputEvent::GestureHoldBegin { event } => {
+                let pointer = self.seat.get_pointer().unwrap();
+                pointer.gesture_hold_begin(
+                    self,
+                    &gestures::GestureHoldBeginEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        fingers: event.fingers(),
+                    },
+                );
+            }
+            InputEvent::GestureHoldEnd { event } => {
+                let pointer = self.seat.get_pointer().unwrap();
+                pointer.gesture_hold_end(
+                    self,
+                    &gestures::GestureHoldEndEvent {
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: event.time_msec(),
+                        cancelled: event.cancelled(),
+                    },
+                );
+            }
             _ => {}
         }
     }
 
     fn on_key<I: InputBackend>(&mut self, event: I::KeyboardKeyEvent) {
+        self.on_key_raw(event.key_code(), event.state(), Event::time_msec(&event));
+    }
+
+    /// A key went down or up (also used by `msg test-key`).
+    pub fn on_key_raw(&mut self, code: smithay::input::keyboard::Keycode, key_state: KeyState, time: u32) {
         let serial = SERIAL_COUNTER.next_serial();
-        let time = Event::time_msec(&event);
-        let code = event.key_code();
-        let key_state = event.state();
 
         let mut mod_tapped = false;
         let mut menu_key = None;
         let mut switcher_key = None;
+        let mut overview_key = None;
         let mut volume_repeat = None;
         let action =
             self.keyboard()
@@ -161,6 +236,15 @@ impl State {
                     if raw == XKB_TERMINATE_SERVER || (raw == XKB_BACKSPACE && mods.ctrl && mods.alt) {
                         state.suppressed_keys.push(code);
                         return FilterResult::Intercept(Some(Action::Quit));
+                    }
+                    // The overview takes plain keys it knows; Mod+Tab and the like still work.
+                    if state.overview_holds_keyboard()
+                        && !(mods.ctrl || mods.alt || mods.logo)
+                        && let Some(k) = menu_key_for(raw)
+                    {
+                        state.suppressed_keys.push(code);
+                        overview_key = Some(k);
+                        return FilterResult::Intercept(None);
                     }
                     // The switcher takes its keys whatever modifiers are held (Alt is, usually).
                     if state.switcher.is_some()
@@ -216,6 +300,9 @@ impl State {
         if let Some(k) = switcher_key {
             self.switcher_key(k);
         }
+        if let Some(k) = overview_key {
+            self.overview_key(k);
+        }
         // Letting go of Alt (or whatever opened it) switches.
         self.switcher_check_release();
         if mod_tapped && let Some(bind) = self.config.binds.iter().find(|b| b.key.is_none()) {
@@ -223,7 +310,7 @@ impl State {
         }
     }
 
-    fn on_pointer_moved(&mut self, pos: Point<f64, Logical>, time: u32, relative: Option<Relative>) {
+    pub fn on_pointer_moved(&mut self, pos: Point<f64, Logical>, time: u32, relative: Option<Relative>) {
         let pointer = self.seat.get_pointer().unwrap();
         let under = self.surface_under(pos);
         let serial = SERIAL_COUNTER.next_serial();
@@ -243,11 +330,29 @@ impl State {
             pointer.frame(self);
             return;
         }
+        if self.overview_open() {
+            self.overview_motion(pos);
+            self.cursor_status = CursorImageStatus::default_named();
+            pointer.motion(
+                self,
+                None,
+                &MotionEvent {
+                    location: pos,
+                    serial,
+                    time,
+                },
+            );
+            pointer.frame(self);
+            return;
+        }
         self.bar_drag_motion(pos);
         self.bar_hover(pos);
+        self.notification_motion(pos);
         self.menu_motion(pos);
         self.switcher_motion(pos);
-        if (self.over_bar(pos) || self.over_menu(pos) || self.over_switcher(pos)) && !pointer.is_grabbed() {
+        if (self.over_bar(pos) || self.over_menu(pos) || self.over_switcher(pos) || self.over_notification(pos))
+            && !pointer.is_grabbed()
+        {
             // Clients don't reset the pointer when it leaves them, so show the normal arrow here.
             self.cursor_status = CursorImageStatus::default_named();
         }
@@ -256,7 +361,10 @@ impl State {
         }
 
         // While a menu is open, hovering doesn't move focus away from what it's for.
-        let follow = self.config.general.focus_follows_mouse && self.menu.is_none() && self.switcher.is_none();
+        let follow = self.config.general.focus_follows_mouse
+            && self.menu.is_none()
+            && self.switcher.is_none()
+            && !self.launcher_focused();
         if follow && !pointer.is_grabbed() && self.focused_layer.is_none() {
             self.focus_monitor_at(pos);
         }
@@ -311,10 +419,13 @@ impl State {
     }
 
     fn on_button<I: InputBackend>(&mut self, event: I::PointerButtonEvent) {
+        self.on_button_raw(event.button_code(), event.state(), event.time_msec());
+    }
+
+    /// A pointer button went down or up (also used by `msg test-press`).
+    pub fn on_button_raw(&mut self, button: u32, button_state: ButtonState, time: u32) {
         let pointer = self.seat.get_pointer().unwrap();
         let serial = SERIAL_COUNTER.next_serial();
-        let button = event.button_code();
-        let button_state = event.state();
         let pos = pointer.current_location();
         // Mod+click (move/resize) shouldn't count as a Mod tap.
         if button_state == ButtonState::Pressed {
@@ -338,10 +449,19 @@ impl State {
                     button,
                     state: button_state,
                     serial,
-                    time: event.time_msec(),
+                    time,
                 },
             );
             pointer.frame(self);
+            return;
+        }
+
+        // The overview gets every click while it's open.
+        if self.overview_open() && !pointer.is_grabbed() {
+            match button_state {
+                ButtonState::Pressed => self.overview_press(pos, button),
+                ButtonState::Released => self.overview_release(pos),
+            }
             return;
         }
 
@@ -364,6 +484,12 @@ impl State {
                 }
                 ButtonState::Released => self.menu_release(pos),
             }
+        }
+
+        // Notification pop-ups take clicks on them, press and release.
+        if button_state == ButtonState::Pressed && !pointer.is_grabbed() && self.notification_press(pos, button) {
+            self.bar.held_buttons.push(button);
+            return;
         }
 
         // Bar clicks are handled here and never reach clients, press or release.
@@ -436,7 +562,7 @@ impl State {
                 button,
                 state: button_state,
                 serial,
-                time: event.time_msec(),
+                time,
             },
         );
         pointer.frame(self);
@@ -451,6 +577,9 @@ impl State {
         };
         let pointer = self.seat.get_pointer().unwrap();
         let pos = pointer.current_location();
+        if self.overview_open() {
+            return;
+        }
         if !pointer.is_grabbed() && !self.is_locked() {
             let vertical = amount(Axis::Vertical);
             if vertical != 0.0
@@ -474,6 +603,74 @@ impl State {
         }
         pointer.axis(self, frame);
         pointer.frame(self);
+    }
+
+    // ---------- touchpad swipes ----------
+
+    fn on_swipe_begin(&mut self, fingers: u32, time: u32) {
+        let ours = fingers >= 3 && self.config.input.gestures && !self.is_locked();
+        self.swipe = Some(Swipe {
+            ours,
+            delta: (0.0, 0.0).into(),
+        });
+        if !ours {
+            let pointer = self.seat.get_pointer().unwrap();
+            pointer.gesture_swipe_begin(
+                self,
+                &gestures::GestureSwipeBeginEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                    fingers,
+                },
+            );
+        }
+    }
+
+    fn on_swipe_update(&mut self, delta: Point<f64, Logical>, time: u32) {
+        let Some(swipe) = &mut self.swipe else { return };
+        swipe.delta += delta;
+        if !swipe.ours {
+            let pointer = self.seat.get_pointer().unwrap();
+            pointer.gesture_swipe_update(self, &gestures::GestureSwipeUpdateEvent { time, delta });
+        }
+    }
+
+    /// The fingers lifted: a long enough swipe, mostly sideways or mostly up or down, acts.
+    fn on_swipe_end(&mut self, cancelled: bool, time: u32) {
+        let Some(swipe) = self.swipe.take() else { return };
+        if !swipe.ours {
+            let pointer = self.seat.get_pointer().unwrap();
+            pointer.gesture_swipe_end(
+                self,
+                &gestures::GestureSwipeEndEvent {
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                    cancelled,
+                },
+            );
+            return;
+        }
+        if cancelled {
+            return;
+        }
+        match swipe_action(swipe.delta) {
+            Some(SwipeAction::Workspace(step)) => {
+                if self.overview_open() {
+                    return;
+                }
+                let Some(m) = self.monitors.get(self.active_mon) else { return };
+                let target = m.active_ws as i32 + step;
+                if (0..m.workspaces.len() as i32).contains(&target) {
+                    self.switch_workspace(target as usize);
+                }
+            }
+            Some(SwipeAction::Overview(open)) => {
+                if open != self.overview_holds_keyboard() {
+                    self.toggle_overview();
+                }
+            }
+            None => {}
+        }
     }
 
     fn mod_held(&self, mods: &ModifiersState) -> bool {
@@ -503,6 +700,27 @@ impl State {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum SwipeAction {
+    /// +1: the next workspace (fingers moved left, like pushing the current one away).
+    Workspace(i32),
+    /// true: open (fingers moved up).
+    Overview(bool),
+}
+
+/// What a finished swipe of `delta` does: nothing unless it went far enough, mostly in one
+/// direction.
+fn swipe_action(delta: Point<f64, Logical>) -> Option<SwipeAction> {
+    let (ax, ay) = (delta.x.abs(), delta.y.abs());
+    if ax >= SWIPE_DISTANCE && ax > ay * 1.5 {
+        Some(SwipeAction::Workspace(if delta.x < 0.0 { 1 } else { -1 }))
+    } else if ay >= SWIPE_DISTANCE && ay > ax * 1.5 {
+        Some(SwipeAction::Overview(delta.y < 0.0))
+    } else {
+        None
+    }
+}
+
 /// Whether `sym` is one of the physical keys for `mod_key` (left or right).
 fn is_mod_sym(sym: Keysym, mod_key: ModKey) -> bool {
     match mod_key {
@@ -516,4 +734,21 @@ fn clamp_into(pos: Point<f64, Logical>, geo: smithay::utils::Rectangle<f64, Logi
     let max_x = geo.loc.x + geo.size.w - 1.0;
     let max_y = geo.loc.y + geo.size.h - 1.0;
     (pos.x.clamp(geo.loc.x, max_x), pos.y.clamp(geo.loc.y, max_y)).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swipes() {
+        let d = |x, y| Point::<f64, Logical>::from((x, y));
+        assert_eq!(swipe_action(d(-120.0, 10.0)), Some(SwipeAction::Workspace(1)));
+        assert_eq!(swipe_action(d(120.0, -10.0)), Some(SwipeAction::Workspace(-1)));
+        assert_eq!(swipe_action(d(5.0, -100.0)), Some(SwipeAction::Overview(true)));
+        assert_eq!(swipe_action(d(0.0, 100.0)), Some(SwipeAction::Overview(false)));
+        // Too short, or diagonal.
+        assert_eq!(swipe_action(d(30.0, 0.0)), None);
+        assert_eq!(swipe_action(d(100.0, 90.0)), None);
+    }
 }

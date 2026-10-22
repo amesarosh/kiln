@@ -52,6 +52,8 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
         });
     });
 
+    arrangement(ui, p, doc, &connected);
+
     let name_of = |t: &Table| t.get("name").and_then(Item::as_str).unwrap_or_default().to_string();
     let mut names: Vec<(String, Option<Monitor>)> =
         connected.iter().map(|m| (m.name.clone(), Some(m.clone()))).collect();
@@ -289,4 +291,223 @@ fn remove_entry(doc: &mut ConfigDoc, name: &str) {
         doc.remove(&["outputs"]);
     }
     doc.touch();
+}
+
+/// A monitor on the map, in logical (scaled) pixels.
+#[derive(Debug, Clone, PartialEq)]
+struct Screen {
+    name: String,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
+impl Screen {
+    fn overlaps(&self, o: &Screen) -> bool {
+        self.x < o.x + o.w - 0.5 && o.x < self.x + self.w - 0.5 && self.y < o.y + o.h - 0.5 && o.y < self.y + self.h - 0.5
+    }
+}
+
+/// The connected monitors as they're arranged: their size at their scale and rotation, and
+/// their position from the config (or where the compositor put them).
+fn screens(doc: &ConfigDoc, connected: &[Monitor]) -> Vec<Screen> {
+    let outputs: Vec<Table> = doc
+        .item(&["outputs"])
+        .and_then(Item::as_array_of_tables)
+        .map(|a| a.iter().cloned().collect())
+        .unwrap_or_default();
+    connected
+        .iter()
+        .map(|m| {
+            let entry = outputs.iter().find(|t| {
+                t.get("name")
+                    .and_then(Item::as_str)
+                    .is_some_and(|n| n.eq_ignore_ascii_case(&m.name))
+            });
+            let get = |k: &str| entry.and_then(|t| t.get(k));
+            let scale = get("scale").and_then(crate::doc::as_number).unwrap_or(1.0).max(0.1) as f32;
+            let (mw, mh) = m
+                .modes
+                .iter()
+                .find(|x| x.current)
+                .map_or((1920, 1080), |x| (x.width, x.height));
+            let rotated = get("transform")
+                .and_then(Item::as_str)
+                .is_some_and(|t| t.ends_with("90") || t.ends_with("270"));
+            let (w, h) = if rotated { (mh, mw) } else { (mw, mh) };
+            let pos = get("position").and_then(|i| {
+                let a = i.as_array()?;
+                Some((a.get(0)?.as_integer()? as f32, a.get(1)?.as_integer()? as f32))
+            });
+            let (x, y) = pos.unwrap_or((m.position.0 as f32, m.position.1 as f32));
+            Screen {
+                name: m.name.clone(),
+                x,
+                y,
+                w: (w as f32 / scale).round(),
+                h: (h as f32 / scale).round(),
+            }
+        })
+        .collect()
+}
+
+/// Where a monitor dropped at (`x`, `y`) lands: touching one of the others along an edge, at
+/// the nearest such spot that doesn't overlap any of them. Close edges line up exactly.
+fn snap(dropped: &Screen, others: &[Screen]) -> (f32, f32) {
+    if others.is_empty() {
+        return (0.0, 0.0);
+    }
+    const ALIGN: f32 = 48.0;
+    let d = dropped;
+    let mut best: Option<((f32, f32), f32)> = None;
+    for o in others {
+        // Along a vertical edge (left or right of `o`), keep y but stay touching.
+        let y = (d.y).clamp(o.y - d.h + 1.0, o.y + o.h - 1.0);
+        let y = [o.y, o.y + o.h - d.h].into_iter().find(|a| (a - y).abs() < ALIGN).unwrap_or(y);
+        let x = (d.x).clamp(o.x - d.w + 1.0, o.x + o.w - 1.0);
+        let x = [o.x, o.x + o.w - d.w].into_iter().find(|a| (a - x).abs() < ALIGN).unwrap_or(x);
+        for (cx, cy) in [(o.x + o.w, y), (o.x - d.w, y), (x, o.y + o.h), (x, o.y - d.h)] {
+            let c = Screen {
+                x: cx,
+                y: cy,
+                ..d.clone()
+            };
+            if others.iter().any(|s| s.overlaps(&c)) {
+                continue;
+            }
+            let dist = (cx - d.x).hypot(cy - d.y);
+            if best.is_none_or(|(_, b)| dist < b) {
+                best = Some(((cx, cy), dist));
+            }
+        }
+    }
+    best.map_or((d.x, d.y), |(p, _)| p)
+}
+
+/// A map of the connected monitors. Drag one to move it; it snaps against the others, and
+/// every monitor's position is saved.
+fn arrangement(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, connected: &[Monitor]) {
+    if connected.len() < 2 {
+        return;
+    }
+    let screens = screens(doc, connected);
+    let min_x = screens.iter().map(|s| s.x).fold(f32::MAX, f32::min);
+    let min_y = screens.iter().map(|s| s.y).fold(f32::MAX, f32::min);
+    let max_x = screens.iter().map(|s| s.x + s.w).fold(f32::MIN, f32::max);
+    let max_y = screens.iter().map(|s| s.y + s.h).fold(f32::MIN, f32::max);
+    let (bw, bh) = ((max_x - min_x).max(1.0), (max_y - min_y).max(1.0));
+
+    let mut save: Option<Vec<Screen>> = None;
+    widgets::card(ui, p, "Arrangement", "Drag a monitor to move it. It snaps to the edges of the others.", |ui| {
+        let width = ui.available_width();
+        let height = 220.0f32.min(width * 0.45);
+        let (area, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+        let pad = 16.0;
+        // Leave room around the monitors so one can be dragged past the others.
+        let k = ((width - 2.0 * pad) / (bw * 1.4)).min((height - 2.0 * pad) / (bh * 1.4));
+        let origin = area.center() - egui::vec2(bw * k, bh * k) / 2.0;
+        let to_ui = |s: &Screen| {
+            egui::Rect::from_min_size(
+                origin + egui::vec2((s.x - min_x) * k, (s.y - min_y) * k),
+                egui::vec2(s.w * k, s.h * k),
+            )
+        };
+        let painter = ui.painter_at(area);
+        painter.rect_filled(area, 6.0, color(p.base));
+
+        let drag_id = ui.id().with("map-drag");
+        let mut dragging: Option<(String, egui::Vec2)> = ui.data(|d| d.get_temp(drag_id));
+        for s in &screens {
+            let rect = to_ui(s);
+            let r = ui.interact(rect, drag_id.with(&s.name), egui::Sense::drag());
+            if r.drag_started()
+                && let Some(pos) = r.interact_pointer_pos()
+            {
+                dragging = Some((s.name.clone(), pos - rect.min));
+            }
+            let held = dragging.as_ref().is_some_and(|(n, _)| *n == s.name);
+            let shown = match (&dragging, r.interact_pointer_pos()) {
+                (Some((n, grab)), Some(pos)) if *n == s.name => egui::Rect::from_min_size(pos - *grab, rect.size()),
+                _ => rect,
+            };
+            if r.drag_stopped()
+                && held
+                && let Some((_, grab)) = &dragging
+                && let Some(pos) = r.interact_pointer_pos().or(ui.input(|i| i.pointer.latest_pos()))
+            {
+                let corner = pos - *grab - origin;
+                let dropped = Screen {
+                    x: corner.x / k + min_x,
+                    y: corner.y / k + min_y,
+                    ..s.clone()
+                };
+                let others: Vec<Screen> = screens.iter().filter(|o| o.name != s.name).cloned().collect();
+                let (x, y) = snap(&dropped, &others);
+                let mut all = others;
+                all.push(Screen { x, y, ..s.clone() });
+                save = Some(all);
+                dragging = None;
+            }
+            let fill = if held { p.selected } else if r.hovered() { p.hover } else { p.raised };
+            let stroke = if held { p.accent } else { p.separator };
+            painter.rect(shown, 4.0, color(fill), egui::Stroke::new(1.5, color(stroke)), egui::StrokeKind::Inside);
+            painter.text(
+                shown.center(),
+                egui::Align2::CENTER_CENTER,
+                &s.name,
+                egui::FontId::proportional(13.0),
+                color(p.text),
+            );
+            if r.hovered() || held {
+                ui.ctx().set_cursor_icon(if held { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
+            }
+        }
+        ui.data_mut(|d| match &dragging {
+            Some(v) => {
+                d.insert_temp(drag_id, v.clone());
+            }
+            None => d.remove::<(String, egui::Vec2)>(drag_id),
+        });
+    });
+
+    // Save every monitor's position, shifted so the top-left one is at 0, 0.
+    if let Some(all) = save {
+        let min_x = all.iter().map(|s| s.x).fold(f32::MAX, f32::min);
+        let min_y = all.iter().map(|s| s.y).fold(f32::MAX, f32::min);
+        for s in &all {
+            let t = entry_mut(doc, &s.name);
+            let pos = [(s.x - min_x).round() as i64, (s.y - min_y).round() as i64];
+            crate::doc::set_in(t, "position", Value::Array(toml_edit::Array::from_iter(pos)));
+        }
+        doc.touch();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn s(name: &str, x: f32, y: f32, w: f32, h: f32) -> Screen {
+        Screen {
+            name: name.into(),
+            x,
+            y,
+            w,
+            h,
+        }
+    }
+
+    #[test]
+    fn snaps_to_the_nearest_free_edge() {
+        let a = s("A", 0.0, 0.0, 1920.0, 1080.0);
+        // Dropped overlapping A's right half: goes to A's right edge, tops lined up.
+        assert_eq!(snap(&s("B", 1500.0, 30.0, 1280.0, 1024.0), std::slice::from_ref(&a)), (1920.0, 0.0));
+        // Dropped below A, a little left: goes under it, left edges lined up.
+        assert_eq!(snap(&s("B", -20.0, 1200.0, 1280.0, 1024.0), std::slice::from_ref(&a)), (0.0, 1080.0));
+        // Never on top of a third monitor.
+        let c = s("C", 1920.0, 0.0, 1920.0, 1080.0);
+        let (x, y) = snap(&s("B", 1800.0, 10.0, 1280.0, 1024.0), &[a, c.clone()]);
+        assert!(!s("B", x, y, 1280.0, 1024.0).overlaps(&c), "{x},{y}");
+    }
 }

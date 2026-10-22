@@ -31,6 +31,8 @@ render_elements! {
     Surface=WaylandSurfaceRenderElement<R>,
     Solid=SolidColorRenderElement,
     Memory=MemoryRenderBufferRenderElement<R>,
+    /// Windows drawn smaller, as overview thumbnails.
+    Rescaled=smithay::backend::renderer::element::utils::RescaleRenderElement<WaylandSurfaceRenderElement<R>>,
 }
 
 /// What the pointer should look like this frame, for backends that draw it.
@@ -158,8 +160,21 @@ where
         }
     }
 
+    // The overview covers the monitor; its backdrop goes over the bar and panels, and the
+    // windows are drawn as its thumbnails instead.
+    let in_overview = crate::overview::push_elements(state, renderer, output, &mut out);
+
+    for (loc, buffer) in state.notification_buffers(output, output.current_scale().integer_scale()) {
+        let loc = (loc - output_geo.loc).to_f64().to_physical(scale);
+        match MemoryRenderBufferRenderElement::from_buffer(renderer, loc, &buffer, None, None, None, Kind::Unspecified)
+        {
+            Ok(e) => out.push(OutputElement::Memory(e)),
+            Err(e) => tracing::warn!("notification upload failed: {e:?}"),
+        }
+    }
+
     let mon = state.monitor_index(output);
-    let fullscreen = mon.is_some_and(|m| state.monitors[m].ws().fullscreen.is_some());
+    let fullscreen = mon.is_some_and(|m| state.monitors[m].ws().fullscreen.is_some()) && !in_overview;
 
     // Each monitor has its own bar. Built before taking the layer map lock below, because
     // bar_rect() locks it too and the lock isn't re-entrant.
@@ -219,20 +234,31 @@ where
     for window in dragged
         .into_iter()
         .chain(state.space.elements().rev().filter(|w| Some(*w) != dragged))
+        .filter(|_| !in_overview)
     {
         // Where it's drawn this frame, which differs from where it is while sliding.
         let Some(loc) = state.visual_location(window) else {
             continue;
         };
         // Windows on other monitors (a floating one may straddle two and is drawn on both).
-        if !state.visual_bbox(window).is_some_and(|b| b.overlaps(output_geo)) {
-            continue;
+        // One sliding in with a workspace switch is only drawn on its own monitor.
+        match state.switching_onto(window) {
+            Some(o) if o != output => continue,
+            Some(_) => {}
+            None if !state.visual_bbox(window).is_some_and(|b| b.overlaps(output_geo)) => continue,
+            None => {}
         }
+        let alpha = state.visual_alpha(window);
         let geo = window.geometry();
         let render_loc = (loc - geo.loc.to_f64() - output_geo.loc.to_f64()).to_physical_precise_round(scale);
         out.extend(
             window
-                .render_elements::<WaylandSurfaceRenderElement<R>>(renderer, render_loc, scale, 1.0)
+                .render_elements::<WaylandSurfaceRenderElement<R>>(
+                    renderer,
+                    render_loc,
+                    scale,
+                    crate::state::window_opacity(window) * alpha,
+                )
                 .into_iter()
                 .map(OutputElement::Surface),
         );
@@ -244,7 +270,28 @@ where
                 deco.border_inactive
             };
             let rect = Rectangle::new(loc.to_i32_round() - output_geo.loc, geo.size);
-            push_border(&mut out, window, rect, deco.border_width, color, scale);
+            push_border(&mut out, window, rect, deco.border_width, faded(color, alpha), scale);
+        }
+    }
+
+    // The workspace being left, sliding or fading out, below the one coming in.
+    for (window, loc, alpha) in state.outgoing_windows(output).into_iter().filter(|_| !in_overview) {
+        let geo = window.geometry();
+        let render_loc = (loc - geo.loc.to_f64() - output_geo.loc.to_f64()).to_physical_precise_round(scale);
+        out.extend(
+            window
+                .render_elements::<WaylandSurfaceRenderElement<R>>(
+                    renderer,
+                    render_loc,
+                    scale,
+                    crate::state::window_opacity(&window) * alpha,
+                )
+                .into_iter()
+                .map(OutputElement::Surface),
+        );
+        if deco.border_width > 0 && geo.size.w > 0 {
+            let rect = Rectangle::new(loc.to_i32_round() - output_geo.loc, geo.size);
+            push_border(&mut out, &window, rect, deco.border_width, faded(deco.border_inactive, alpha), scale);
         }
     }
 
@@ -276,6 +323,11 @@ where
         (&state.lock_fill_ids[0], state.config.theme.palette.locked)
     };
     push_fill(output, id, color, out);
+}
+
+/// A color made more see-through, premultiplied the way solid elements are drawn.
+fn faded(c: Color, alpha: f32) -> Color {
+    [c[0] * alpha, c[1] * alpha, c[2] * alpha, c[3] * alpha]
 }
 
 /// Cover the whole output with one color.
@@ -360,6 +412,12 @@ pub fn send_frames(state: &mut State, output: &Output) {
             window.with_surfaces(hint);
         }
     }
+    // Thumbnails in the overview stay live, even of workspaces not shown.
+    for window in state.overview_windows_on(output) {
+        if state.space.element_location(&window).is_none() {
+            window.send_frame(output, time, Some(Duration::ZERO), |_, _| Some(output.clone()));
+        }
+    }
     if let Some(surface) = state.lock_surface(output) {
         let surface = surface.wl_surface();
         smithay::desktop::utils::send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
@@ -397,6 +455,46 @@ pub fn send_frames(state: &mut State, output: &Output) {
     }
     state.space.refresh();
     state.popups.cleanup();
+}
+
+/// Collect the presentation feedback requests of everything drawn on `output` this frame, to
+/// be answered once the frame is on screen. `states` says which surfaces went straight to the
+/// display without a copy.
+pub fn take_presentation_feedback(
+    state: &State,
+    output: &Output,
+    states: &smithay::backend::renderer::element::RenderElementStates,
+) -> smithay::desktop::utils::OutputPresentationFeedback {
+    use smithay::desktop::utils::{
+        OutputPresentationFeedback, surface_presentation_feedback_flags_from_states,
+        take_presentation_feedback_surface_tree,
+    };
+    let mut feedback = OutputPresentationFeedback::new(output);
+    let on_output = |_: &WlSurface, _: &SurfaceData| Some(output.clone());
+    let flags = |s: &WlSurface, _: &SurfaceData| surface_presentation_feedback_flags_from_states(s, states);
+    // A window on two monitors is answered by the one showing most of it.
+    for window in state.space.elements() {
+        if main_output(state, window).as_ref() == Some(output) {
+            window.take_presentation_feedback(&mut feedback, on_output, flags);
+        }
+    }
+    for layer in layer_map_for_output(output).layers() {
+        layer.take_presentation_feedback(&mut feedback, on_output, flags);
+    }
+    if let Some(lock) = state.lock_surface(output) {
+        take_presentation_feedback_surface_tree(lock.wl_surface(), &mut feedback, on_output, flags);
+    }
+    feedback
+}
+
+/// How long one frame lasts on `output`, for presentation feedback.
+pub fn refresh_of(output: &Output) -> smithay::wayland::presentation::Refresh {
+    match output.current_mode().map(|m| m.refresh) {
+        Some(mhz) if mhz > 0 => {
+            smithay::wayland::presentation::Refresh::fixed(Duration::from_nanos(1_000_000_000_000 / mhz as u64))
+        }
+        _ => smithay::wayland::presentation::Refresh::Unknown,
+    }
 }
 
 /// The monitor showing most of a window.

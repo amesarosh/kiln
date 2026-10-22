@@ -1,3 +1,4 @@
+pub mod headless;
 pub mod udev;
 pub mod winit;
 
@@ -17,6 +18,8 @@ pub enum Backend {
     Winit(winit::WinitData),
     /// Real hardware from a TTY.
     Udev(udev::UdevData),
+    /// No screen at all, for testing.
+    Headless(headless::HeadlessData),
 }
 
 impl State {
@@ -25,7 +28,8 @@ impl State {
         match &self.backend {
             Some(Backend::Winit(w)) => w.request_redraw(),
             Some(Backend::Udev(_)) => udev::render_all(self),
-            None => {}
+            // Draws on its own steady timer.
+            Some(Backend::Headless(_)) | None => {}
         }
     }
 
@@ -40,6 +44,7 @@ impl State {
         match &self.backend {
             Some(Backend::Winit(_)) => winit::capture(self, output, f),
             Some(Backend::Udev(_)) => udev::capture(self, output, with_cursor, f),
+            Some(Backend::Headless(_)) => headless::capture(self, output, f),
             None => None,
         }
     }
@@ -62,7 +67,18 @@ impl State {
         match &self.backend {
             Some(Backend::Winit(_)) => winit::apply_output_config(self),
             Some(Backend::Udev(_)) => udev::apply_output_config(self),
+            Some(Backend::Headless(_)) => headless::apply_output_config(self),
             None => {}
+        }
+    }
+
+    /// Every connected monitor, lit or not, for monitor setup tools.
+    pub fn output_heads(&self) -> Vec<crate::handlers::output_management::HeadInfo> {
+        match &self.backend {
+            Some(Backend::Winit(w)) => w.heads(self),
+            Some(Backend::Udev(_)) => udev::heads(self),
+            Some(Backend::Headless(h)) => h.heads(self),
+            None => Vec::new(),
         }
     }
 
@@ -96,6 +112,7 @@ impl DmabufHandler for State {
         let ok = match &mut self.backend {
             Some(Backend::Winit(w)) => w.renderer().import_dmabuf(&dmabuf, None).is_ok(),
             Some(Backend::Udev(u)) => u.import_dmabuf(&dmabuf),
+            Some(Backend::Headless(h)) => h.renderer().import_dmabuf(&dmabuf, None).is_ok(),
             None => false,
         };
         if ok {

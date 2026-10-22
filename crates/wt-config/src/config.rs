@@ -64,7 +64,12 @@ struct RawConfig {
     keyboard: KeyboardConfig,
     input: InputConfig,
     session: SessionConfig,
+    animations: AnimationConfig,
+    notifications: NotificationConfig,
     binds: BTreeMap<String, String>,
+    /// Names and icons for workspaces, keyed by number ("1", "2", ...).
+    #[serde(default)]
+    workspaces: BTreeMap<String, WorkspaceLabel>,
     #[serde(default)]
     rules: Vec<WindowRule>,
     #[serde(default)]
@@ -83,7 +88,10 @@ struct PartialConfig {
     keyboard: Option<toml::Table>,
     input: Option<toml::Table>,
     session: Option<toml::Table>,
+    animations: Option<toml::Table>,
+    notifications: Option<toml::Table>,
     binds: Option<BTreeMap<String, String>>,
+    workspaces: Option<toml::Table>,
     rules: Option<Vec<toml::Table>>,
     outputs: Option<Vec<toml::Table>>,
 }
@@ -202,6 +210,8 @@ struct RawBar {
     foreground: Option<String>,
     accent: Option<String>,
     dim: Option<String>,
+    /// Status widgets next to the clock, in order.
+    widgets: Vec<Widget>,
     /// What the old + button ran. It's the power button now; still accepted so older
     /// config files load.
     #[serde(default)]
@@ -231,6 +241,63 @@ pub struct SessionConfig {
     pub exclude: Vec<String>,
 }
 
+/// How a workspace switch looks.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceAnimation {
+    /// The old workspace slides out as the new one slides in.
+    Slide,
+    /// The old workspace fades into the new one.
+    Fade,
+    None,
+}
+
+/// Motion: workspace switches, tiles sliding into place, the overview opening.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AnimationConfig {
+    /// Off turns every animation off.
+    pub enabled: bool,
+    pub workspace: WorkspaceAnimation,
+    /// How long animations take, in milliseconds.
+    pub duration: u64,
+}
+
+impl AnimationConfig {
+    /// How long an animation takes, or zero when animations are off.
+    pub fn duration(&self) -> std::time::Duration {
+        if self.enabled {
+            std::time::Duration::from_millis(self.duration)
+        } else {
+            std::time::Duration::ZERO
+        }
+    }
+}
+
+/// Corner of the screen notifications pop up in.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Corner {
+    TopRight,
+    TopLeft,
+    BottomRight,
+    BottomLeft,
+}
+
+/// The built-in notification daemon.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct NotificationConfig {
+    /// Show desktop notifications. Read at startup; off leaves them to another daemon (mako).
+    pub enabled: bool,
+    pub position: Corner,
+    /// Seconds a notification stays up when the app doesn't say; urgent ones stay until
+    /// dismissed.
+    pub timeout: u64,
+    /// Most pop-ups shown at once; the rest wait in the bell's list.
+    pub max_visible: usize,
+}
+
 /// Pointer and touchpad settings (hardware backend only).
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -238,17 +305,64 @@ pub struct InputConfig {
     pub tap_to_click: bool,
     pub natural_scroll: bool,
     pub pointer_speed: f64,
+    /// Three- and four-finger swipes: sideways changes workspace, up and down open and close
+    /// the overview.
+    pub gestures: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct WindowRule {
+    /// Exact app id; a trailing `*` matches any ending.
     pub app_id: Option<String>,
     pub title: Option<String>,
     pub floating: Option<bool>,
     pub workspace: Option<usize>,
     /// Monitor to open on, by connector name (e.g. "DP-5"). Ignored if it isn't connected.
     pub output: Option<String>,
+    /// Size of a floating window, `[width, height]` in logical pixels.
+    pub size: Option<[i32; 2]>,
+    /// Where a floating window opens: "center", or `[x, y]` from the top-left of the
+    /// monitor's free area.
+    pub position: Option<RulePosition>,
+    /// Open fullscreen.
+    pub fullscreen: Option<bool>,
+    /// `false`: open without taking focus from the window you're using.
+    pub focus: Option<bool>,
+    /// 0.1 (nearly see-through) to 1.0 (solid).
+    pub opacity: Option<f32>,
+}
+
+/// Where a rule places a floating window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum RulePosition {
+    At([i32; 2]),
+    Named(NamedPosition),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NamedPosition {
+    Center,
+}
+
+/// What a workspace's button shows instead of its number.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceLabel {
+    /// Shown instead of the number.
+    #[serde(default)]
+    pub name: String,
+    /// An icon name from the icon theme (an app id works too), shown before the name.
+    #[serde(default)]
+    pub icon: String,
+}
+
+impl WorkspaceLabel {
+    pub fn is_empty(&self) -> bool {
+        self.name.is_empty() && self.icon.is_empty()
+    }
 }
 
 /// One `[[outputs]]` entry: settings for a monitor, matched by connector name.
@@ -358,6 +472,33 @@ pub struct BarConfig {
     /// From `[theme]`, so the bar repaints when they change.
     pub radius: f32,
     pub icon_theme: String,
+    /// Status widgets, in order.
+    pub widgets: Vec<Widget>,
+}
+
+/// A status widget on the bar.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Widget {
+    /// Tray icons from apps (StatusNotifierItem).
+    Tray,
+    /// What's playing, with play/pause.
+    Media,
+    /// Wired or wireless connection.
+    Network,
+    /// Laptop battery, if there is one.
+    Battery,
+    /// Screen brightness, if it can be changed.
+    Brightness,
+    /// A bell: unread notifications and do not disturb.
+    Notifications,
+}
+
+impl BarConfig {
+    /// Whether the bars show this widget.
+    pub fn has(&self, w: Widget) -> bool {
+        self.widgets.contains(&w)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -370,7 +511,11 @@ pub struct Config {
     pub keyboard: KeyboardConfig,
     pub input: InputConfig,
     pub session: SessionConfig,
+    pub animations: AnimationConfig,
+    pub notifications: NotificationConfig,
     pub binds: Vec<Bind>,
+    /// One per workspace, in order; empty labels show the number.
+    pub workspace_labels: Vec<WorkspaceLabel>,
     pub rules: Vec<WindowRule>,
     pub outputs: Vec<OutputConfig>,
 }
@@ -460,6 +605,10 @@ pub enum Action {
     WindowSwitcher(Dir),
     /// Change the default output's volume, or mute it.
     Volume(VolumeChange),
+    /// Show every workspace at once, or go back.
+    Overview,
+    /// Open the app launcher, or close it.
+    Launcher,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -580,9 +729,14 @@ impl Config {
         merge("keyboard", user.keyboard);
         merge("input", user.input);
         merge("session", user.session);
+        merge("animations", user.animations);
+        merge("notifications", user.notifications);
         if let Some(binds) = user.binds {
             let table = binds.into_iter().map(|(k, v)| (k, toml::Value::String(v))).collect();
             base.insert("binds".into(), toml::Value::Table(table));
+        }
+        if let Some(ws) = user.workspaces {
+            base.insert("workspaces".into(), toml::Value::Table(ws));
         }
         if let Some(rules) = user.rules {
             base.insert(
@@ -733,6 +887,7 @@ impl Config {
             font_size: rb.font_size.unwrap_or(theme.font_size),
             radius: theme.radius,
             icon_theme: theme.icon_theme.clone(),
+            widgets: rb.widgets.clone(),
             palette: palette(
                 &[
                     ("background", "surface", &rb.background),
@@ -755,6 +910,12 @@ impl Config {
         if !(0.05..=0.95).contains(&layout.master_ratio) {
             problems.push("layout.master_ratio must be between 0.05 and 0.95".into());
         }
+        if !(1..=10).contains(&raw.notifications.max_visible) {
+            problems.push("notifications.max_visible must be between 1 and 10".into());
+        }
+        if raw.animations.duration > 2000 {
+            problems.push("animations.duration must be at most 2000 (milliseconds)".into());
+        }
         if !(-1.0..=1.0).contains(&raw.input.pointer_speed) {
             problems.push("input.pointer_speed must be between -1.0 and 1.0".into());
         }
@@ -769,6 +930,23 @@ impl Config {
                 && (ws == 0 || ws > layout.workspaces)
             {
                 problems.push(format!("rules[{i}]: workspace {ws} does not exist"));
+            }
+            if let Some([w, h]) = rule.size
+                && (w < 1 || h < 1)
+            {
+                problems.push(format!("rules[{i}]: size must be at least [1, 1]"));
+            }
+            if rule.opacity.is_some_and(|o| !(0.1..=1.0).contains(&o)) {
+                problems.push(format!("rules[{i}]: opacity must be between 0.1 and 1.0"));
+            }
+        }
+
+        let mut workspace_labels = vec![WorkspaceLabel::default(); layout.workspaces];
+        for (key, label) in &raw.workspaces {
+            match key.parse::<usize>() {
+                Ok(n) if (1..=layout.workspaces).contains(&n) => workspace_labels[n - 1] = label.clone(),
+                Ok(n) => problems.push(format!("workspaces.{n}: there are only {} workspaces", layout.workspaces)),
+                Err(_) => problems.push(format!("workspaces.{key}: expected a workspace number")),
             }
         }
 
@@ -815,7 +993,10 @@ impl Config {
             keyboard: raw.keyboard,
             input: raw.input,
             session: raw.session,
+            animations: raw.animations,
+            notifications: raw.notifications,
             binds,
+            workspace_labels,
             rules: raw.rules,
             outputs,
         })
@@ -836,9 +1017,13 @@ impl Config {
 
 impl WindowRule {
     pub fn matches(&self, app_id: Option<&str>, title: Option<&str>) -> bool {
-        let app_ok = match &self.app_id {
-            Some(want) => app_id == Some(want.as_str()),
-            None => true,
+        let app_ok = match (&self.app_id, app_id) {
+            (Some(want), Some(id)) => match want.strip_suffix('*') {
+                Some(prefix) => id.starts_with(prefix),
+                None => id == want,
+            },
+            (Some(_), None) => false,
+            (None, _) => true,
         };
         let title_ok = match &self.title {
             Some(want) => title.is_some_and(|t| t.contains(want.as_str())),
@@ -953,6 +1138,8 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
         "move-to-monitor" => Action::MoveToMonitor(dir()?),
         "power-off-monitors" => Action::PowerOffMonitors,
         "window-switcher" => Action::WindowSwitcher(dir()?),
+        "overview" => Action::Overview,
+        "launcher" => Action::Launcher,
         "volume" => Action::Volume(match need_arg()? {
             "mute" => VolumeChange::ToggleMute,
             a => VolumeChange::Step(
@@ -998,6 +1185,8 @@ pub const ACTIONS: &[(&str, &str, &str)] = &[
         "next|prev",
         "Pick a window from a list, most recent first",
     ),
+    ("overview", "", "Show every workspace at once, or go back"),
+    ("launcher", "", "Find and start an app"),
     ("volume", "+5|-5|mute", "Change the volume by a percentage, or mute"),
     ("reload", "", "Reload the config file"),
     ("quit", "", "Exit the compositor"),
@@ -1390,20 +1579,51 @@ mod tests {
     fn rules() {
         let r = WindowRule {
             app_id: Some("mpv".into()),
-            title: None,
             floating: Some(true),
-            workspace: None,
-            output: None,
+            ..Default::default()
         };
         assert!(r.matches(Some("mpv"), Some("video.mkv")));
         assert!(!r.matches(Some("mpv2"), None));
         let r = WindowRule {
-            app_id: None,
             title: Some("Picture".into()),
-            floating: None,
-            workspace: None,
-            output: None,
+            ..Default::default()
         };
         assert!(r.matches(None, Some("Picture-in-Picture")));
+        let r = WindowRule {
+            app_id: Some("steam_app_*".into()),
+            ..Default::default()
+        };
+        assert!(r.matches(Some("steam_app_570"), None));
+        assert!(!r.matches(Some("steam"), None));
+        assert!(!r.matches(None, None));
+    }
+
+    #[test]
+    fn workspace_labels() {
+        let c = Config::parse_user("[workspaces]\n1 = { name = \"web\", icon = \"firefox\" }\n3 = { name = \"chat\" }\n")
+            .unwrap();
+        assert_eq!(c.workspace_labels.len(), 9);
+        assert_eq!(c.workspace_labels[0].name, "web");
+        assert_eq!(c.workspace_labels[0].icon, "firefox");
+        assert!(c.workspace_labels[1].is_empty());
+        assert_eq!(c.workspace_labels[2].name, "chat");
+        assert!(Config::parse_user("[workspaces]\n10 = { name = \"x\" }\n").is_err());
+        assert!(Config::parse_user("[workspaces]\nweb = { name = \"x\" }\n").is_err());
+    }
+
+    #[test]
+    fn rule_placement() {
+        let c = Config::parse_user(
+            "[[rules]]\napp_id = \"a\"\nsize = [600, 400]\nposition = \"center\"\nopacity = 0.9\n\
+             [[rules]]\napp_id = \"b\"\nposition = [10, 20]\nfocus = false\nfullscreen = true\n",
+        )
+        .unwrap();
+        assert_eq!(c.rules[0].size, Some([600, 400]));
+        assert_eq!(c.rules[0].position, Some(RulePosition::Named(NamedPosition::Center)));
+        assert_eq!(c.rules[1].position, Some(RulePosition::At([10, 20])));
+        assert_eq!(c.rules[1].focus, Some(false));
+        assert!(Config::parse_user("[[rules]]\napp_id = \"a\"\nposition = \"left\"\n").is_err());
+        assert!(Config::parse_user("[[rules]]\napp_id = \"a\"\nopacity = 0\n").is_err());
+        assert!(Config::parse_user("[[rules]]\napp_id = \"a\"\nsize = [0, 5]\n").is_err());
     }
 }

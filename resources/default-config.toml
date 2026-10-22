@@ -71,6 +71,7 @@ selected = "mix(surface, text, 0.16)"          # the chosen item
 separator = "mix(surface, text, 0.08)"         # thin dividing lines
 border_focused = "accent"                      # focused window border
 border = "#313244"                             # other window borders
+backdrop = "mix(base, #000000, 0.35)"          # behind the workspaces in the overview
 locked = "#000000"                             # lock screen, before the locker draws
 lock_failed = "#590000"                        # lock screen if the locker crashed
 
@@ -95,6 +96,12 @@ enabled = true
 position = "top"         # "top", "bottom", "left" or "right"
 height = 28              # top/bottom bar height; also the row height of a side bar
 width = 180              # left/right bar width
+# Status widgets, in this order, next to the clock (on every bar if no connected
+# monitor has the clock on): "tray" (app icons), "media" (what's playing; click to
+# pause, scroll to skip), "network", "battery", "brightness" (scroll to change)
+# and "notifications" (a bell: click for the list, right-click for do not
+# disturb). Battery and brightness only show on machines that have them.
+widgets = ["tray", "media", "network", "battery", "brightness", "notifications"]
 # font = "sans"          # defaults to [theme] font and font_size
 # font_size = 14
 
@@ -110,6 +117,9 @@ repeat_delay = 250  # milliseconds
 tap_to_click = true
 natural_scroll = false
 pointer_speed = 0.0  # -1.0 (slowest) to 1.0 (fastest)
+# Swipe with three or four fingers: left and right change workspace, up opens
+# the overview and down closes it. Other gestures (like pinch) go to apps.
+gestures = true
 
 # Bring back your apps and windows at the next start: the same monitors,
 # workspaces, tiling order, sizes and layouts. Saved a few seconds after any
@@ -119,6 +129,21 @@ restore = true    # read at startup only
 # App ids never saved or started again. A trailing * matches any ending, e.g.
 # "steam_app_*" for Steam games.
 exclude = []
+
+# Desktop notifications from apps, shown in a corner and kept in the bell's list
+# on the bar. Click one to open it (or its app's default action); right-click
+# to dismiss it.
+[notifications]
+enabled = true            # read at startup; off leaves them to another daemon (mako, dunst)
+position = "top-right"    # "top-right", "top-left", "bottom-right" or "bottom-left"
+timeout = 6               # seconds, when the app doesn't say; urgent ones stay until dismissed
+max_visible = 4           # most shown at once; the rest wait in the bell's list
+
+# Motion: switching workspaces, tiles sliding into place, the overview.
+[animations]
+enabled = true
+workspace = "slide"   # "slide", "fade" or "none"
+duration = 220        # milliseconds
 
 # Keybinds: "Modifiers+Key" = "action".
 # Modifiers: Mod, Super, Alt, Ctrl, Shift. Keys use xkb names (Return, space, a, 1, F1, ...).
@@ -144,6 +169,11 @@ exclude = []
 #   power-off-monitors        turn monitors off until the next input
 #   window-switcher next|prev pick a window from a list of all of them, most
 #                             recent first; let go of the modifier to switch
+#   launcher                  find and start an app (type, then Enter); text
+#                             that matches no app runs as a command
+#   overview                  show every workspace at once: click a window or
+#                             workspace to go there, drag windows between
+#                             workspaces; Escape (or the same key) goes back
 #   volume +5|-5|mute         change the volume by a percentage (up to 100%),
 #                             or mute; shows the level. Needs wpctl (WirePlumber)
 #   reload                    reload this file (it also reloads on save)
@@ -160,7 +190,7 @@ exclude = []
 # If you define a [binds] table, it replaces all of these defaults.
 [binds]
 "Mod+Return" = "spawn alacritty"
-"Mod+d" = "spawn fuzzel"
+"Mod+d" = "launcher"
 "Mod+Shift+q" = "close"
 "Mod+Shift+e" = "quit"
 "Mod+Shift+r" = "reload"
@@ -174,6 +204,8 @@ exclude = []
 # Hold Alt, press Tab to move through your windows, let go to switch.
 "Alt+Tab" = "window-switcher next"
 "Alt+Shift+Tab" = "window-switcher prev"
+# See every workspace at once.
+"Mod+Tab" = "overview"
 # Volume keys; hold to keep going. With Shift they move in small steps.
 "XF86AudioRaiseVolume" = "volume +5"
 "XF86AudioLowerVolume" = "volume -5"
@@ -223,17 +255,38 @@ exclude = []
 "Mod+Shift+period" = "move-to-monitor next"
 "Mod+Shift+comma" = "move-to-monitor prev"
 
-# Window rules. `app_id` must match exactly; `title` matches if it is contained
-# in the window title. Both are optional, but at least one should be set.
+# Window rules. `app_id` must match exactly (a trailing * matches any ending,
+# e.g. "steam_app_*"); `title` matches if it is contained in the window title.
+# Both are optional, but at least one should be set. When several rules match a
+# window, later ones win for anything they set. Every other key is optional:
+#   floating = true           float (or false: tile, even dialogs)
+#   workspace = 2             open on this workspace
+#   output = "DP-5"           open on this monitor (names are in the log)
+#   size = [800, 600]         size of a floating window
+#   position = "center"       where a floating window opens: "center", or
+#                             [x, y] from the top-left of the free area
+#   fullscreen = true         open fullscreen
+#   focus = false             open without taking the keyboard
+#   opacity = 0.9             0.1 (nearly see-through) to 1.0
 #
 # [[rules]]
 # app_id = "pavucontrol"
 # floating = true
+# size = [700, 500]
 #
 # [[rules]]
 # app_id = "firefox"
 # workspace = 2
-# output = "DP-5"   # open on this monitor (names are in the log)
+# output = "DP-5"
+
+# Names and icons for workspaces, shown on the bar and in the overview instead
+# of the numbers. The icon is an icon name from your icon theme or an app id.
+# Keybinds still use the numbers.
+#
+# [workspaces]
+# 1 = { name = "web", icon = "firefox" }
+# 2 = { name = "code" }
+# 3 = { icon = "discord" }
 
 # Monitors, matched by connector name (e.g. "DP-1", "HDMI-A-1", "eDP-1"). The
 # log lists each connected monitor with its name and available modes. Monitors

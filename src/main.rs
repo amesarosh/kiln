@@ -4,16 +4,21 @@ mod bar;
 mod clipboard;
 mod config;
 mod cursor;
+mod dbus;
 mod focus;
 mod grabs;
 mod handlers;
 mod icons;
 mod input;
+mod ipc;
 mod layout;
 mod menu;
+mod notifications;
+mod overview;
 mod power;
 mod render;
 mod session;
+mod status;
 mod state;
 mod switcher;
 mod text;
@@ -36,11 +41,17 @@ USAGE:
 OPTIONS:
     -c, --config <PATH>      Use this config file instead of ~/.config/wayland-time/config.toml
     -e, --exec <CMD>         Run a command once the compositor is ready (repeatable)
-    -b, --backend <NAME>     auto (default), winit (nested window) or tty (real hardware)
+    -b, --backend <NAME>     auto (default), winit (nested window), tty (real hardware) or
+                             headless (no screen, for testing; see `msg`)
     -o, --output <NAME>      tty only: light up just this monitor, e.g. DP-4 (repeatable).
                              Monitors not listed are switched off. Names are in the log.
         --check-config       Validate the config file and exit
     -h, --help               Show this help
+
+    wayland-time msg <ACTION>
+                             Run an action in the running compositor, e.g.
+                             wayland-time msg \"workspace 2\". Actions are the same as in [binds].
+
 
 Logging is controlled with RUST_LOG, e.g. RUST_LOG=debug. When running from a TTY,
 logs are also written to ~/.local/state/wayland-time/wayland-time.log.
@@ -51,6 +62,7 @@ enum BackendChoice {
     Auto,
     Winit,
     Tty,
+    Headless,
 }
 
 struct Args {
@@ -79,7 +91,8 @@ fn parse_args() -> Result<Args, String> {
                     Some("auto") => BackendChoice::Auto,
                     Some("winit") => BackendChoice::Winit,
                     Some("tty") => BackendChoice::Tty,
-                    _ => return Err("--backend must be auto, winit or tty".into()),
+                    Some("headless") => BackendChoice::Headless,
+                    _ => return Err("--backend must be auto, winit, tty or headless".into()),
                 }
             }
             "-o" | "--output" => args.outputs.push(it.next().ok_or("--output needs a monitor name")?),
@@ -98,7 +111,7 @@ fn parse_args() -> Result<Args, String> {
 fn init_logging(to_file: bool) {
     use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,usvg=error"));
     let file = to_file.then(log_file).flatten();
     let file_layer = file.map(|(f, path)| {
         eprintln!("logging to {}", path.display());
@@ -125,6 +138,30 @@ fn log_file() -> Option<(File, PathBuf)> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `wayland-time msg <action>`: talk to the running compositor and exit.
+    let mut argv = std::env::args().skip(1);
+    if argv.next().as_deref() == Some("msg") {
+        let action = argv.collect::<Vec<_>>().join(" ");
+        if action.trim().is_empty() {
+            eprintln!("usage: wayland-time msg <action>, e.g. wayland-time msg \"workspace 2\"");
+            std::process::exit(2);
+        }
+        match ipc::send(&action) {
+            Ok(reply) if reply == "ok" => return Ok(()),
+            Ok(reply) if reply.starts_with("error:") => {
+                eprintln!("{reply}");
+                std::process::exit(1);
+            }
+            Ok(reply) => {
+                println!("{reply}");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+    }
     let args = parse_args().unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
@@ -133,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let has_display = std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some();
     let nested = match args.backend {
         BackendChoice::Auto => has_display,
-        BackendChoice::Winit => true,
+        BackendChoice::Winit | BackendChoice::Headless => true,
         BackendChoice::Tty => false,
     };
     init_logging(!nested && !args.check_config);
@@ -176,10 +213,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         nested,
     );
 
-    let result = if nested {
-        backend::winit::init(&mut state, &handle)
-    } else {
-        backend::udev::init(&mut state, &handle, args.outputs)
+    let result = match args.backend {
+        BackendChoice::Headless => backend::headless::init(&mut state, &handle),
+        _ if nested => backend::winit::init(&mut state, &handle),
+        _ => backend::udev::init(&mut state, &handle, args.outputs),
     };
     if let Err(e) = result {
         tracing::error!("failed to start {} backend: {e}", if nested { "nested" } else { "tty" });
@@ -187,9 +224,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     tracing::info!("listening on WAYLAND_DISPLAY={}", state.socket_name.to_string_lossy());
 
+    let ipc_path = state.start_ipc();
     state.watch_config();
     state.arm_idle_power_off();
     state.start_clock_timer();
+    state.start_status_timer();
+    state.start_dbus();
     state.startup_commands = state.config.general.autostart.clone();
     state.startup_commands.extend(args.exec.iter().cloned());
     if state.config.general.xwayland {
@@ -211,6 +251,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = state.display_handle.flush_clients();
     })?;
 
+    if let Some(p) = ipc_path {
+        let _ = std::fs::remove_file(p);
+    }
     tracing::info!("exiting");
     Ok(())
 }

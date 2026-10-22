@@ -327,6 +327,7 @@ impl State {
                 if app_id.is_empty()
                     || e.window.toplevel().is_some_and(|t| t.parent().is_some())
                     || excluded(exclude, &app_id)
+                    || app_id == crate::state::LAUNCHER
                 {
                     continue;
                 }

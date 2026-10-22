@@ -1,5 +1,6 @@
-//! Pop-up menus drawn by the compositor: the window menu (right-click a tab in the bar) and
-//! the power menu (the power button at the end of the bar). Painted on the CPU like the bar, from the theme's font, palette and radius, and
+//! Pop-up menus drawn by the compositor: the window menu (right-click a tab in the bar), the
+//! power menu (the power button at the end of the bar), tray icon menus, and the bell's list
+//! of notifications. Painted on the CPU like the bar, from the theme's font, palette and radius, and
 //! drawn above everything except the pointer.
 //!
 //! Mouse: click an item, or press-drag-release from where the menu opened. Click elsewhere to
@@ -43,12 +44,21 @@ pub enum MenuAction {
     /// Monitor index.
     MoveToMonitor(usize),
     Power(PowerAction),
+    /// An entry of a tray icon's menu, by its id there.
+    TrayItem(i32),
+    /// Open a notification from the bell's list.
+    Notification(u32),
+    ClearNotifications,
+    ToggleDnd,
 }
 
 /// What a menu is for.
 pub enum MenuTarget {
     Window(Window),
     Power,
+    /// A tray icon's menu, by the item's id.
+    Tray(String),
+    Notifications,
 }
 
 enum Entry {
@@ -59,6 +69,8 @@ enum Entry {
         action: MenuAction,
         /// Drawn in the `urgent` color (Close).
         danger: bool,
+        /// A check item: Some(on). Drawn with a dot in front when on.
+        checked: Option<bool>,
     },
     Separator,
     /// A row of numbered buttons, one per workspace.
@@ -126,7 +138,11 @@ impl Panel {
         let text_w = entries
             .iter()
             .filter_map(|e| match e {
-                Entry::Heading(t) | Entry::Item { label: t, .. } => Some(text.width(t, theme.font_size)),
+                Entry::Heading(t) => Some(text.width(t, theme.font_size)),
+                // Check items have their dot's room in front.
+                Entry::Item { label: t, checked, .. } => {
+                    Some(text.width(t, theme.font_size) + if checked.is_some() { theme.font_size * 1.2 } else { 0.0 })
+                }
                 _ => None,
             })
             .fold(0.0f32, f32::max)
@@ -292,7 +308,9 @@ impl Panel {
                 Entry::Separator => {
                     canvas.fill_rect(rs.x + 4 * s, rs.y + rs.h / 2, rs.w - 8 * s, s, p.separator);
                 }
-                Entry::Item { label: t, danger, .. } => {
+                Entry::Item {
+                    label: t, danger, checked, ..
+                } => {
                     let hovered = self.hover == Some(Hit::Item(i));
                     if hovered {
                         let fill = if *danger { p.urgent } else { p.hover };
@@ -302,6 +320,19 @@ impl Panel {
                         (true, true) => p.on_accent,
                         (true, false) => p.urgent,
                         _ => p.text,
+                    };
+                    // Check items: a dot when on, and the label moved over to make room.
+                    let rs = match checked {
+                        Some(on) => {
+                            let d = (px * 0.45) as i32;
+                            let slot = (px * 1.2) as i32;
+                            if *on {
+                                let (cx, cy) = (rs.x + INSET * s + (slot - d) / 2, rs.y + (rs.h - d) / 2);
+                                canvas.fill_rounded_rect(cx, cy, d, d, d as f32 / 2.0, p.accent);
+                            }
+                            Rect::new(rs.x + slot, rs.y, rs.w - slot, rs.h)
+                        }
+                        None => rs,
                     };
                     label(&mut canvas, t, rs, px, color);
                 }
@@ -354,11 +385,42 @@ fn ws_buttons(row: Rect, count: usize, row_h: i32) -> Vec<Rect> {
         .collect()
 }
 
+/// A tray menu as rows: submenus become a heading with their entries under it, indented.
+fn flatten_tray_menu(nodes: &[crate::dbus::tray::MenuNode], depth: usize, out: &mut Vec<Entry>) {
+    let indent = "    ".repeat(depth);
+    for n in nodes {
+        if n.separator {
+            if !matches!(out.last(), None | Some(Entry::Separator)) {
+                out.push(Entry::Separator);
+            }
+            continue;
+        }
+        let label = format!("{indent}{}", n.label);
+        if !n.children.is_empty() {
+            out.push(Entry::Heading(label));
+            flatten_tray_menu(&n.children, depth + 1, out);
+        } else if n.enabled {
+            out.push(Entry::Item {
+                label,
+                action: MenuAction::TrayItem(n.id),
+                danger: false,
+                checked: n.toggle,
+            });
+        } else {
+            out.push(Entry::Heading(label));
+        }
+    }
+    if matches!(out.last(), Some(Entry::Separator)) {
+        out.pop();
+    }
+}
+
 fn power_entries() -> Vec<Entry> {
     let item = |label: &str, action: PowerAction| Entry::Item {
         label: label.into(),
         action: MenuAction::Power(action),
         danger: false,
+        checked: None,
     };
     vec![
         item("Lock", PowerAction::Lock),
@@ -392,11 +454,13 @@ impl State {
                 label: if floating { "Tile" } else { "Float" }.into(),
                 action: MenuAction::ToggleFloating,
                 danger: false,
+                checked: None,
             },
             Entry::Item {
                 label: if fullscreen { "Exit fullscreen" } else { "Fullscreen" }.into(),
                 action: MenuAction::ToggleFullscreen,
                 danger: false,
+                checked: None,
             },
             Entry::Separator,
             Entry::Heading("Move to workspace".into()),
@@ -419,6 +483,7 @@ impl State {
                     label: format!("Move to {name}"),
                     action: MenuAction::MoveToMonitor(i),
                     danger: false,
+                    checked: None,
                 });
             }
         }
@@ -427,6 +492,7 @@ impl State {
             label: "Close".into(),
             action: MenuAction::Close,
             danger: true,
+            checked: None,
         });
 
         let output = self.monitors[mon].output.clone();
@@ -440,6 +506,69 @@ impl State {
             return;
         };
         self.show_menu(MenuTarget::Power, output, entries, pos);
+    }
+
+    /// A tray icon's menu arrived: show it where its icon was clicked.
+    pub fn open_tray_menu(&mut self, item: &str, nodes: Vec<crate::dbus::tray::MenuNode>) {
+        let Some((wanted, pos, mon)) = self.tray_menu_request.take() else {
+            return;
+        };
+        if wanted != item || nodes.is_empty() {
+            return;
+        }
+        let Some(output) = self.monitors.get(mon).map(|m| m.output.clone()) else {
+            return;
+        };
+        let mut entries = Vec::new();
+        flatten_tray_menu(&nodes, 0, &mut entries);
+        self.show_menu(MenuTarget::Tray(item.to_string()), output, entries, pos);
+    }
+
+    /// The bell: recent notifications, do not disturb, clear all.
+    pub fn open_notifications_menu(&mut self, mon: usize, pos: Point<f64, Logical>) {
+        let Some(output) = self.monitors.get(mon).map(|m| m.output.clone()) else {
+            return;
+        };
+        let items = &self.notifications.items;
+        let mut entries = vec![Entry::Heading(if items.is_empty() {
+            "No notifications".into()
+        } else {
+            "Notifications".into()
+        })];
+        for item in items.iter().take(10) {
+            let n = &item.n;
+            let label = match (n.app_name.is_empty(), n.summary.is_empty()) {
+                (false, false) => format!("{}: {}", n.app_name, n.summary),
+                (true, _) => n.summary.clone(),
+                (false, true) => n.app_name.clone(),
+            };
+            entries.push(Entry::Item {
+                label,
+                action: MenuAction::Notification(n.id),
+                danger: false,
+                checked: None,
+            });
+        }
+        if items.len() > 10 {
+            entries.push(Entry::Heading(format!("{} more", items.len() - 10)));
+        }
+        entries.push(Entry::Separator);
+        entries.push(Entry::Item {
+            label: "Do not disturb".into(),
+            action: MenuAction::ToggleDnd,
+            danger: false,
+            checked: Some(self.notifications.dnd),
+        });
+        if !items.is_empty() {
+            entries.push(Entry::Item {
+                label: "Clear all".into(),
+                action: MenuAction::ClearNotifications,
+                danger: true,
+                checked: None,
+            });
+        }
+        self.mark_notifications_read();
+        self.show_menu(MenuTarget::Notifications, output, entries, pos);
     }
 
     /// Open a menu at the pointer, pushed back inside the monitor if it would hang off an edge.
@@ -493,7 +622,9 @@ impl State {
             MenuTarget::Window(w) => self
                 .monitor_showing(w)
                 .is_some_and(|mon| self.monitors[mon].output == m.output),
-            MenuTarget::Power => self.monitors.iter().any(|mon| mon.output == m.output),
+            MenuTarget::Power | MenuTarget::Tray(_) | MenuTarget::Notifications => {
+                self.monitors.iter().any(|mon| mon.output == m.output)
+            }
         })
     }
 
@@ -565,8 +696,15 @@ impl State {
         let Some(menu) = self.menu.take() else { return };
         self.needs_redraw = true;
         let Some(action) = menu.panel.action(hit) else { return };
-        if let MenuAction::Power(p) = action {
-            return self.power(p);
+        match (action, &menu.target) {
+            (MenuAction::Power(p), _) => return self.power(p),
+            (MenuAction::TrayItem(id), MenuTarget::Tray(item)) => {
+                return self.bus_command(crate::dbus::Command::TrayMenuClick { item: item.clone(), id });
+            }
+            (MenuAction::Notification(id), _) => return self.activate_notification(id),
+            (MenuAction::ClearNotifications, _) => return self.clear_notifications(),
+            (MenuAction::ToggleDnd, _) => return self.toggle_dnd(),
+            _ => {}
         }
         let MenuTarget::Window(w) = menu.target else { return };
         let Some(mon) = self.monitor_showing(&w) else { return };
@@ -580,7 +718,11 @@ impl State {
             MenuAction::ToggleFullscreen => self.run_action(Action::ToggleFullscreen),
             MenuAction::MoveToWorkspace(n) => self.run_action(Action::MoveToWorkspace(n + 1)),
             MenuAction::MoveToMonitor(target) => self.move_window_to_monitor(target),
-            MenuAction::Power(_) => {}
+            MenuAction::Power(_)
+            | MenuAction::TrayItem(_)
+            | MenuAction::Notification(_)
+            | MenuAction::ClearNotifications
+            | MenuAction::ToggleDnd => {}
         }
     }
 
@@ -637,11 +779,13 @@ mod tests {
                     label: "Float".into(),
                     action: MenuAction::ToggleFloating,
                     danger: false,
+                    checked: None,
                 },
                 Entry::Item {
                     label: "Fullscreen".into(),
                     action: MenuAction::ToggleFullscreen,
                     danger: false,
+                    checked: None,
                 },
                 Entry::Separator,
                 Entry::Heading("Move to workspace".into()),
@@ -654,17 +798,20 @@ mod tests {
                     label: "Move to DP-4".into(),
                     action: MenuAction::MoveToMonitor(0),
                     danger: false,
+                    checked: None,
                 },
                 Entry::Item {
                     label: "Move to HDMI-A-5".into(),
                     action: MenuAction::MoveToMonitor(2),
                     danger: false,
+                    checked: None,
                 },
                 Entry::Separator,
                 Entry::Item {
                     label: "Close".into(),
                     action: MenuAction::Close,
                     danger: true,
+                    checked: None,
                 },
             ],
         )

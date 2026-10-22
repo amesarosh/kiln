@@ -65,6 +65,8 @@ palette! {
     border_focused,
     /// Border of other windows.
     border,
+    /// Behind the workspaces in the overview.
+    backdrop,
     /// Screen shown while locked, before the locker draws.
     locked,
     /// Screen shown while locked if the locker crashed.

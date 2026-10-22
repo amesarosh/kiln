@@ -25,6 +25,8 @@ pub enum Kind {
     List(&'static str),
     Font,
     IconTheme,
+    /// Some of a fixed set of values, kept in this order: (value, label).
+    Flags(&'static [(&'static str, &'static str)]),
 }
 
 pub struct Field {
@@ -160,6 +162,29 @@ pub const APPEARANCE: &[Section] = &[
             Kind::Int(0, 20, "px"),
         )],
     },
+    Section {
+        title: "Animations",
+        note: "",
+        fields: &[
+            f(
+                &["animations", "enabled"],
+                "Animations",
+                "Workspace switches, tiles sliding into place, and the overview opening.",
+                Kind::Toggle,
+            ),
+            f(
+                &["animations", "workspace"],
+                "Switching workspace",
+                "",
+                Kind::Choice(&[
+                    ("slide", "Slide"),
+                    ("fade", "Fade"),
+                    ("none", "No animation"),
+                ]),
+            ),
+            f(&["animations", "duration"], "Speed", "How long an animation takes.", Kind::Int(50, 1000, "ms")),
+        ],
+    },
 ];
 
 pub const LAYOUT: &[Section] = &[
@@ -236,6 +261,50 @@ pub const BAR: &[Section] = &[Section {
             Kind::Int(16, 96, "px"),
         ),
         f(&["bar", "width"], "Side bar width", "", Kind::Int(40, 800, "px")),
+        f(
+            &["bar", "widgets"],
+            "Status widgets",
+            "Shown next to the clock (on every bar when no monitor has the clock). Battery and brightness only show on machines that have them.",
+            Kind::Flags(&[
+                ("tray", "Tray icons from apps"),
+                ("media", "What's playing"),
+                ("network", "Network"),
+                ("battery", "Battery"),
+                ("brightness", "Screen brightness"),
+                ("notifications", "Notifications bell"),
+            ]),
+        ),
+    ],
+}];
+
+pub const NOTIFICATIONS: &[Section] = &[Section {
+    title: "Notifications",
+    note: "Pop-ups from apps. Click one to open it, right-click to dismiss it. Missed ones wait behind the bell on the bar.",
+    fields: &[
+        at_start(f(
+            &["notifications", "enabled"],
+            "Show notifications",
+            "Off leaves them to another program, like mako or dunst.",
+            Kind::Toggle,
+        )),
+        f(
+            &["notifications", "position"],
+            "Corner",
+            "",
+            Kind::Choice(&[
+                ("top-right", "Top right"),
+                ("top-left", "Top left"),
+                ("bottom-right", "Bottom right"),
+                ("bottom-left", "Bottom left"),
+            ]),
+        ),
+        f(
+            &["notifications", "timeout"],
+            "Stay for",
+            "When the app doesn't say. Urgent ones stay until dismissed.",
+            Kind::Int(1, 60, "s"),
+        ),
+        f(&["notifications", "max_visible"], "Most at once", "", Kind::Int(1, 10, "")),
     ],
 }];
 
@@ -301,6 +370,12 @@ pub const INPUT: &[Section] = &[Section {
             "On touchpads.",
             Kind::Toggle,
         ),
+        f(
+            &["input", "gestures"],
+            "Swipe gestures",
+            "Three or four fingers: left and right change workspace, up opens the overview, down closes it.",
+            Kind::Toggle,
+        ),
     ],
 }];
 
@@ -325,7 +400,7 @@ pub const SESSION: &[Section] = &[Section {
 
 /// Every section, for searching.
 pub fn all() -> impl Iterator<Item = &'static Section> {
-    [GENERAL, APPEARANCE, LAYOUT, BAR, KEYBOARD, INPUT, SESSION]
+    [GENERAL, APPEARANCE, LAYOUT, BAR, NOTIFICATIONS, KEYBOARD, INPUT, SESSION]
         .into_iter()
         .flatten()
 }
@@ -358,6 +433,35 @@ pub fn show_field(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cac
         changed: doc.changed(path),
         restart: field.restart,
     };
+    // Flags are one toggle each, under the label.
+    if let Kind::Flags(options) = field.kind {
+        let reset = widgets::row(ui, p, info, |_| {});
+        let on = doc.str_list(path);
+        let mut changed = None;
+        for (value, label) in options {
+            let mut v = on.iter().any(|x| x == value);
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                if widgets::toggle(ui, p, &mut v).changed() {
+                    changed = Some((*value, v));
+                }
+                ui.label(wt_ui::egui::RichText::new(*label).color(wt_ui::color(p.text)));
+            });
+        }
+        if let Some((value, v)) = changed {
+            // Keep them in the given order, whatever order they were switched on in.
+            let list: Vec<&str> = options
+                .iter()
+                .map(|(o, _)| *o)
+                .filter(|o| if *o == value { v } else { on.iter().any(|x| x == o) })
+                .collect();
+            doc.set(path, toml_edit::Array::from_iter(list));
+        }
+        if reset {
+            doc.reset(path);
+        }
+        return;
+    }
     // Lists are tall, so they go under the label instead of beside it.
     if let Kind::List(hint) = field.kind {
         let reset = widgets::row(ui, p, info, |_| {});
@@ -441,7 +545,7 @@ pub fn show_field(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cac
                 doc.set(path, v);
             }
         }
-        Kind::List(_) => unreachable!(),
+        Kind::List(_) | Kind::Flags(_) => unreachable!(),
     });
     if reset {
         doc.reset(path);

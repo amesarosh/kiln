@@ -4,6 +4,7 @@ pub mod foreign_toplevel;
 mod idle;
 mod layer_shell;
 pub mod lock;
+pub mod output_management;
 mod output_power;
 pub mod pointer_lock;
 pub mod screencopy;
@@ -225,3 +226,6 @@ impl FractionalScaleHandler for State {
     }
 }
 delegate_fractional_scale!(State);
+
+smithay::delegate_presentation!(State);
+smithay::delegate_pointer_gestures!(State);

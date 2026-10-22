@@ -6,6 +6,7 @@ pub mod fields;
 pub mod monitors;
 pub mod rules;
 pub mod themes;
+pub mod workspaces;
 
 use crate::monitors::Monitor;
 
@@ -15,6 +16,7 @@ pub enum Page {
     Appearance,
     Layout,
     Bar,
+    Notifications,
     Monitors,
     Keyboard,
     Input,
@@ -29,6 +31,7 @@ impl Page {
         Page::Appearance,
         Page::Layout,
         Page::Bar,
+        Page::Notifications,
         Page::Monitors,
         Page::Keyboard,
         Page::Input,
@@ -52,6 +55,7 @@ impl Page {
             Page::Appearance => "Appearance",
             Page::Layout => "Tiling",
             Page::Bar => "Bar",
+            Page::Notifications => "Notifications",
             Page::Monitors => "Monitors",
             Page::Keyboard => "Keyboard",
             Page::Input => "Mouse and touchpad",

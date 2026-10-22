@@ -110,6 +110,7 @@ impl State {
 
     /// Locking or unlocking changes what is under the pointer and who has the keyboard.
     fn lock_changed(&mut self) {
+        self.overview_cancel();
         let pointer = self.seat.get_pointer().unwrap();
         if pointer.is_grabbed() {
             let time = self.start_time.elapsed().as_millis() as u32;

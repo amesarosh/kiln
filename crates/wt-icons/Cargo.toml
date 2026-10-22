@@ -1,0 +1,11 @@
+[package]
+name = "wt-icons"
+version = "0.1.0"
+edition = "2024"
+description = "App and symbolic icons from the freedesktop icon themes, for wayland-time and its apps"
+license = "MIT"
+
+[dependencies]
+png = "0.18"
+resvg = { version = "0.45", default-features = false }
+tracing = "0.1"

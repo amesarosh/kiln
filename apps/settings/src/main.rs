@@ -16,8 +16,8 @@ USAGE:
 
 OPTIONS:
     -c, --config <PATH>   Edit this config file instead of ~/.config/wayland-time/config.toml
-    -p, --page <NAME>     Open at a page: general, appearance, tiling, bar, monitors,
-                          keyboard, mouse, keybinds, rules or session
+    -p, --page <NAME>     Open at a page: general, appearance, tiling, bar, notifications,
+                          monitors, keyboard, mouse, keybinds, rules or session
     -h, --help            Show this help
 ";
 

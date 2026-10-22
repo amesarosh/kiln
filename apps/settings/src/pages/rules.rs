@@ -23,8 +23,9 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
     widgets::note(
         ui,
         p,
-        "A rule applies to windows whose app id matches exactly, and whose title contains the given \
-         text. Leave either empty to match any. Rules apply to windows as they open.",
+        "A rule applies to windows whose app id matches exactly (a * at the end matches any ending), \
+         and whose title contains the given text. Leave either empty to match any. Rules apply to \
+         windows as they open; when several match, later ones win.",
     );
 
     let mut remove = None;
@@ -71,7 +72,7 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                             changed: false,
                             restart: false,
                         },
-                        |ui| changed = widgets::text(ui, v, hint).changed(),
+                        |ui| changed = widgets::draft_text(ui, label, v, hint),
                     );
                     changed
                 };
@@ -142,6 +143,99 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                         }
                     },
                 );
+                widgets::divider(ui, p);
+                let pair = |key: &str| -> Option<(i64, i64)> {
+                    let a = rule.get(key)?.as_array()?;
+                    Some((a.get(0)?.as_integer()?, a.get(1)?.as_integer()?))
+                };
+                let mut size = pair("size").map_or(String::new(), |(w, h)| format!("{w}x{h}"));
+                if text_row(
+                    ui,
+                    "Size",
+                    "Width and height of a floating window",
+                    &mut size,
+                    "e.g. 800x600",
+                ) {
+                    match parse_pair(&size, 'x') {
+                        Some((w, h)) if w > 0 && h > 0 => edits.push(("size", Some(pair_value(w, h)))),
+                        _ if size.trim().is_empty() => edits.push(("size", None)),
+                        _ => {}
+                    }
+                }
+                widgets::divider(ui, p);
+                let mut position = match (rule.get("position").and_then(Item::as_str), pair("position")) {
+                    (Some(_), _) => "center".to_string(),
+                    (None, Some((x, y))) => format!("{x}, {y}"),
+                    (None, None) => String::new(),
+                };
+                if text_row(
+                    ui,
+                    "Position",
+                    "Where a floating window opens: center, or x, y from the top-left corner",
+                    &mut position,
+                    "center",
+                ) {
+                    let t = position.trim();
+                    if t.is_empty() {
+                        edits.push(("position", None));
+                    } else if t.eq_ignore_ascii_case("center") {
+                        edits.push(("position", Some("center".into())));
+                    } else if let Some((x, y)) = parse_pair(t, ',') {
+                        edits.push(("position", Some(pair_value(x, y))));
+                    }
+                }
+                let tri = |key: &str| match rule.get(key).and_then(Item::as_bool) {
+                    None => String::new(),
+                    Some(true) => "yes".into(),
+                    Some(false) => "no".into(),
+                };
+                for (key, label, help, yes, no) in [
+                    ("fullscreen", "Fullscreen", "", "Open fullscreen", "Open normally"),
+                    (
+                        "focus",
+                        "Take focus",
+                        "Whether the window takes the keyboard when it opens",
+                        "Yes",
+                        "No, open behind",
+                    ),
+                ] {
+                    widgets::divider(ui, p);
+                    let mut v = tri(key);
+                    widgets::row(
+                        ui,
+                        p,
+                        widgets::RowInfo {
+                            label,
+                            help,
+                            changed: false,
+                            restart: false,
+                        },
+                        |ui| {
+                            let opts = [("", "Don't change"), ("yes", yes), ("no", no)];
+                            if widgets::choice(ui, key, &mut v, &opts) {
+                                edits.push((key, (!v.is_empty()).then(|| (v == "yes").into())));
+                            }
+                        },
+                    );
+                }
+                widgets::divider(ui, p);
+                let mut opacity = rule.get("opacity").and_then(crate::doc::as_number).unwrap_or(1.0);
+                widgets::row(
+                    ui,
+                    p,
+                    widgets::RowInfo {
+                        label: "Opacity",
+                        help: "Below 1, you can see through the window",
+                        changed: false,
+                        restart: false,
+                    },
+                    |ui| {
+                        if widgets::slider(ui, p, &mut opacity, 0.1..=1.0, 2, "").changed() {
+                            let v = (opacity * 100.0).round() / 100.0;
+                            edits.push(("opacity", (v < 1.0).then(|| v.into())));
+                        }
+                    },
+                );
                 if app_id.is_empty() && title.is_empty() {
                     widgets::error(ui, p, "Needs an app id or a title.");
                 }
@@ -183,4 +277,17 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
         a.push(t);
         doc.touch();
     }
+}
+
+/// "800x600" or "10, 20" → the two numbers.
+fn parse_pair(s: &str, sep: char) -> Option<(i64, i64)> {
+    let (a, b) = s.split_once(sep)?;
+    Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+}
+
+fn pair_value(a: i64, b: i64) -> toml_edit::Value {
+    let mut arr = toml_edit::Array::new();
+    arr.push(a);
+    arr.push(b);
+    arr.into()
 }

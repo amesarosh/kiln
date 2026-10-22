@@ -275,6 +275,24 @@ pub fn text(ui: &mut Ui, value: &mut String, hint: &str) -> Response {
     ui.add(padded(ui, edit))
 }
 
+/// A text field for values that only make sense once fully typed (like "800x600"). It keeps
+/// its own text while focused, so half-typed input isn't replaced by the saved value each
+/// frame. Returns true when the text changed; `value` then holds it.
+pub fn draft_text(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, value: &mut String, hint: &str) -> bool {
+    let id = ui.id().with(id);
+    let mut draft = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| value.clone());
+    let r = text(ui, &mut draft, hint);
+    if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, draft.clone()));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(id));
+    }
+    if r.changed() {
+        *value = draft;
+    }
+    r.changed()
+}
+
 /// A text field as tall as the other controls, with its text clear of the rounded ends.
 pub fn padded<'t>(ui: &Ui, edit: egui::TextEdit<'t>) -> egui::TextEdit<'t> {
     let h = ui.spacing().interact_size.y;

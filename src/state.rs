@@ -118,6 +118,11 @@ pub struct State {
     #[allow(dead_code)]
     pub cursor_shape_state: smithay::wayland::cursor_shape::CursorShapeManagerState,
     pub activation_state: smithay::wayland::xdg_activation::XdgActivationState,
+    /// Tells apps (video players, games) exactly when their frames reached the screen.
+    #[allow(dead_code)]
+    pub presentation_state: smithay::wayland::presentation::PresentationState,
+    /// The clock presentation times are given in.
+    pub clock: smithay::utils::Clock<smithay::utils::Monotonic>,
     /// Set when keyboard focus changes; the main loop then re-checks pointer constraints.
     pub keyboard_focus_moved: bool,
     /// The X11 window manager, once Xwayland is running.
@@ -150,6 +155,21 @@ pub struct State {
     pub clipboard: crate::clipboard::Keeper,
     /// Saving the open windows, and bringing back the last session's.
     pub session: crate::session::Session,
+    /// Every workspace at once, while open.
+    pub overview: Option<crate::overview::Overview>,
+    /// A touchpad swipe in progress, and whether it's ours or an app's.
+    pub swipe: Option<crate::input::Swipe>,
+    /// Lets apps (browsers, image viewers) get pinch and swipe gestures.
+    #[allow(dead_code)]
+    pub pointer_gestures_state: smithay::wayland::pointer_gestures::PointerGesturesState,
+    /// The session bus: tray icons, media players, and the notification daemon.
+    pub bus: crate::dbus::Bus,
+    /// Notifications on screen and in the bell's list.
+    pub notifications: crate::notifications::Notifications,
+    /// Battery, network and brightness for the bar.
+    pub status: crate::status::Status,
+    /// A tray menu asked for, and where to show it once it arrives: (item, pointer, monitor).
+    pub tray_menu_request: Option<(String, Point<f64, Logical>, usize)>,
     /// The Alt+Tab switcher, while open.
     pub switcher: Option<crate::switcher::Switcher>,
     /// Volume keys and the panel that shows the level.
@@ -173,6 +193,11 @@ pub struct State {
     pub lock_fill_ids: [Id; 2],
 
     pub config: Config,
+    /// Monitor settings changed at runtime by tools like kanshi or wdisplays. They sit on top
+    /// of `[[outputs]]` until the config's monitor settings change.
+    pub output_overrides: Vec<crate::config::OutputConfig>,
+    /// Clients managing monitors (wlr-output-management).
+    pub output_management: crate::handlers::output_management::OutputManagement,
     pub bar: Bar,
     pub config_path: Option<PathBuf>,
     /// Running inside another desktop (winit backend) rather than on real hardware.
@@ -246,8 +271,13 @@ impl State {
         let relative_pointer_state = smithay::wayland::relative_pointer::RelativePointerManagerState::new::<Self>(&dh);
         let activation_state = smithay::wayland::xdg_activation::XdgActivationState::new::<Self>(&dh);
         let cursor_shape_state = smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
+        let pointer_gestures_state = smithay::wayland::pointer_gestures::PointerGesturesState::new::<Self>(&dh);
+        let clock = smithay::utils::Clock::<smithay::utils::Monotonic>::new();
+        let presentation_state =
+            smithay::wayland::presentation::PresentationState::new::<Self>(&dh, clock.id() as u32);
         Self::create_output_power_global(&dh);
         Self::create_screencopy_global(&dh);
+        Self::create_output_management_global(&dh);
         let foreign_toplevels = crate::handlers::foreign_toplevel::ForeignToplevels::new(&dh);
 
         let mut seat_state = SeatState::new();
@@ -301,6 +331,8 @@ impl State {
             relative_pointer_state,
             cursor_shape_state,
             activation_state,
+            presentation_state,
+            clock,
             keyboard_focus_moved: false,
             xwm: None,
             xdisplay: None,
@@ -320,6 +352,13 @@ impl State {
             foreign_toplevels,
             menu: None,
             switcher: None,
+            bus: Default::default(),
+            notifications: Default::default(),
+            status: Default::default(),
+            tray_menu_request: None,
+            swipe: None,
+            pointer_gestures_state,
+            overview: None,
             volume: Default::default(),
             focus_history: Vec::new(),
             ui_text: None,
@@ -327,6 +366,8 @@ impl State {
             screencopy_watch: Vec::new(),
             session: crate::session::Session::new(config.session.restore, nested),
             config,
+            output_overrides: Vec::new(),
+            output_management: Default::default(),
             bar,
             config_path,
             nested,
@@ -471,6 +512,8 @@ impl State {
         if self.switcher.as_ref().is_some_and(|s| s.on_output(output)) {
             self.switcher = None;
         }
+        // Its cards are laid out for the old set of monitors.
+        self.overview_cancel();
         if self.volume.osd.as_ref().is_some_and(|o| o.on_output(output)) {
             self.volume.osd = None;
         }
@@ -515,7 +558,7 @@ impl State {
         let mut placed: Vec<(Output, Rectangle<i32, Logical>)> = Vec::new();
         let mut auto = Vec::new();
         for o in outputs {
-            match self.config.output(&o.name()).position {
+            match self.output_config(&o.name()).position {
                 Some((x, y)) => {
                     let rect = Rectangle::new((x, y).into(), size(&o));
                     if let Some((other, _)) = placed.iter().find(|(_, r)| r.overlaps(rect)) {
@@ -556,6 +599,16 @@ impl State {
         self.arrange();
         self.refocus();
         self.needs_redraw = true;
+        self.refresh_output_heads();
+    }
+
+    /// Settings for a monitor: a runtime change from a monitor tool, else the config's.
+    pub fn output_config(&self, name: &str) -> crate::config::OutputConfig {
+        self.output_overrides
+            .iter()
+            .find(|o| o.name.eq_ignore_ascii_case(name))
+            .cloned()
+            .unwrap_or_else(|| self.config.output(name))
     }
 
     /// Put the pointer at `pos` and tell whatever surface is now under it.
@@ -689,26 +742,21 @@ impl State {
         self.pending_windows.retain(|w| w != &window);
 
         let (app_id, title) = toplevel_ids(&window);
-        let mut floating = false;
+        let rule = self.rules_for(app_id.as_deref(), title.as_deref());
+        // The launcher always floats in the middle of the screen.
+        let mut floating = rule.floating.unwrap_or(false) || app_id.as_deref() == Some(LAUNCHER);
         let mut target_mon = self.active_mon;
-        let mut target_ws = None;
-        for rule in &self.config.rules {
-            if rule.matches(app_id.as_deref(), title.as_deref()) {
-                if let Some(f) = rule.floating {
-                    floating = f;
-                }
-                if let Some(n) = rule.workspace {
-                    target_ws = Some(n - 1);
-                }
-                if let Some(name) = &rule.output
-                    && let Some(i) = self
-                        .monitors
-                        .iter()
-                        .position(|m| m.output.name().eq_ignore_ascii_case(name))
-                {
-                    target_mon = i;
-                }
-            }
+        let mut target_ws = rule.workspace.map(|n| n - 1);
+        if let Some(name) = &rule.output
+            && let Some(i) = self
+                .monitors
+                .iter()
+                .position(|m| m.output.name().eq_ignore_ascii_case(name))
+        {
+            target_mon = i;
+        }
+        if let Some(o) = rule.opacity {
+            set_window_opacity(&window, o);
         }
         // Dialogs and fixed-size windows float.
         if !floating && let Some(t) = window.toplevel() {
@@ -732,15 +780,22 @@ impl State {
         let at_master = self.config.general.new_window == NewWindow::Master;
         // Wayland windows are centered once they pick a size (see on_window_commit). X11 windows
         // already have one.
-        let float_rect = floating.then(|| {
-            match (
-                window.x11_surface(),
-                self.monitors.get(target_mon).and(self.work_area(target_mon)),
-            ) {
-                (Some(x), Some(area)) => x11_float_rect(x, area),
-                _ => Rect::new(0, 0, 0, 0),
+        let area = self.monitors.get(target_mon).and(self.work_area(target_mon));
+        let float_rect = floating.then(|| match (window.x11_surface(), area, rule.size) {
+            // A size from a rule: placed now, and the client is told to use it.
+            (_, Some(area), Some([w, h])) => place_floating(area, (w, h), rule.position),
+            (Some(x), Some(area), None) => {
+                let r = x11_float_rect(x, area);
+                place_floating(area, (r.w, r.h), rule.position)
             }
+            _ => Rect::new(0, 0, 0, 0),
         });
+        // A Wayland window placed by a rule once it has picked its own size (see on_window_commit).
+        if float_rect.is_some_and(|r| r.w == 0) && rule.position.is_some() {
+            window
+                .user_data()
+                .insert_if_missing(|| RulePlacement(std::cell::Cell::new(rule.position)));
+        }
         let float_rect = match &restored {
             Some(p) => p.floating,
             None => float_rect,
@@ -779,7 +834,19 @@ impl State {
                     t.with_pending_state(|s| s.size = Some((r.w, r.h).into()));
                 }
             }
-            _ => ws.add(window.clone(), at_master, float_rect),
+            _ => {
+                let focus_before = ws.focus.clone();
+                ws.add(window.clone(), at_master, float_rect);
+                if rule.fullscreen == Some(true) {
+                    ws.fullscreen = Some(window.clone());
+                }
+                if rule.focus == Some(false) && focus_before.is_some() {
+                    ws.focus = focus_before;
+                }
+                if let (Some(t), Some(r)) = (window.toplevel(), float_rect.filter(|r| r.w > 0)) {
+                    t.with_pending_state(|s| s.size = Some((r.w, r.h).into()));
+                }
+            }
         }
 
         if let Some(t) = window.toplevel() {
@@ -824,12 +891,8 @@ impl State {
         };
         if let Some(rect) = &mut entry.floating {
             if rect.w == 0 && size.w > 0 {
-                *rect = Rect::new(
-                    area.loc.x + (area.size.w - size.w) / 2,
-                    area.loc.y + (area.size.h - size.h) / 2,
-                    size.w,
-                    size.h,
-                );
+                let position = window.user_data().get::<RulePlacement>().and_then(|p| p.0.take());
+                *rect = place_floating(area, (size.w, size.h), position);
                 if shown {
                     self.arrange();
                 }
@@ -979,6 +1042,12 @@ impl State {
             return;
         }
 
+        // The overview takes the keys while it's open.
+        if self.overview_holds_keyboard() {
+            keyboard.set_focus(self, None, serial);
+            return;
+        }
+
         // An exclusive layer (launcher, lock screen) always wins.
         if let Some(surface) = self.exclusive_layer() {
             self.focused_layer = Some(surface.clone());
@@ -1073,8 +1142,8 @@ impl State {
             )
             .map(|(s, p)| (s, (p + output_loc).to_f64()));
         }
-        // The compositor's own menu and switcher are above everything.
-        if self.over_menu(pos) || self.over_switcher(pos) {
+        // The compositor's own menu, switcher, overview and notifications are above everything.
+        if self.over_menu(pos) || self.over_switcher(pos) || self.overview_open() || self.over_notification(pos) {
             return None;
         }
         // Before taking the layer map lock: over_bar() locks it too, and the lock isn't re-entrant.
@@ -1143,6 +1212,9 @@ impl State {
         self.close_menu();
         if !matches!(action, Action::WindowSwitcher(_)) {
             self.switcher_cancel();
+        }
+        if !matches!(action, Action::Overview) {
+            self.overview_cancel();
         }
         match action {
             Action::Spawn(cmd) => self.spawn(&cmd),
@@ -1224,6 +1296,8 @@ impl State {
             Action::PowerOffMonitors => self.set_all_monitors_power(false),
             Action::WindowSwitcher(dir) => self.window_switcher(dir),
             Action::Volume(change) => self.change_volume(change),
+            Action::Overview => self.toggle_overview(),
+            Action::Launcher => self.toggle_launcher(),
         }
     }
 
@@ -1235,10 +1309,14 @@ impl State {
         if idx >= m.workspaces.len() || idx == m.active_ws {
             return;
         }
-        m.active_ws = idx;
+        let anim = self.begin_workspace_switch(self.active_mon);
+        self.monitors[self.active_mon].active_ws = idx;
         self.focused_layer = None;
         self.arrange();
         self.refocus();
+        if let Some(a) = anim {
+            self.finish_workspace_switch(a, idx);
+        }
     }
 
     fn move_to_workspace(&mut self, idx: usize) {
@@ -1290,6 +1368,9 @@ impl State {
             .env("XDG_CURRENT_DESKTOP", "wayland-time")
             .env("XDG_DATA_DIRS", xdg_data_dirs())
             .stdin(Stdio::null());
+        if let Some(sock) = crate::ipc::socket_path(&self.socket_name.to_string_lossy()) {
+            command.env("WAYLAND_TIME_SOCKET", sock);
+        }
         // Never hand out the host's DISPLAY: X11 apps would open on another desktop.
         match self.xdisplay {
             Some(n) => command.env("DISPLAY", format!(":{n}")),
@@ -1378,6 +1459,14 @@ impl State {
                 ws.master_count = config.layout.master_count;
             }
         }
+        if config.workspace_labels != self.config.workspace_labels {
+            let labels = &config.workspace_labels;
+            for list in self.monitors.iter_mut().map(|m| &mut m.workspaces).chain([&mut self.parked]) {
+                for (i, ws) in list.iter_mut().enumerate() {
+                    ws.label = labels.get(i).cloned().unwrap_or_default();
+                }
+            }
+        }
         if layout_changed {
             for m in &mut self.monitors {
                 let layout = config.layout.default_for(&m.output.name());
@@ -1391,6 +1480,10 @@ impl State {
             self.bar.reconfigure(&config.bar);
         }
         let outputs_changed = config.outputs != self.config.outputs;
+        // Editing the monitors in the config file takes over from changes made by tools.
+        if outputs_changed {
+            self.output_overrides.clear();
+        }
         let idle_changed = config.general.monitors_off_after != self.config.general.monitors_off_after;
         self.config = config;
         if idle_changed {
@@ -1508,6 +1601,80 @@ impl State {
     }
 }
 
+impl State {
+    /// Every rule matching a window, merged in order: later rules win where they set something.
+    fn rules_for(&self, app_id: Option<&str>, title: Option<&str>) -> crate::config::WindowRule {
+        let mut out = crate::config::WindowRule::default();
+        for r in self.config.rules.iter().filter(|r| r.matches(app_id, title)) {
+            macro_rules! take {
+                ($($f:ident),*) => { $( if r.$f.is_some() { out.$f = r.$f.clone(); } )* };
+            }
+            take!(floating, workspace, output, size, position, fullscreen, focus, opacity);
+        }
+        out
+    }
+}
+
+/// The launcher's app id (and program name).
+pub const LAUNCHER: &str = "wayland-time-launcher";
+
+impl State {
+    /// The `launcher` action: open it, or close it if it's open.
+    pub fn toggle_launcher(&mut self) {
+        let open = self
+            .all_workspaces()
+            .flat_map(|ws| ws.entries.iter())
+            .find(|e| toplevel_ids(&e.window).0.as_deref() == Some(LAUNCHER))
+            .map(|e| e.window.clone());
+        match open {
+            Some(w) => close_window(&w),
+            None => self.spawn(LAUNCHER),
+        }
+    }
+
+    /// The launcher has the keyboard: pointer movement shouldn't take it away.
+    pub fn launcher_focused(&self) -> bool {
+        self.ws().focus.as_ref().is_some_and(|w| toplevel_ids(w).0.as_deref() == Some(LAUNCHER))
+    }
+}
+
+/// A rule's position for a floating Wayland window, used once it has picked its size.
+struct RulePlacement(std::cell::Cell<Option<crate::config::RulePosition>>);
+
+/// Where a floating window of `size` goes in `area`: at a rule's position, or centered.
+/// The size is kept within the area.
+fn place_floating(
+    area: Rectangle<i32, Logical>,
+    size: (i32, i32),
+    position: Option<crate::config::RulePosition>,
+) -> Rect {
+    use crate::config::RulePosition;
+    let (w, h) = (size.0.clamp(1, area.size.w.max(1)), size.1.clamp(1, area.size.h.max(1)));
+    let (x, y) = match position {
+        Some(RulePosition::At([x, y])) => (
+            area.loc.x + x.clamp(0, (area.size.w - w).max(0)),
+            area.loc.y + y.clamp(0, (area.size.h - h).max(0)),
+        ),
+        Some(RulePosition::Named(_)) | None => (
+            area.loc.x + (area.size.w - w) / 2,
+            area.loc.y + (area.size.h - h) / 2,
+        ),
+    };
+    Rect::new(x, y, w, h)
+}
+
+/// How see-through a window is drawn, from a rule.
+struct WindowOpacity(f32);
+
+fn set_window_opacity(w: &Window, opacity: f32) {
+    w.user_data().insert_if_missing(|| WindowOpacity(opacity.clamp(0.1, 1.0)));
+}
+
+/// 1.0 unless a rule made the window see-through.
+pub fn window_opacity(w: &Window) -> f32 {
+    w.user_data().get::<WindowOpacity>().map_or(1.0, |o| o.0)
+}
+
 /// Ask a window to close.
 pub fn close_window(w: &Window) {
     if let Some(t) = w.toplevel() {
@@ -1593,7 +1760,9 @@ fn resize_workspaces(list: &mut Vec<Workspace<Window>>, want: usize, config: &Co
         }
     }
     while list.len() < want {
-        list.push(new_workspace(config));
+        let mut ws = new_workspace(config);
+        ws.label = config.workspace_labels.get(list.len()).cloned().unwrap_or_default();
+        list.push(ws);
     }
 }
 
@@ -1610,7 +1779,13 @@ fn shift_floating(list: &mut [Workspace<Window>], by: (i32, i32)) {
 }
 
 fn make_workspaces(config: &Config) -> Vec<Workspace<Window>> {
-    (0..config.layout.workspaces).map(|_| new_workspace(config)).collect()
+    (0..config.layout.workspaces)
+        .map(|i| {
+            let mut ws = new_workspace(config);
+            ws.label = config.workspace_labels.get(i).cloned().unwrap_or_default();
+            ws
+        })
+        .collect()
 }
 
 fn init_wayland_listener(display: Display<State>, handle: &LoopHandle<'static, State>) -> OsString {
@@ -1654,34 +1829,7 @@ impl ClientData for ClientState {
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
 }
 
-/// `$XDG_DATA_DIRS` for spawned clients, so launchers find Flatpak and Snap apps.
-/// Starts from the inherited value (or the spec default) and appends any missing dirs.
-pub fn xdg_data_dirs() -> String {
-    let inherited = std::env::var("XDG_DATA_DIRS").unwrap_or_default();
-    let mut dirs: Vec<String> = if inherited.is_empty() {
-        vec!["/usr/local/share".into(), "/usr/share".into()]
-    } else {
-        inherited
-            .split(':')
-            .filter(|d| !d.is_empty())
-            .map(String::from)
-            .collect()
-    };
-    let mut extra = vec![
-        "/var/lib/flatpak/exports/share".to_string(),
-        "/var/lib/snapd/desktop".to_string(),
-    ];
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = home.to_string_lossy();
-        extra.insert(0, format!("{home}/.local/share/flatpak/exports/share"));
-    }
-    for dir in extra {
-        if !dirs.contains(&dir) {
-            dirs.push(dir);
-        }
-    }
-    dirs.join(":")
-}
+pub use wt_icons::xdg_data_dirs;
 
 /// Portals that were already running (say, from an earlier login) keep the environment
 /// they started with, so a stale XDG_CURRENT_DESKTOP means no screen sharing. Restart the

@@ -45,7 +45,7 @@ use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 
 use super::Backend;
 use crate::{
-    config::{Config, ModeSpec},
+    config::ModeSpec,
     cursor::Cursor,
     render::{self, CursorDraw, OutputElement},
     state::State,
@@ -56,6 +56,8 @@ const COLOR_FORMATS: [Fourcc; 2] = [Fourcc::Abgr8888, Fourcc::Argb8888];
 
 type Allocator = GbmAllocator<DrmDeviceFd>;
 type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
+/// Carried with each queued frame, and answered when it reaches the screen.
+type Feedback = Option<smithay::desktop::utils::OutputPresentationFeedback>;
 
 pub struct UdevData {
     session: LibSeatSession,
@@ -72,7 +74,7 @@ pub struct UdevData {
 struct Gpu {
     node: DrmNode,
     renderer: GlesRenderer,
-    outputs: DrmOutputManager<Allocator, Exporter, (), DrmDeviceFd>,
+    outputs: DrmOutputManager<Allocator, Exporter, Feedback, DrmDeviceFd>,
     scanner: DrmScanner,
     surfaces: HashMap<crtc::Handle, Surface>,
     _drm_token: RegistrationToken,
@@ -82,7 +84,7 @@ struct Surface {
     output: Output,
     connector: connector::Handle,
     mode: drm::control::Mode,
-    drm_output: DrmOutput<Allocator, Exporter, (), DrmDeviceFd>,
+    drm_output: DrmOutput<Allocator, Exporter, Feedback, DrmDeviceFd>,
     global: GlobalId,
     /// A frame is queued and we're waiting for vblank before rendering again.
     waiting_vblank: bool,
@@ -274,8 +276,8 @@ fn device_added(
         .create_global_with_default_feedback::<State>(&state.display_handle, &feedback);
     state.dmabuf_global = Some(global);
 
-    let token = handle.insert_source(notifier, move |event, _, state| match event {
-        DrmEvent::VBlank(crtc) => frame_finished(state, crtc),
+    let token = handle.insert_source(notifier, move |event, metadata, state| match event {
+        DrmEvent::VBlank(crtc) => frame_finished(state, crtc, event_time(metadata)),
         DrmEvent::Error(e) => tracing::error!("DRM error: {e}"),
     })?;
 
@@ -332,17 +334,18 @@ fn connector_name(info: &connector::Info) -> String {
 
 /// Whether a connected monitor should be lit. Never all of them off: if the config disables
 /// every connected monitor, the first one by name stays on.
-fn wants_enabled(u: &UdevData, config: &Config, name: &str) -> bool {
+fn wants_enabled(state: &State, name: &str) -> bool {
+    let Some(u) = udev_data(state) else { return false };
     if !u.only_outputs.is_empty() && !u.only_outputs.iter().any(|n| n.eq_ignore_ascii_case(name)) {
         return false;
     }
-    if config.output(name).enabled {
+    if state.output_config(name).enabled {
         return true;
     }
     let Some(gpu) = &u.gpu else { return false };
     let mut connected: Vec<String> = gpu.scanner.crtcs().map(|(info, _)| connector_name(info)).collect();
     connected.sort();
-    let all_off = connected.iter().all(|n| !config.output(n).enabled);
+    let all_off = connected.iter().all(|n| !state.output_config(n).enabled);
     all_off && connected.first().is_some_and(|n| n == name)
 }
 
@@ -385,6 +388,75 @@ fn pick_mode(info: &connector::Info, want: Option<ModeSpec>) -> Option<drm::cont
     }
 }
 
+/// Every connected monitor, lit or not, for monitor setup tools.
+pub fn heads(state: &State) -> Vec<crate::handlers::output_management::HeadInfo> {
+    use crate::handlers::output_management::{HeadInfo, HeadMode};
+    let Some(gpu) = udev_data(state).and_then(|u| u.gpu.as_ref()) else {
+        return Vec::new();
+    };
+    let mut heads: Vec<HeadInfo> = gpu
+        .scanner
+        .crtcs()
+        .map(|(info, crtc)| {
+            let name = connector_name(info);
+            // Monitors list some modes more than once (with different flags); show each once.
+            let mut modes: Vec<(HeadMode, drm::control::Mode)> = Vec::new();
+            for m in info.modes() {
+                let wl = WlMode::from(*m);
+                let hm = HeadMode {
+                    width: wl.size.w,
+                    height: wl.size.h,
+                    refresh: wl.refresh,
+                    preferred: m.mode_type().contains(ModeTypeFlags::PREFERRED),
+                };
+                match modes.iter_mut().find(|(x, _)| (x.width, x.height, x.refresh) == (hm.width, hm.height, hm.refresh)) {
+                    Some((x, _)) => x.preferred |= hm.preferred,
+                    None => modes.push((hm, *m)),
+                }
+            }
+            let surface = gpu.surfaces.get(&crtc);
+            let current = surface.and_then(|s| {
+                let wl = WlMode::from(s.mode);
+                modes
+                    .iter()
+                    .position(|(x, _)| (x.width, x.height, x.refresh) == (wl.size.w, wl.size.h, wl.refresh))
+            });
+            let (w, h) = info.size().unwrap_or((0, 0));
+            let (position, transform, scale) = match surface {
+                Some(s) => {
+                    let loc = s.output.current_location();
+                    (
+                        (loc.x, loc.y),
+                        s.output.current_transform(),
+                        s.output.current_scale().fractional_scale(),
+                    )
+                }
+                None => {
+                    let cfg = state.output_config(&name);
+                    (
+                        cfg.position.unwrap_or_default(),
+                        crate::config::smithay_transform(cfg.transform),
+                        cfg.scale,
+                    )
+                }
+            };
+            HeadInfo {
+                description: if w > 0 { format!("{name} ({w}x{h} mm)") } else { name.clone() },
+                name,
+                physical_size: (w as i32, h as i32),
+                modes: modes.into_iter().map(|(m, _)| m).collect(),
+                enabled: surface.is_some(),
+                current,
+                position,
+                transform,
+                scale,
+            }
+        })
+        .collect();
+    heads.sort_by(|a, b| a.name.cmp(&b.name));
+    heads
+}
+
 fn describe_modes(info: &connector::Info) -> String {
     let mut seen = Vec::new();
     for m in info.modes() {
@@ -398,8 +470,7 @@ fn describe_modes(info: &connector::Info) -> String {
 }
 
 /// Push scale and rotation from the config onto an output.
-fn apply_scale_transform(output: &Output, config: &Config) {
-    let cfg = config.output(&output.name());
+fn apply_scale_transform(output: &Output, cfg: &crate::config::OutputConfig) {
     output.change_current_state(
         None,
         Some(crate::config::smithay_transform(cfg.transform)),
@@ -424,14 +495,13 @@ pub fn apply_output_config(state: &mut State) {
         .collect();
 
     for (crtc, name) in lit {
-        let config = state.config.clone();
-        let u = udev_data_mut(state).unwrap();
-        if !wants_enabled(u, &config, &name) {
+        let cfg = state.output_config(&name);
+        if !wants_enabled(state, &name) {
             tracing::info!("{name}: disabled in config");
             remove_surface(state, crtc);
             continue;
         }
-        let gpu = u.gpu.as_mut().unwrap();
+        let gpu = udev_data_mut(state).unwrap().gpu.as_mut().unwrap();
         let Some(info) = gpu
             .surfaces
             .get(&crtc)
@@ -441,7 +511,7 @@ pub fn apply_output_config(state: &mut State) {
             continue;
         };
         let surface = gpu.surfaces.get_mut(&crtc).unwrap();
-        if let Some(mode) = pick_mode(&info, config.output(&name).mode)
+        if let Some(mode) = pick_mode(&info, cfg.mode)
             && mode != surface.mode
         {
             let wl = WlMode::from(mode);
@@ -465,11 +535,11 @@ pub fn apply_output_config(state: &mut State) {
             }
         }
         let output = surface.output.clone();
-        apply_scale_transform(&output, &config);
+        apply_scale_transform(&output, &cfg);
     }
 
     for (info, crtc) in dark {
-        let enable = udev_data(state).is_some_and(|u| wants_enabled(u, &state.config, &connector_name(&info)));
+        let enable = wants_enabled(state, &connector_name(&info));
         if enable {
             connector_connected(state, info, crtc);
         }
@@ -481,10 +551,10 @@ pub fn apply_output_config(state: &mut State) {
 fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc::Handle) {
     let name = connector_name(&connector);
     tracing::info!("{name}: connected, modes: {}", describe_modes(&connector));
-    if !udev_data(state).is_some_and(|u| wants_enabled(u, &state.config, &name)) {
+    if !wants_enabled(state, &name) {
         return tracing::info!("{name}: left off (disabled in config or not listed in --output)");
     }
-    let cfg = state.config.output(&name);
+    let cfg = state.output_config(&name);
     let Some(drm_mode) = pick_mode(&connector, cfg.mode) else {
         return tracing::warn!("{name}: no usable modes");
     };
@@ -662,15 +732,38 @@ pub fn render_all(state: &mut State) {
     }
 }
 
-fn frame_finished(state: &mut State, crtc: crtc::Handle) {
+/// When a frame reached the screen and its sequence number, from the kernel if it says, else now.
+fn event_time(metadata: &mut Option<smithay::backend::drm::DrmEventMetadata>) -> (Option<std::time::Duration>, u64) {
+    match metadata {
+        Some(m) => match m.time {
+            smithay::backend::drm::DrmEventTime::Monotonic(t) => (Some(t), m.sequence as u64),
+            smithay::backend::drm::DrmEventTime::Realtime(_) => (None, m.sequence as u64),
+        },
+        None => (None, 0),
+    }
+}
+
+fn frame_finished(state: &mut State, crtc: crtc::Handle, (when, seq): (Option<std::time::Duration>, u64)) {
+    let now = std::time::Duration::from(state.clock.now());
     let Some(surface) = udev_data_mut(state)
         .and_then(|u| u.gpu.as_mut())
         .and_then(|g| g.surfaces.get_mut(&crtc))
     else {
         return;
     };
-    if let Err(e) = surface.drm_output.frame_submitted() {
-        tracing::warn!("frame submit error: {e}");
+    match surface.drm_output.frame_submitted() {
+        Ok(Some(Some(mut feedback))) => {
+            use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
+            // A kernel timestamp is the moment of the flip, taken by the hardware.
+            let (time, flags) = match when {
+                Some(t) => (t, Kind::Vsync | Kind::HwClock | Kind::HwCompletion),
+                None => (now, Kind::Vsync),
+            };
+            let refresh = render::refresh_of(&surface.output);
+            feedback.presented::<_, smithay::utils::Monotonic>(time, refresh, seq, flags);
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("frame submit error: {e}"),
     }
     surface.waiting_vblank = false;
     let redraw = std::mem::take(&mut surface.redraw_after_vblank);
@@ -716,7 +809,10 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
                 .render_frame(&mut gpu.renderer, &elements, clear, FrameFlags::DEFAULT)
             {
                 // Only flip when the frame differs; an idle screen stays untouched.
-                Ok(result) if !result.is_empty => match surface.drm_output.queue_frame(()) {
+                Ok(result) if !result.is_empty => match surface
+                    .drm_output
+                    .queue_frame(Some(render::take_presentation_feedback(state, output, &result.states)))
+                {
                     Ok(()) => {
                         damaged = true;
                         surface.waiting_vblank = true;

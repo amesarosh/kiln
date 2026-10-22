@@ -66,7 +66,7 @@ fn layout_outputs(state: &mut State, outputs: &[Output], window: Size<i32, Physi
             size: (width, window.h).into(),
             refresh: 60_000,
         };
-        let scale = state.config.output(&output.name()).scale;
+        let scale = state.output_config(&output.name()).scale;
         output.change_current_state(Some(mode), None, Some(Scale::Fractional(scale)), None);
         output.set_preferred(mode);
         state.move_monitor(output, (logical_x, 0).into());
@@ -152,6 +152,35 @@ impl WinitData {
 
     pub fn renderer(&mut self) -> &mut GlesRenderer {
         self.backend.renderer()
+    }
+
+    /// The window's slices, each with the one mode the window gives it.
+    pub fn heads(&self, state: &State) -> Vec<crate::handlers::output_management::HeadInfo> {
+        use crate::handlers::output_management::{HeadInfo, HeadMode};
+        self.outputs
+            .iter()
+            .map(|o| {
+                let mode = o.current_mode().map(|m| HeadMode {
+                    width: m.size.w,
+                    height: m.size.h,
+                    refresh: m.refresh,
+                    preferred: true,
+                });
+                let loc = state.space.output_geometry(o).map(|g| g.loc).unwrap_or_default();
+                HeadInfo {
+                    name: o.name(),
+                    description: "wayland-time nested window".into(),
+                    physical_size: (0, 0),
+                    modes: mode.into_iter().collect(),
+                    enabled: true,
+                    current: mode.map(|_| 0),
+                    position: (loc.x, loc.y),
+                    // The window's own flip isn't the monitor's rotation.
+                    transform: Transform::Normal,
+                    scale: o.current_scale().fractional_scale(),
+                }
+            })
+            .collect()
     }
 }
 
@@ -265,6 +294,7 @@ fn render(state: &mut State) {
     };
     let age = data.backend.buffer_age().unwrap_or(0);
     let clear = state.config.decoration.background;
+    let mut feedback = Vec::new();
 
     let rendered = match data.backend.bind() {
         Ok((renderer, mut framebuffer)) => {
@@ -284,7 +314,12 @@ fn render(state: &mut State) {
                 .damage_tracker
                 .render_output(renderer, &mut framebuffer, age, &elements, clear)
             {
-                Ok(result) => result.damage.cloned(),
+                Ok(result) => {
+                    for output in &data.outputs {
+                        feedback.push(render::take_presentation_feedback(state, output, &result.states));
+                    }
+                    result.damage.cloned()
+                }
                 Err(e) => {
                     tracing::warn!("render failed: {e:?}");
                     None
@@ -302,6 +337,16 @@ fn render(state: &mut State) {
         && let Err(e) = data.backend.submit(Some(damage))
     {
         tracing::warn!("failed to submit frame: {e}");
+    }
+
+    // The host shows the frame some time after this; there's no vblank to wait for here.
+    if rendered.is_some() {
+        use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
+        let now = state.clock.now();
+        for mut f in feedback {
+            let refresh = f.output().map_or(smithay::wayland::presentation::Refresh::Unknown, |o| render::refresh_of(&o));
+            f.presented(now, refresh, 0, Kind::Vsync);
+        }
     }
 
     let outputs = data.outputs.clone();

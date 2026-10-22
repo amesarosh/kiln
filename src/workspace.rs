@@ -25,6 +25,9 @@ pub struct Workspace<W> {
     pub layout: LayoutKind,
     pub master_ratio: f32,
     pub master_count: usize,
+    /// Name and icon from the config, shown on the bar instead of the number. It belongs to
+    /// the workspace, so it moves along when the workspace is dragged to another spot.
+    pub label: crate::config::WorkspaceLabel,
 }
 
 impl<W: Clone + PartialEq> Workspace<W> {
@@ -36,6 +39,7 @@ impl<W: Clone + PartialEq> Workspace<W> {
             layout,
             master_ratio,
             master_count,
+            label: Default::default(),
         }
     }
 

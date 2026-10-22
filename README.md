@@ -4,7 +4,11 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 
 - **Dynamic tiling** (master/stack side by side or stacked vertically, and monocle), toggleable floating, fullscreen, 1–32 workspaces
 - **Multiple monitors**, each with its own set of workspaces (like dwm), placed left to right
-- **Built-in clickable bar** per monitor (top, bottom, left or right): workspaces, one tab per window with its app icon, layout switcher, a settings button (opens the settings app, or brings it forward if it is already open) and a power button (lock, suspend, log out, restart, shut down)
+- **Built-in clickable bar** per monitor (top, bottom, left or right): workspaces (with optional names and icons), one tab per window with its app icon, status widgets (tray icons, what's playing, network, battery, brightness, a notifications bell), layout switcher, a settings button and a power button (lock, suspend, log out, restart, shut down)
+- **Overview** (`Mod+Tab`): every workspace of every monitor as live thumbnails; click a window or workspace to go there, drag windows between workspaces
+- **App launcher** (`wayland-time-launcher`): fuzzy search over installed apps, with the ones you use most first
+- **Desktop notifications** built in: pop-ups with actions, do not disturb, and a list of missed ones behind the bell (or leave it to mako/dunst)
+- **Animations**: workspaces slide or fade, tiles glide into place; touchpad swipes change workspace and open the overview
 - **One TOML file** for keybinds, gaps, borders, colors, keyboard layout and window rules, **reloaded on save**
 - **Settings app** (`wayland-time-settings`) that edits that file for you, with every change applied as you make it
 - **Idle costs nothing:** frames are only drawn when something changes, and only damaged regions are repainted
@@ -16,6 +20,8 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **Screenshots and recording** (grim, slurp, wf-recorder) and screen sharing through xdg-desktop-portal-wlr
 - **Sessions come back**: apps open when you quit, log out or shut down are started again at the next login, with each window on the same monitor and workspace, in the same tiling order, size and floating position
 - **Screen locking** (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
+- **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
+- **Scripting**: `wayland-time msg "<action>"` runs any action from a shell
 
 ## Status
 
@@ -35,9 +41,11 @@ On first start it writes a fully commented default config to `~/.config/wayland-
 ```
 -c, --config <PATH>    use a different config file
 -e, --exec <CMD>       run a command once ready (repeatable)
--b, --backend <NAME>   auto (default), winit or tty
+-b, --backend <NAME>   auto (default), winit, tty or headless (no screen, for tests)
 -o, --output <NAME>    tty only: light up just this monitor, e.g. DP-4 (repeatable)
     --check-config     validate the config and exit
+
+wayland-time msg <ACTION>   run an action in the running compositor, e.g. "workspace 2"
 ```
 
 Logging uses `RUST_LOG`, e.g. `RUST_LOG=debug`.
@@ -63,6 +71,8 @@ sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
 # The settings app, and its launcher entry:
 sudo install -m755 target/release/wayland-time-settings /usr/local/bin/
 sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applications/
+# The app launcher:
+sudo install -m755 target/release/wayland-time-launcher /usr/local/bin/
 ```
 
 ## Default keys
@@ -73,7 +83,8 @@ sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applicatio
 | Keys | Action |
 |---|---|
 | `Mod+Return` | terminal (alacritty) |
-| `Mod+d` | launcher (fuzzel) |
+| `Mod+d` | app launcher: type, then Enter (text matching no app runs as a command) |
+| `Mod+Tab` | overview: every workspace at once (arrows and Enter, 1-9, or click; Escape goes back) |
 | `Mod+j` / `Mod+k` | focus next / previous |
 | `Mod+Shift+j` / `Mod+Shift+k` | move window down / up the stack |
 | `Mod+Shift+Return` | swap with master |
@@ -95,6 +106,7 @@ sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applicatio
 | `Mod+left drag` | move: a tiled window swaps places with the tile under the pointer and stays tiled (drag it to the top or bottom edge of a tile in the other column to stack it above or below that tile), a floating one moves freely; drop on another monitor to move it there |
 | `Mod+right drag` | resize: a tiled window moves the borders it shares with its neighbours, a floating one changes size |
 | `Mod+middle click` | float or re-tile the window under the pointer |
+| 3 or 4 finger swipe | left / right: next / previous workspace; up: overview; down: close it (`[input] gestures`) |
 
 ## Configuration
 
@@ -179,13 +191,56 @@ current look as a new one, and delete one.
 If you define `[binds]`, it replaces the default binds entirely. See [`resources/default-config.toml`](resources/default-config.toml) for every option and action.
 A config with errors is rejected as a whole and the last working config stays active; all problems are logged at once.
 
+### Bar widgets, notifications and the tray
+
+`[bar] widgets` picks the status widgets and their order. They sit next to the clock (on
+every bar when no connected monitor has the clock):
+
+- **tray**: icons apps put in the tray (StatusNotifierItem: Steam, Discord, nm-applet...).
+  Click to open the app, right-click for its menu, middle-click for its second action.
+- **media**: what's playing in any MPRIS player. Click to pause or play, middle- or right-click
+  for the next track, scroll to skip back and forward.
+- **network**, **battery** and **brightness** (scroll to change it, through logind). Battery
+  and brightness only show on machines that have them.
+- **notifications**: a bell with a dot for unread notifications. Click for the list,
+  right-click for do not disturb, middle-click to clear them all.
+
+Notifications pop up in a corner (`[notifications]`). Click one to open it, click its buttons
+for their actions, right-click to dismiss it. With another notification daemon running (mako,
+dunst) the built-in one stays out of the way; `enabled = false` turns it off for good.
+
+### Launcher, overview and animations
+
+`wayland-time-launcher` (the `launcher` action) lists installed apps from their `.desktop`
+files. Type to search names, keywords and descriptions; apps you start often come first. It
+opens floating in the middle of the focused monitor and closes when you press Escape or click
+elsewhere.
+
+The `overview` action (`Mod+Tab`, or swipe up with three fingers) zooms out to every workspace
+of every monitor. Click a window to go to it, click a workspace to switch to it, or drag a
+window onto another workspace (on any monitor) to move it there.
+
+```toml
+[animations]
+enabled = true
+workspace = "slide"   # "slide", "fade" or "none"
+duration = 220        # milliseconds
+```
+
+### Scripting
+
+`wayland-time msg <action>` runs any action from `[binds]` in the running compositor, e.g.
+`wayland-time msg "workspace 3"` or `wayland-time msg overview`. It talks to a socket in
+`$XDG_RUNTIME_DIR` (programs the compositor starts get its path in `$WAYLAND_TIME_SOCKET`).
+
 ### Settings app
 
 `wayland-time-settings` edits the config file with a window instead of a text editor: general
-behavior, appearance and every theme color, tiling and gaps, the bar, each monitor (mode, scale,
-position, rotation, bar, layout, picked from the monitors that are connected), keyboard layout and
-repeat, mouse and touchpad, keybinds, window rules and sessions. A search box finds settings
-by name.
+behavior, appearance, animations and every theme color, tiling, gaps and workspace names, the
+bar and its widgets, notifications, each monitor (a map to drag them into place, plus mode,
+scale, rotation, bar and layout, picked from the monitors that are connected), keyboard layout
+and repeat, mouse and touchpad, keybinds, window rules and sessions. A search box finds
+settings by name.
 
 Changes apply as you make them: shortly after each edit the file is checked with the
 compositor's own config loader and saved, and the compositor reloads it. A change that doesn't
@@ -257,7 +312,9 @@ The repository is a Cargo workspace:
 | `src/` | the compositor (`wayland-time`) |
 | `crates/wt-config/` | the config file and theme, shared by the compositor and the apps: defaults, parsing, validation, keybind and action parsing, color palette, font lookup (unit tested) |
 | `crates/wt-ui/` | the shared look for apps: turns `[theme]` into egui styling and fonts, and opens app windows |
+| `crates/wt-icons/` | icons from the icon themes: app icons via .desktop files, symbolic icons tinted one color, PNG/SVG loading |
 | `apps/settings/` | the settings app (`wayland-time-settings`) |
+| `apps/launcher/` | the app launcher (`wayland-time-launcher`) |
 
 New apps go in `apps/`, use `wt-ui` for their window and look, and `wt-config` for anything
 in the config file.
@@ -278,7 +335,12 @@ in the config file.
 | `apps/settings/src/pages/` | the settings pages; plain settings are listed as data in `fields.rs` |
 | `src/handlers/xwayland.rs` | Xwayland: starting it, managing X11 windows, sharing the clipboard with X11 |
 | `src/focus.rs` | keyboard focus target: a Wayland surface or an X11 window |
-| `src/icons.rs` | app icons for the bar: .desktop lookup, icon theme search, PNG/SVG loading |
+| `src/overview.rs` | the overview: workspace cards, live thumbnails, zoom animation, dragging windows between workspaces |
+| `src/anim.rs` | animations: tiles sliding into place, the dragged tile, workspace switches |
+| `src/notifications.rs` | notification pop-ups, their timeouts and clicks, do not disturb, the bell's list |
+| `src/status.rs` | battery, network and backlight from sysfs, for the bar |
+| `src/dbus/` | the session bus thread: notification daemon, tray watcher and items, media players |
+| `src/ipc.rs` | `wayland-time msg`: the command socket |
 | `src/input.rs` | keyboard binds, pointer focus, Mod+drag |
 | `src/grabs.rs` | interactive move/resize |
 | `src/render.rs` | builds the frame: layers, windows, borders, lock screen |
@@ -286,8 +348,10 @@ in the config file.
 | `src/handlers/lock.rs` | screen locking: lock state, lock surfaces, who may unlock |
 | `src/handlers/idle.rs` | idle notifications and idle inhibit |
 | `src/handlers/output_power.rs` | turning monitors off and on (DPMS), idle power-off timer |
+| `src/handlers/output_management.rs` | monitor setup tools (wlr-output-management): heads, modes, applying arrangements |
 | `src/backend/winit.rs` | nested backend |
 | `src/backend/udev.rs` | hardware backend: DRM/KMS outputs, libinput, session/VT handling |
+| `src/backend/headless.rs` | headless backend for tests: draws offscreen at 60 Hz |
 | `src/backend/mod.rs` | backend switch, linux-dmabuf (GPU buffer sharing) |
 | `src/cursor.rs` | XCursor theme loading for the hardware backend |
 
@@ -296,9 +360,13 @@ in the config file.
 To try multi-monitor behaviour without extra screens, split the nested window into several fake
 monitors: `WAYLAND_TIME_NESTED_OUTPUTS=2 cargo run -- -b winit`.
 
+For tests that shouldn't need a visible window, `-b headless` (with
+`WAYLAND_TIME_HEADLESS_OUTPUTS=N`) draws offscreen; take screenshots with `grim` and drive it
+with `wayland-time msg`, which also has fake input for this: `test-pointer X Y`, `test-click
+[BUTTON]`, `test-key CODE` and `test-bar` (where each part of the bar is).
+
 ## Roadmap
 
 1. 10-bit output, multi-GPU.
-2. IPC socket for status bars and scripting (workspace state, focused window, run actions).
-3. More protocols: xdg-activation, screencopy (screenshots/screen sharing), presentation-time.
-4. Small optional animations (window open/close, workspace switch).
+2. Workspace and window state over the `msg` socket, for status bars and scripts.
+3. Window open and close animations; workspace swipes that follow your fingers.

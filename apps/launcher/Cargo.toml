@@ -1,0 +1,13 @@
+[package]
+name = "wayland-time-launcher"
+version = "0.1.0"
+edition = "2024"
+description = "App launcher for the wayland-time compositor"
+license = "MIT"
+
+[dependencies]
+wt-config = { path = "../../crates/wt-config" }
+wt-icons = { path = "../../crates/wt-icons" }
+wt-ui = { path = "../../crates/wt-ui" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
