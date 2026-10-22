@@ -64,6 +64,10 @@ impl Players {
         Some(shown)
     }
 
+    pub fn has_shown(&self) -> bool {
+        self.shown.is_some()
+    }
+
     pub fn command(&mut self, conn: &Connection, cmd: MediaCommand) {
         let Some(m) = &self.shown else { return };
         let method = match cmd {

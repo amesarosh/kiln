@@ -175,6 +175,12 @@ fn worker(options: Options, events: channel::Sender<Event>, rx: mpsc::Receiver<M
                     }
                     Command::TrayMenuClick { item, id } => tray.menu_click(&conn, &item, id),
                     Command::Media(c) => {
+                        // A key can come before the player was ever read (e.g. Spotify just started).
+                        if !media.has_shown()
+                            && let Some(m) = media.refresh(&conn)
+                        {
+                            send(Event::Media(m));
+                        }
                         media.command(&conn, c);
                         let _ = me.send(Msg::Media);
                     }

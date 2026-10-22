@@ -625,6 +625,15 @@ pub enum Action {
     Launcher,
     /// Lock the screen with the configured locker.
     Lock,
+    /// Play/pause or skip in the media player the bar shows (Spotify, browsers, mpv...).
+    Media(MediaChange),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaChange {
+    PlayPause,
+    Next,
+    Previous,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1167,6 +1176,12 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
                     .ok_or_else(|| format!("expected +5, -5 or mute, got \"{a}\""))?,
             ),
         }),
+        "media" => Action::Media(match need_arg()? {
+            "play-pause" => MediaChange::PlayPause,
+            "next" => MediaChange::Next,
+            "prev" => MediaChange::Previous,
+            a => return Err(format!("expected play-pause, next or prev, got \"{a}\"")),
+        }),
         other => return Err(format!("unknown action \"{other}\"")),
     })
 }
@@ -1206,6 +1221,7 @@ pub const ACTIONS: &[(&str, &str, &str)] = &[
     ("launcher", "", "Find and start an app"),
     ("lock", "", "Lock the screen"),
     ("volume", "+5|-5|mute", "Change the volume by a percentage, or mute"),
+    ("media", "play-pause|next|prev", "Play/pause or skip in the media player"),
     ("reload", "", "Reload the config file"),
     ("quit", "", "Exit the compositor"),
 ];

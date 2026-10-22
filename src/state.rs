@@ -1228,6 +1228,9 @@ impl State {
         if let Action::Volume(change) = action {
             return self.change_volume(change);
         }
+        if let Action::Media(change) = action {
+            return self.media_key(change);
+        }
         self.close_menu();
         if !matches!(action, Action::WindowSwitcher(_)) {
             self.switcher_cancel();
@@ -1318,7 +1321,19 @@ impl State {
             Action::Overview => self.toggle_overview(),
             Action::Launcher => self.toggle_launcher(),
             Action::Lock => self.power(crate::power::PowerAction::Lock),
+            Action::Media(change) => self.media_key(change),
         }
+    }
+
+    fn media_key(&mut self, change: wt_config::config::MediaChange) {
+        use crate::dbus::mpris::MediaCommand;
+        use wt_config::config::MediaChange;
+        let cmd = match change {
+            MediaChange::PlayPause => MediaCommand::PlayPause,
+            MediaChange::Next => MediaCommand::Next,
+            MediaChange::Previous => MediaCommand::Previous,
+        };
+        self.bus_command(crate::dbus::Command::Media(cmd));
     }
 
     /// Show workspace `idx` on the focused monitor.

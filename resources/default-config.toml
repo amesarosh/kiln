@@ -217,6 +217,12 @@ duration = 220        # milliseconds
 "Shift+XF86AudioRaiseVolume" = "volume +1"
 "Shift+XF86AudioLowerVolume" = "volume -1"
 "XF86AudioMute" = "volume mute"
+# Media keys: play/pause and skip in Spotify, browsers, mpv...
+"XF86AudioPlay" = "media play-pause"
+"XF86AudioPause" = "media play-pause"
+"Pause" = "media play-pause"
+"XF86AudioNext" = "media next"
+"XF86AudioPrev" = "media prev"
 
 "Mod+j" = "focus next"
 "Mod+k" = "focus prev"
