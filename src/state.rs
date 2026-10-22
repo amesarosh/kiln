@@ -124,6 +124,8 @@ pub struct State {
     pub xwm: Option<X11Wm>,
     /// Xwayland's display number, set as `DISPLAY` for launched apps.
     pub xdisplay: Option<u32>,
+    /// Our own connection to Xwayland, for window properties the window manager doesn't set.
+    pub x11_props: Option<crate::handlers::xwayland::X11Props>,
     /// Mapped override-redirect X11 windows (menus, tooltips), bottom to top. Not tiled.
     pub x11_unmanaged: Vec<X11Surface>,
     /// Autostart and `--exec` commands, held until Xwayland is up so they get `DISPLAY`.
@@ -150,6 +152,8 @@ pub struct State {
     pub session: crate::session::Session,
     /// The Alt+Tab switcher, while open.
     pub switcher: Option<crate::switcher::Switcher>,
+    /// Volume keys and the panel that shows the level.
+    pub volume: crate::volume::Volume,
     /// Windows by when they last had focus, most recent first.
     pub focus_history: Vec<Window>,
     /// The open pop-up menu, if any.
@@ -298,6 +302,7 @@ impl State {
             keyboard_focus_moved: false,
             xwm: None,
             xdisplay: None,
+            x11_props: None,
             x11_unmanaged: Vec::new(),
             startup_commands: Vec::new(),
             lock: LockState::Unlocked,
@@ -313,6 +318,7 @@ impl State {
             foreign_toplevels,
             menu: None,
             switcher: None,
+            volume: Default::default(),
             focus_history: Vec::new(),
             ui_text: None,
             screencopy_pending: Vec::new(),
@@ -461,6 +467,9 @@ impl State {
         }
         if self.switcher.as_ref().is_some_and(|s| s.on_output(output)) {
             self.switcher = None;
+        }
+        if self.volume.osd.as_ref().is_some_and(|o| o.on_output(output)) {
+            self.volume.osd = None;
         }
 
         if self.monitors.is_empty() {
@@ -1124,6 +1133,10 @@ impl State {
     // ---------- actions ----------
 
     pub fn run_action(&mut self, action: Action) {
+        // Volume keys leave menus and the switcher open; they don't change what's on screen.
+        if let Action::Volume(change) = action {
+            return self.change_volume(change);
+        }
         self.close_menu();
         if !matches!(action, Action::WindowSwitcher(_)) {
             self.switcher_cancel();
@@ -1207,6 +1220,7 @@ impl State {
             Action::SwitchVt(vt) => self.switch_vt(vt),
             Action::PowerOffMonitors => self.set_all_monitors_power(false),
             Action::WindowSwitcher(dir) => self.window_switcher(dir),
+            Action::Volume(change) => self.change_volume(change),
         }
     }
 
@@ -1314,6 +1328,7 @@ impl State {
         // Painted from the old theme; reopening shows the new one.
         self.close_menu();
         self.switcher_cancel();
+        self.hide_volume_osd();
         if config.keyboard != self.config.keyboard {
             let kb = &config.keyboard;
             let keyboard = self.keyboard();

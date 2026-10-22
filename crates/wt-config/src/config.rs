@@ -455,6 +455,15 @@ pub enum Action {
     PowerOffMonitors,
     /// Alt+Tab: open the window switcher, or move through it while open.
     WindowSwitcher(Dir),
+    /// Change the default output's volume, or mute it.
+    Volume(VolumeChange),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VolumeChange {
+    /// Up or down by this many percent.
+    Step(i32),
+    ToggleMute,
 }
 
 #[derive(Debug)]
@@ -941,6 +950,16 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
         "move-to-monitor" => Action::MoveToMonitor(dir()?),
         "power-off-monitors" => Action::PowerOffMonitors,
         "window-switcher" => Action::WindowSwitcher(dir()?),
+        "volume" => Action::Volume(match need_arg()? {
+            "mute" => VolumeChange::ToggleMute,
+            a => VolumeChange::Step(
+                a.trim_end_matches('%')
+                    .parse()
+                    .ok()
+                    .filter(|n: &i32| *n != 0 && a.starts_with(['+', '-']))
+                    .ok_or_else(|| format!("expected +5, -5 or mute, got \"{a}\""))?,
+            ),
+        }),
         other => return Err(format!("unknown action \"{other}\"")),
     })
 }
@@ -976,6 +995,7 @@ pub const ACTIONS: &[(&str, &str, &str)] = &[
         "next|prev",
         "Pick a window from a list, most recent first",
     ),
+    ("volume", "+5|-5|mute", "Change the volume by a percentage, or mute"),
     ("reload", "", "Reload the config file"),
     ("quit", "", "Exit the compositor"),
 ];
@@ -1194,6 +1214,11 @@ mod tests {
         assert_eq!(parse_action("master-ratio -0.05").unwrap(), Action::MasterRatio(-0.05));
         assert_eq!(parse_action("workspace 3").unwrap(), Action::Workspace(3));
         assert_eq!(parse_action("power-off-monitors").unwrap(), Action::PowerOffMonitors);
+        assert_eq!(parse_action("volume +5").unwrap(), Action::Volume(VolumeChange::Step(5)));
+        assert_eq!(parse_action("volume -2%").unwrap(), Action::Volume(VolumeChange::Step(-2)));
+        assert_eq!(parse_action("volume mute").unwrap(), Action::Volume(VolumeChange::ToggleMute));
+        assert!(parse_action("volume 5").is_err());
+        assert!(parse_action("volume +0").is_err());
         assert_eq!(
             parse_action("window-switcher prev").unwrap(),
             Action::WindowSwitcher(Dir::Prev)

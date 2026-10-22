@@ -12,7 +12,7 @@ use smithay::{
 
 use crate::{
     bar::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT},
-    config::{Action, ModKey, Mods, normalize_keysym},
+    config::{Action, ModKey, Mods, VolumeChange, normalize_keysym},
     grabs,
     handlers::pointer_lock::Constraint,
     menu::MenuKey,
@@ -116,11 +116,13 @@ impl State {
         let mut mod_tapped = false;
         let mut menu_key = None;
         let mut switcher_key = None;
+        let mut volume_repeat = None;
         let action =
             self.keyboard()
                 .input::<Option<Action>, _>(self, code, key_state, serial, time, |state, mods, handle| {
                     // Swallow the release of any key whose press triggered a bind.
                     if key_state == KeyState::Released {
+                        state.stop_volume_repeat_for(Some(code));
                         // Still forwarded, so clients don't think Mod is stuck down.
                         if state.mod_tap == Some(code) {
                             state.mod_tap = None;
@@ -132,8 +134,10 @@ impl State {
                         }
                         return FilterResult::Forward;
                     }
-                    // Any other press cancels a pending Mod tap; a lone Mod press starts one.
+                    // Any other press cancels a pending Mod tap; a lone Mod press starts one,
+                    // and stops a held volume key repeating.
                     state.mod_tap = None;
+                    state.stop_volume_repeat_for(None);
                     // Ctrl+Alt+Fn produces XF86Switch_VT_n; always handled so you can't get stuck.
                     let modified = handle.modified_sym().raw();
                     if (XF86_SWITCH_VT_1..=XF86_SWITCH_VT_12).contains(&modified) {
@@ -189,6 +193,9 @@ impl State {
                     match state.config.binds.iter().find(|b| b.matches(pressed, sym, mod_key)) {
                         Some(bind) => {
                             state.suppressed_keys.push(code);
+                            if let Action::Volume(change @ VolumeChange::Step(_)) = bind.action {
+                                volume_repeat = Some(change);
+                            }
                             FilterResult::Intercept(Some(bind.action.clone()))
                         }
                         None => FilterResult::Forward,
@@ -197,6 +204,9 @@ impl State {
 
         if let Some(Some(action)) = action {
             self.run_action(action);
+        }
+        if let Some(change) = volume_repeat {
+            self.start_volume_repeat(code, change);
         }
         if let Some(k) = menu_key {
             self.menu_key(k);

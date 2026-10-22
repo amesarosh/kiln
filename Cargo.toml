@@ -19,6 +19,8 @@ xcursor = "0.3"
 serde = { version = "1", features = ["derive"] }
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
 tracing = "0.1"
+# Our own Xwayland connection, for window properties smithay doesn't set.
+x11rb = "0.13"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ab_glyph = "0.2"
 ab_glyph_rasterizer = "0.1"

@@ -3469,6 +3469,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wt-config",
+ "x11rb",
  "xcursor",
 ]
 

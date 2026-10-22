@@ -28,6 +28,12 @@ use smithay::{
     },
 };
 
+use x11rb::{
+    protocol::xproto::{AtomEnum, ConnectionExt, PropMode},
+    rust_connection::RustConnection,
+    wrapper::ConnectionExt as _,
+};
+
 use crate::{clipboard::SelectionData, cursor::Cursor, focus::KeyboardFocusTarget, grabs, layout::Rect, state::State};
 
 /// If Xwayland hasn't reported in by then, run startup commands without it.
@@ -69,6 +75,7 @@ impl State {
                             }
                             state.xwm = Some(wm);
                             state.xdisplay = Some(display_number);
+                            state.x11_props = X11Props::connect(display_number);
                             tracing::info!("Xwayland ready on DISPLAY=:{display_number}");
                         }
                         Err(e) => tracing::warn!("Xwayland started but its window manager failed: {e}"),
@@ -119,6 +126,38 @@ impl State {
     }
 }
 
+/// A second connection to Xwayland, for window properties smithay's window manager doesn't set.
+pub struct X11Props {
+    conn: RustConnection,
+    frame_extents: u32,
+}
+
+impl X11Props {
+    fn connect(display: u32) -> Option<Self> {
+        let result = (|| -> Result<Self, Box<dyn std::error::Error>> {
+            let (conn, _) = RustConnection::connect(Some(&format!(":{display}")))?;
+            let frame_extents = conn.intern_atom(false, b"_NET_FRAME_EXTENTS")?.reply()?.atom;
+            Ok(Self { conn, frame_extents })
+        })();
+        result
+            .inspect_err(|e| tracing::warn!("could not open a second Xwayland connection: {e}"))
+            .ok()
+    }
+
+    /// Say the window has no frame. Java waits for this before it draws: without it, it guesses
+    /// at title-bar insets and ignores every resize that arrives with the reparent, so the
+    /// window stays blank. Done before mapping, which reparents.
+    fn set_no_frame(&self, window: u32) {
+        let set = self
+            .conn
+            .change_property32(PropMode::REPLACE, window, self.frame_extents, AtomEnum::CARDINAL, &[0; 4]);
+        // Waits for it, so the property is there before the window manager reparents.
+        if let Err(e) = set.map_err(|e| e.to_string()).and_then(|c| c.check().map_err(|e| e.to_string())) {
+            tracing::debug!("could not set _NET_FRAME_EXTENTS: {e}");
+        }
+    }
+}
+
 /// Dialogs, menus and fixed-size windows float instead of tiling.
 pub fn x11_wants_float(s: &X11Surface) -> bool {
     let fixed = matches!((s.min_size(), s.max_size()), (Some(a), Some(b)) if a == b && a.w > 0);
@@ -139,13 +178,19 @@ impl XwmHandler for State {
     fn new_override_redirect_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
 
     fn map_window_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Some(props) = &self.x11_props {
+            props.set_no_frame(window.window_id());
+        }
         if let Err(e) = window.set_mapped(true) {
             tracing::warn!("could not map X11 window \"{}\": {e}", window.title());
             return;
         }
         if self.window_for_x11(&window).is_none() {
-            self.manage_window(Window::new_x11_window(window));
+            self.manage_window(Window::new_x11_window(window.clone()));
         }
+        // Always tell a newly mapped window its geometry, even if unchanged: X11 requires it,
+        // and Java apps that reopen at their old tile's exact size stay blank without it.
+        let _ = window.configure(None);
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -198,9 +243,9 @@ impl XwmHandler for State {
         }
         if self.monitor_showing(&managed).is_some() {
             self.arrange();
-        } else {
-            let _ = window.configure(None);
         }
+        // arrange() only configures windows whose geometry changed; this always answers.
+        let _ = window.configure(None);
     }
 
     fn configure_notify(

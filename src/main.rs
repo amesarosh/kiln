@@ -16,6 +16,7 @@ mod session;
 mod state;
 mod switcher;
 mod text;
+mod volume;
 use wt_config::theme;
 mod workspace;
 
