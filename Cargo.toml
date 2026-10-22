@@ -13,6 +13,7 @@ default-members = [".", "apps/*"]
 [dependencies]
 wt-config = { path = "crates/wt-config" }
 wt-icons = { path = "crates/wt-icons" }
+wt-draw = { path = "crates/wt-draw" }
 bitflags = "2"
 inotify = { version = "0.11", default-features = false }
 smithay-drm-extras = { version = "0.1", default-features = false }
@@ -23,9 +24,6 @@ tracing = "0.1"
 # Our own Xwayland connection, for window properties smithay doesn't set.
 x11rb = "0.13"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ab_glyph = "0.2"
-ab_glyph_rasterizer = "0.1"
-skrifa = "0.42"
 resvg = { version = "0.45", default-features = false }
 rustix = { version = "1", features = ["pipe", "fs"] }
 libc = "0.2"

@@ -14,7 +14,7 @@ focus_follows_mouse = true
 new_window = "master"
 # Commands run once at startup, through `sh -c`. To lock after 5 minutes idle
 # and before suspend:
-#   autostart = ["swayidle -w timeout 300 'swaylock -f' before-sleep 'swaylock -f'"]
+#   autostart = ["swayidle -w timeout 300 'wayland-time-lock -f' before-sleep 'wayland-time-lock -f'"]
 # To keep a clipboard history for Mod+v (needs cliphist):
 #   autostart = ["wl-paste --watch cliphist store"]
 autostart = []
@@ -31,7 +31,8 @@ xwayland = true
 # holds its own copy (up to 64 MiB); the middle-click selection isn't kept.
 keep_clipboard = true
 # Screen locker used by Lock and Suspend in the bar's power menu. Empty picks
-# the first one installed of hyprlock, swaylock, gtklock and waylock.
+# the first one installed of wayland-time-lock (our own), hyprlock, swaylock,
+# gtklock and waylock.
 locker = ""
 
 # The look shared by everything the compositor draws: the bar, window borders,
@@ -198,7 +199,7 @@ duration = 220        # milliseconds
 "Mod+Shift+q" = "close"
 "Mod+Shift+e" = "quit"
 "Mod+Shift+r" = "reload"
-"Mod+Escape" = "spawn swaylock"
+"Mod+Escape" = "lock"
 # Screenshots: pick a region and copy it, or save every monitor to a file
 # (in your Pictures folder). Needs grim, slurp and wl-clipboard.
 "Print" = 'spawn grim -g "$(slurp)" - | wl-copy'

@@ -180,6 +180,9 @@ pub struct State {
     pub menu: Option<crate::menu::Menu>,
     /// Suspend picked from the power menu: suspend as soon as the locker has locked.
     pub suspend_when_locked: bool,
+    /// When the locker was last started, so key presses on a crashed lock screen don't start
+    /// a pile of them before the first one connects.
+    pub locker_started: Option<std::time::Instant>,
     /// The theme font, loaded for menus; reloaded when `[theme] font` changes.
     pub ui_text: Option<(String, crate::text::Text)>,
     /// Screencopy frames waiting for the screen to change.
@@ -343,6 +346,7 @@ impl State {
             startup_commands: Vec::new(),
             lock: LockState::Unlocked,
             suspend_when_locked: false,
+            locker_started: None,
             lock_surfaces: Vec::new(),
             idle_inhibitors: Vec::new(),
             lock_fill_ids: [Id::new(), Id::new()],
@@ -1313,6 +1317,7 @@ impl State {
             Action::Volume(change) => self.change_volume(change),
             Action::Overview => self.toggle_overview(),
             Action::Launcher => self.toggle_launcher(),
+            Action::Lock => self.power(crate::power::PowerAction::Lock),
         }
     }
 

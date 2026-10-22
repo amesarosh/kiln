@@ -1,0 +1,17 @@
+[package]
+name = "wayland-time-lock"
+version = "0.1.0"
+edition = "2024"
+description = "Screen locker for the wayland-time compositor"
+license = "MIT"
+
+[dependencies]
+wt-config = { path = "../../crates/wt-config" }
+wt-draw = { path = "../../crates/wt-draw" }
+# Session lock, keyboard with key repeat, shared-memory buffers. Its calloop and protocols
+# are used through its re-exports, so the versions always match.
+smithay-client-toolkit = "0.20"
+wayland-client = "0.31"
+libc = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

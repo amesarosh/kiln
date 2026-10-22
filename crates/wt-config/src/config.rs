@@ -623,6 +623,8 @@ pub enum Action {
     Overview,
     /// Open the app launcher, or close it.
     Launcher,
+    /// Lock the screen with the configured locker.
+    Lock,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1154,6 +1156,7 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
         "window-switcher" => Action::WindowSwitcher(dir()?),
         "overview" => Action::Overview,
         "launcher" => Action::Launcher,
+        "lock" => Action::Lock,
         "volume" => Action::Volume(match need_arg()? {
             "mute" => VolumeChange::ToggleMute,
             a => VolumeChange::Step(
@@ -1201,6 +1204,7 @@ pub const ACTIONS: &[(&str, &str, &str)] = &[
     ),
     ("overview", "", "Show every workspace at once, or go back"),
     ("launcher", "", "Find and start an app"),
+    ("lock", "", "Lock the screen"),
     ("volume", "+5|-5|mute", "Change the volume by a percentage, or mute"),
     ("reload", "", "Reload the config file"),
     ("quit", "", "Exit the compositor"),

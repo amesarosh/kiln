@@ -1,4 +1,5 @@
-//! CPU text and shape drawing for compositor-drawn UI (the bar, the switcher and menus).
+//! CPU text and shape drawing for the compositor's own UI (the bar, the switcher, menus) and
+//! the lock screen.
 //!
 //! Glyphs are hinted (snapped to the pixel grid by the font's own instructions, or the
 //! autohinter) and placed at whole pixels, so stems come out as solid lines instead of
@@ -22,7 +23,7 @@ use skrifa::{
     outline::{DrawSettings, HintingInstance, HintingOptions, OutlinePen, SmoothMode, Target},
 };
 
-use crate::config::Color;
+use wt_config::config::Color;
 use wt_config::fonts::Subpixel;
 
 /// FreeType's default LCD filter, spreading each subpixel over its neighbours to tame color fringes.
@@ -66,7 +67,7 @@ impl Text {
                 Err(e) => tracing::warn!("{}: not a usable font: {e}", path.display()),
             }
         }
-        tracing::error!("no usable font found for \"{name}\"; the bar is disabled");
+        tracing::error!("no usable font found for \"{name}\"");
         None
     }
 
@@ -457,6 +458,27 @@ impl Canvas {
             .iter()
             .flat_map(|c| [to_u8(c[0] * c[3]), to_u8(c[1] * c[3]), to_u8(c[2] * c[3]), to_u8(c[3])])
             .collect()
+    }
+
+    /// Copy into a `wl_shm` ARGB8888 buffer (B, G, R, A in memory, premultiplied) with this
+    /// canvas's top-left corner at (x, y). Whatever falls outside `dst` is left out.
+    pub fn write_argb8888(&self, dst: &mut [u8], dst_w: i32, dst_h: i32, stride: usize, x: i32, y: i32) {
+        let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        for row in 0..self.h {
+            let dy = y + row;
+            if dy < 0 || dy >= dst_h {
+                continue;
+            }
+            for col in 0..self.w {
+                let dx = x + col;
+                if dx < 0 || dx >= dst_w {
+                    continue;
+                }
+                let c = self.px[(row * self.w + col) as usize];
+                let at = dy as usize * stride + dx as usize * 4;
+                dst[at..at + 4].copy_from_slice(&[to_u8(c[2] * c[3]), to_u8(c[1] * c[3]), to_u8(c[0] * c[3]), to_u8(c[3])]);
+            }
+        }
     }
 }
 

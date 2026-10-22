@@ -19,7 +19,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **Window list for other programs**: taskbars (waybar's `wlr/taskbar`), window switchers and scripts (`wlrctl`, `lswt`) can list, focus, fullscreen and close windows
 - **Screenshots and recording** (grim, slurp, wf-recorder) and screen sharing through xdg-desktop-portal-wlr
 - **Sessions come back**: apps open when you quit, log out or shut down are started again at the next login, with each window on the same monitor and workspace, in the same tiling order, size and floating position
-- **Screen locking** (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
+- **Screen locking** with its own lock screen (`wayland-time-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 - **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
 - **Scripting**: `wayland-time msg "<action>"` runs any action from a shell
 
@@ -52,7 +52,7 @@ Logging uses `RUST_LOG`, e.g. `RUST_LOG=debug`.
 
 ### Running from a TTY
 
-Build dependencies: `libinput-dev`, `libseat-dev`, `libgbm-dev`, `libdrm-dev`, `libudev-dev`, `libxkbcommon-dev`.
+Build dependencies: `libinput-dev`, `libseat-dev`, `libgbm-dev`, `libdrm-dev`, `libudev-dev`, `libxkbcommon-dev`, `libpam0g-dev` (for the lock screen).
 For X11 apps, install `xwayland` (turn it off with `xwayland = false` under `[general]`).
 
 1. Switch to a free text console with `Ctrl+Alt+F3` and log in.
@@ -73,6 +73,9 @@ sudo install -m755 target/release/wayland-time-settings /usr/local/bin/
 sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applications/
 # The app launcher:
 sudo install -m755 target/release/wayland-time-launcher /usr/local/bin/
+# The lock screen, and the PAM rules it checks passwords with:
+sudo install -m755 target/release/wayland-time-lock /usr/local/bin/
+sudo install -m644 resources/pam.d/wayland-time-lock /etc/pam.d/
 ```
 
 ## Default keys
@@ -98,7 +101,7 @@ sudo install -m755 target/release/wayland-time-launcher /usr/local/bin/
 | `Mod+Shift+.` / `Mod+Shift+,` | send window to next / previous monitor |
 | `Mod+Shift+q` | close window |
 | `Mod+Shift+r` | reload config |
-| `Mod+Escape` | lock the screen (swaylock) |
+| `Mod+Escape` | lock the screen |
 | `Print` / `Shift+Print` | screenshot a region to the clipboard / all monitors to a file (grim, slurp, wl-copy) |
 | `Alt+Tab` / `Alt+Shift+Tab` | window switcher: all windows, most recent first; let go of Alt to switch (Escape cancels) |
 | `Mod+v` | pick from clipboard history (cliphist and fuzzel; start `wl-paste --watch cliphist store` in autostart) |
@@ -278,22 +281,26 @@ Nested runs use `session-nested.toml`, so testing never touches the real session
 
 ### Screen lock and idle
 
-Any locker that uses the standard lock protocol works, such as `swaylock` or `hyprlock`. Bind
-one to a key, and use `swayidle` to lock after a while and before suspend:
+`wayland-time-lock` is the built-in lock screen: the time, the date, your name and a password
+field, drawn in the theme's colors and font. It checks your password with PAM, like logging in
+(`install.sh` adds `/etc/pam.d/wayland-time-lock` for this; without it, the `login` rules are
+used). Escape clears what you typed. `Mod+Escape` runs the `lock` action, which starts the
+locker set in `[general] locker`, or else the first one installed of `wayland-time-lock`,
+hyprlock, swaylock, gtklock and waylock. Any locker that uses the standard lock protocol works.
+
+To lock after a while and before suspend, use `swayidle` (`-f` returns once the screen is
+locked, so the machine doesn't sleep with the desktop showing):
 
 ```toml
 [general]
-autostart = ["swayidle -w timeout 300 'swaylock -f' before-sleep 'swaylock -f'"]
-
-[binds]
-"Mod+Escape" = "spawn swaylock"
+autostart = ["swayidle -w timeout 300 'wayland-time-lock -f' before-sleep 'wayland-time-lock -f'"]
 ```
 
 While locked, only the locker is drawn and every key goes to it. No binds work, including
 Ctrl+Alt+Backspace (quitting would drop you into the shell that started the compositor), but
 Ctrl+Alt+F1..F12 still switch VTs. If the locker crashes, the screen stays locked and turns dark
-red. To recover, switch to another VT, log in, and start a new locker there:
-`WAYLAND_DISPLAY=wayland-1 swaylock` (the socket name is in the log).
+red; press any key to start the locker again. From another VT you can also start one yourself:
+`WAYLAND_DISPLAY=wayland-1 wayland-time-lock` (the socket name is in the log).
 
 To turn monitors off when idle, set `monitors_off_after` (seconds) under `[general]`, or bind
 the `power-off-monitors` action. Any key press, click or pointer movement turns them back on.
@@ -312,9 +319,11 @@ The repository is a Cargo workspace:
 | `src/` | the compositor (`wayland-time`) |
 | `crates/wt-config/` | the config file and theme, shared by the compositor and the apps: defaults, parsing, validation, keybind and action parsing, color palette, font lookup (unit tested) |
 | `crates/wt-ui/` | the shared look for apps: turns `[theme]` into egui styling and fonts, and opens app windows |
+| `crates/wt-draw/` | CPU text and shape drawing (hinted, subpixel text): the bar, menus and the lock screen |
 | `crates/wt-icons/` | icons from the icon themes: app icons via .desktop files, symbolic icons tinted one color, PNG/SVG loading |
 | `apps/settings/` | the settings app (`wayland-time-settings`) |
 | `apps/launcher/` | the app launcher (`wayland-time-launcher`) |
+| `apps/lock/` | the lock screen (`wayland-time-lock`): session lock protocol, PAM, drawn with `wt-draw` since egui can't make lock surfaces |
 
 New apps go in `apps/`, use `wt-ui` for their window and look, and `wt-config` for anything
 in the config file.
@@ -325,7 +334,6 @@ in the config file.
 | `src/state.rs` | compositor state and window management: monitors, arrange, focus, actions, config reload |
 | `src/session.rs` | saving open windows and restoring them at the next start |
 | `src/bar.rs` | the built-in bar: layout, painting, hit testing, clicks |
-| `src/text.rs` | CPU text and shape drawing for compositor-drawn UI |
 | `src/layout.rs` | pure tiling math (unit tested); add new layouts here |
 | `src/workspace.rs` | per-workspace window order, focus, floating (unit tested) |
 | `src/config.rs` | re-exports `wt-config`, plus conversions to smithay types |

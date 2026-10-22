@@ -112,7 +112,7 @@ pub const GENERAL: &[Section] = &[
             f(
                 &["general", "locker"],
                 "Screen locker",
-                "Used by Lock and Suspend in the power menu. Empty uses the first installed of hyprlock, swaylock, gtklock and waylock.",
+                "Used by Lock and Suspend in the power menu. Empty uses the first installed of wayland-time-lock, hyprlock, swaylock, gtklock and waylock.",
                 Kind::Text("automatic"),
             ),
         ],

@@ -223,8 +223,13 @@ impl State {
                         return FilterResult::Intercept(Some(Action::SwitchVt(vt)));
                     }
                     // Locked: every key goes to the locker. No binds, not even quit, which
-                    // would drop back to the shell that started us.
+                    // would drop back to the shell that started us. If the locker crashed, a
+                    // key starts it again.
                     if state.is_locked() {
+                        if state.locker_dead() {
+                            state.suppressed_keys.push(code);
+                            return FilterResult::Intercept(Some(Action::Lock));
+                        }
                         return FilterResult::Forward;
                     }
                     // Match on the unshifted, layout-independent sym so "Mod+Shift+1" works.

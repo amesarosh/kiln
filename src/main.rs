@@ -21,7 +21,8 @@ mod session;
 mod status;
 mod state;
 mod switcher;
-mod text;
+// Text and canvas drawing are shared with the lock screen.
+use wt_draw as text;
 mod volume;
 use wt_config::theme;
 mod workspace;

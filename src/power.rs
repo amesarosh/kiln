@@ -22,11 +22,15 @@ pub enum PowerAction {
 
 /// Lockers tried in order when `[general] locker` is empty, as (program, command).
 const LOCKERS: &[(&str, &str)] = &[
+    ("wayland-time-lock", "wayland-time-lock"),
     ("hyprlock", "hyprlock"),
     ("swaylock", "swaylock -f"),
     ("gtklock", "gtklock -d"),
     ("waylock", "waylock"),
 ];
+
+/// Shortest time between starting lockers, so one has time to connect.
+const LOCKER_RESTART: Duration = Duration::from_secs(3);
 
 /// How long Suspend waits for the locker before suspending anyway.
 const LOCK_WAIT: Duration = Duration::from_secs(5);
@@ -81,18 +85,24 @@ impl State {
         }
     }
 
-    /// Start the locker unless the screen is already locked. False if there's no locker.
+    /// Start the locker unless the screen is already locked, or start it again if it crashed
+    /// while locked. False if there's no locker.
     fn lock_screen(&mut self) -> bool {
-        if self.is_locked() {
+        if self.is_locked() && !self.locker_dead() {
+            return true;
+        }
+        // A locker started moments ago is still connecting.
+        if self.locker_started.is_some_and(|t| t.elapsed() < LOCKER_RESTART) {
             return true;
         }
         match locker_command(&self.config.general.locker) {
             Some(cmd) => {
+                self.locker_started = Some(Instant::now());
                 self.spawn(&cmd);
                 true
             }
             None => {
-                tracing::warn!("no screen locker found: install hyprlock or swaylock, or set [general] locker");
+                tracing::warn!("no screen locker found: install wayland-time-lock, or set [general] locker");
                 false
             }
         }

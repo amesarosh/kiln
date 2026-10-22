@@ -1,0 +1,2 @@
+# PAM config for wayland-time-lock: check the password the same way logging in does.
+auth include login
