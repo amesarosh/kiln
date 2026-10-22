@@ -620,7 +620,7 @@ fn font_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool {
 }
 
 /// The times offered for `Kind::Seconds` settings, 0 being "Never".
-const SECONDS_CHOICES: &[i64] = &[60, 120, 180, 300, 600, 900, 1200, 1800, 2700, 3600, 7200, 0];
+const SECONDS_CHOICES: &[i64] = &[60, 120, 180, 300, 600, 900, 1200, 1800, 2700, 3600, 5400, 7200, 10800, 14400, 18000, 21600, 0];
 
 /// "10 min", "1 h 30 min", "45 s".
 fn duration(s: i64) -> String {
