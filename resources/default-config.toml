@@ -143,6 +143,7 @@ max_visible = 4           # most shown at once; the rest wait in the bell's list
 [animations]
 enabled = true
 workspace = "slide"   # "slide", "fade" or "none"
+direction = "vertical" # which way "slide" moves: "vertical" or "horizontal"
 duration = 220        # milliseconds
 
 # Keybinds: "Modifiers+Key" = "action".

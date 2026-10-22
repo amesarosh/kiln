@@ -252,6 +252,16 @@ pub enum WorkspaceAnimation {
     None,
 }
 
+/// Which way a sliding workspace switch moves.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SlideDirection {
+    /// A higher workspace comes in from the right.
+    Horizontal,
+    /// A higher workspace comes in from below.
+    Vertical,
+}
+
 /// Motion: workspace switches, tiles sliding into place, the overview opening.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -259,6 +269,8 @@ pub struct AnimationConfig {
     /// Off turns every animation off.
     pub enabled: bool,
     pub workspace: WorkspaceAnimation,
+    /// Which way "slide" moves.
+    pub direction: SlideDirection,
     /// How long animations take, in milliseconds.
     pub duration: u64,
 }

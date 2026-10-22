@@ -182,6 +182,12 @@ pub const APPEARANCE: &[Section] = &[
                     ("none", "No animation"),
                 ]),
             ),
+            f(
+                &["animations", "direction"],
+                "Slide direction",
+                "A higher-numbered workspace comes in from below, or from the right.",
+                Kind::Choice(&[("vertical", "Vertical"), ("horizontal", "Horizontal")]),
+            ),
             f(&["animations", "duration"], "Speed", "How long an animation takes.", Kind::Int(50, 1000, "ms")),
         ],
     },

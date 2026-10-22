@@ -16,7 +16,10 @@ use smithay::{
     utils::{Logical, Point, Rectangle},
 };
 
-use crate::{config::WorkspaceAnimation, state::State};
+use crate::{
+    config::{SlideDirection, WorkspaceAnimation},
+    state::State,
+};
 /// Redraw rate while something is sliding; vblank pacing still caps real frames.
 const TICK: Duration = Duration::from_millis(7);
 
@@ -34,10 +37,12 @@ pub struct WsSwitch {
     output: Output,
     /// The windows of the workspace being left, bottom to top, and where they were drawn.
     old: Vec<(Window, Point<f64, Logical>)>,
-    /// 1.0: the new workspace comes in from the right (a higher number); -1.0 from the left.
+    /// 1.0: the new workspace comes in from the right or below (a higher number); -1.0 from
+    /// the left or above.
     dir: f64,
-    /// How far to slide: the monitor's width.
-    width: f64,
+    /// How far to slide: the monitor's width, or its height when sliding vertically.
+    distance: f64,
+    direction: SlideDirection,
     style: WorkspaceAnimation,
     start: Instant,
     duration: Duration,
@@ -57,12 +62,16 @@ impl WsSwitch {
         };
         match self.style {
             WorkspaceAnimation::Slide => {
-                let x = if incoming {
-                    self.dir * self.width * (1.0 - p)
+                let d = if incoming {
+                    self.dir * self.distance * (1.0 - p)
                 } else {
-                    -self.dir * self.width * p
+                    -self.dir * self.distance * p
                 };
-                ((x, 0.0).into(), 1.0)
+                let offset = match self.direction {
+                    SlideDirection::Horizontal => (d, 0.0),
+                    SlideDirection::Vertical => (0.0, d),
+                };
+                (offset.into(), 1.0)
             }
             WorkspaceAnimation::Fade | WorkspaceAnimation::None => {
                 ((0.0, 0.0).into(), if incoming { p as f32 } else { 1.0 - p as f32 })
@@ -175,7 +184,11 @@ impl State {
             return None;
         }
         let m = self.monitors.get(mon)?;
-        let width = self.space.output_geometry(&m.output)?.size.w as f64;
+        let size = self.space.output_geometry(&m.output)?.size;
+        let distance = match cfg.direction {
+            SlideDirection::Horizontal => size.w,
+            SlideDirection::Vertical => size.h,
+        } as f64;
         // Windows already sliding out of an earlier switch stop where they are.
         let old = self
             .space
@@ -187,7 +200,8 @@ impl State {
             output: m.output.clone(),
             old,
             from: m.active_ws,
-            width,
+            distance,
+            direction: cfg.direction,
             style: cfg.workspace,
             duration,
         })
@@ -202,7 +216,8 @@ impl State {
             output: start.output,
             old: start.old,
             dir: if to > start.from { 1.0 } else { -1.0 },
-            width: start.width,
+            distance: start.distance,
+            direction: start.direction,
             style: start.style,
             start: Instant::now(),
             duration: start.duration,
@@ -335,7 +350,8 @@ pub struct WsSwitchStart {
     output: Output,
     old: Vec<(Window, Point<f64, Logical>)>,
     from: usize,
-    width: f64,
+    distance: f64,
+    direction: SlideDirection,
     style: WorkspaceAnimation,
     duration: Duration,
 }
