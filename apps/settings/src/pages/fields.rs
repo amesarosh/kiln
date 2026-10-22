@@ -104,6 +104,12 @@ pub const GENERAL: &[Section] = &[
                 Kind::Seconds,
             ),
             f(
+                &["general", "suspend_after"],
+                "Suspend after",
+                "Time without input before the computer suspends. The screen locks first.",
+                Kind::Seconds,
+            ),
+            f(
                 &["general", "locker"],
                 "Screen locker",
                 "Used by Lock and Suspend in the power menu. Empty uses the first installed of hyprlock, swaylock, gtklock and waylock.",

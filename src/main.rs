@@ -227,6 +227,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ipc_path = state.start_ipc();
     state.watch_config();
     state.arm_idle_power_off();
+    state.arm_idle_suspend();
     state.start_clock_timer();
     state.start_status_timer();
     state.start_dbus();

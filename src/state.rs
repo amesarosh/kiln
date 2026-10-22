@@ -189,6 +189,8 @@ pub struct State {
     /// When the last input happened, for `monitors_off_after`.
     pub last_activity: Instant,
     pub idle_power_timer: Option<smithay::reexports::calloop::RegistrationToken>,
+    /// The `suspend_after` countdown; None while off or after it fired, until the next input.
+    pub idle_suspend_timer: Option<smithay::reexports::calloop::RegistrationToken>,
     /// Damage-tracking ids for the lock screen fill: [normal, locker died].
     pub lock_fill_ids: [Id; 2],
 
@@ -347,6 +349,7 @@ impl State {
             powered_off: Vec::new(),
             last_activity: Instant::now(),
             idle_power_timer: None,
+            idle_suspend_timer: None,
             output_powers: Vec::new(),
             clipboard: Default::default(),
             foreign_toplevels,
@@ -1485,9 +1488,13 @@ impl State {
             self.output_overrides.clear();
         }
         let idle_changed = config.general.monitors_off_after != self.config.general.monitors_off_after;
+        let suspend_changed = config.general.suspend_after != self.config.general.suspend_after;
         self.config = config;
         if idle_changed {
             self.arm_idle_power_off();
+        }
+        if suspend_changed {
+            self.arm_idle_suspend();
         }
         if outputs_changed {
             self.apply_output_config();

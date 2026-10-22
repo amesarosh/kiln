@@ -100,6 +100,12 @@ impl State {
             p.map_or(Ok(default), |s| s.parse().map_err(|_| format!("\"{s}\" is not a number")))
         };
         let time = self.start_time.elapsed().as_millis() as u32;
+        // Fake input counts as activity, like real input does.
+        if matches!(name, "pointer" | "press" | "click" | "key") {
+            let seat = self.seat.clone();
+            self.idle_notifier.notify_activity(&seat);
+            self.note_activity(true);
+        }
         match name {
             "pointer" => {
                 let (x, y) = (num(parts.next(), 0.0)?, num(parts.next(), 0.0)?);

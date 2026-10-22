@@ -122,6 +122,8 @@ pub struct General {
     pub autostart: Vec<String>,
     /// Seconds without input before monitors turn off; 0 never.
     pub monitors_off_after: u64,
+    /// Seconds without input before the computer suspends (locking first); 0 never.
+    pub suspend_after: u64,
     /// Run X11 apps through Xwayland. Read at startup only.
     pub xwayland: bool,
     /// Keep the clipboard after the app that copied closes.

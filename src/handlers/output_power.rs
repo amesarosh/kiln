@@ -73,6 +73,10 @@ impl State {
     /// Input happened: monitors wake up, and the idle power-off countdown restarts.
     pub fn note_activity(&mut self, wakes: bool) {
         self.last_activity = Instant::now();
+        // The suspend countdown stops once it fires; input after waking starts it again.
+        if self.idle_suspend_timer.is_none() && self.config.general.suspend_after > 0 {
+            self.arm_idle_suspend();
+        }
         if wakes && self.any_monitor_off() {
             self.set_all_monitors_power(true);
         }
