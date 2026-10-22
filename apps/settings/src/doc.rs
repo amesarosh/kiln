@@ -155,7 +155,9 @@ impl ConfigDoc {
 
     /// The saved theme in use, or `None` for the built-in one.
     pub fn theme_name(&self) -> Option<String> {
-        self.user_raw(&["theme", "name"]).and_then(Item::as_str).map(String::from)
+        self.user_raw(&["theme", "name"])
+            .and_then(Item::as_str)
+            .map(String::from)
     }
 
     /// Saved theme names.
@@ -224,7 +226,8 @@ impl ConfigDoc {
             return;
         };
         let mut out = DocumentMut::new();
-        out.decor_mut().set_prefix(format!("# wayland-time theme \"{name}\"\n\n"));
+        out.decor_mut()
+            .set_prefix(format!("# wayland-time theme \"{name}\"\n\n"));
         let root = out.as_table_mut();
         for (k, v) in defaults.iter() {
             root.insert(k, v.clone());
@@ -298,7 +301,13 @@ impl ConfigDoc {
         let names = self.theme_names();
         let taken = |n: &str| names.iter().any(|t| t.eq_ignore_ascii_case(n));
         (1..)
-            .map(|i| if i == 1 { base.to_string() } else { format!("{base} {i}") })
+            .map(|i| {
+                if i == 1 {
+                    base.to_string()
+                } else {
+                    format!("{base} {i}")
+                }
+            })
             .find(|n| !taken(n))
             .expect("some number is free")
     }
@@ -715,7 +724,10 @@ mod tests {
 
     #[test]
     fn themes_save_switch_and_delete() {
-        let (dir, mut d) = temp_config("themes", "# mine\n[theme]\nradius = 2\n[theme.colors]\naccent = \"#ff0000\"\n");
+        let (dir, mut d) = temp_config(
+            "themes",
+            "# mine\n[theme]\nradius = 2\n[theme.colors]\naccent = \"#ff0000\"\n",
+        );
         let red = [1.0, 0.0, 0.0, 1.0];
 
         // Saving moves the config's theme settings into the new file.
@@ -734,7 +746,11 @@ mod tests {
         // Edits now go to the theme file.
         d.set(&["theme", "radius"], 7);
         save_now(&mut d);
-        assert!(std::fs::read_to_string(dir.join("themes/Red.toml")).unwrap().contains("radius = 7"));
+        assert!(
+            std::fs::read_to_string(dir.join("themes/Red.toml"))
+                .unwrap()
+                .contains("radius = 7")
+        );
         assert!(!std::fs::read_to_string(&d.path).unwrap().contains("radius"));
         assert!(d.changed(&["theme", "radius"]));
 

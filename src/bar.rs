@@ -964,7 +964,11 @@ impl State {
         } else {
             (x, from_rect.w, to_rect.x, to_rect.x + to_rect.w)
         };
-        let lands = if to_idx > from { p >= end - size } else { p < start + size };
+        let lands = if to_idx > from {
+            p >= end - size
+        } else {
+            p < start + size
+        };
         if !lands {
             return;
         }

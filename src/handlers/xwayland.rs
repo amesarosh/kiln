@@ -148,11 +148,18 @@ impl X11Props {
     /// at title-bar insets and ignores every resize that arrives with the reparent, so the
     /// window stays blank. Done before mapping, which reparents.
     fn set_no_frame(&self, window: u32) {
-        let set = self
-            .conn
-            .change_property32(PropMode::REPLACE, window, self.frame_extents, AtomEnum::CARDINAL, &[0; 4]);
+        let set = self.conn.change_property32(
+            PropMode::REPLACE,
+            window,
+            self.frame_extents,
+            AtomEnum::CARDINAL,
+            &[0; 4],
+        );
         // Waits for it, so the property is there before the window manager reparents.
-        if let Err(e) = set.map_err(|e| e.to_string()).and_then(|c| c.check().map_err(|e| e.to_string())) {
+        if let Err(e) = set
+            .map_err(|e| e.to_string())
+            .and_then(|c| c.check().map_err(|e| e.to_string()))
+        {
             tracing::debug!("could not set _NET_FRAME_EXTENTS: {e}");
         }
     }

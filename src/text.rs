@@ -26,7 +26,13 @@ use crate::config::Color;
 use wt_config::fonts::Subpixel;
 
 /// FreeType's default LCD filter, spreading each subpixel over its neighbours to tame color fringes.
-const LCD_FILTER: [f32; 5] = [0x08 as f32 / 256.0, 0x4D as f32 / 256.0, 0x56 as f32 / 256.0, 0x4D as f32 / 256.0, 0x08 as f32 / 256.0];
+const LCD_FILTER: [f32; 5] = [
+    0x08 as f32 / 256.0,
+    0x4D as f32 / 256.0,
+    0x56 as f32 / 256.0,
+    0x4D as f32 / 256.0,
+    0x08 as f32 / 256.0,
+];
 
 pub struct Text {
     font: FontVec,
@@ -50,7 +56,12 @@ impl Text {
                 Ok(font) => {
                     let subpixel = wt_config::fonts::subpixel(name);
                     tracing::info!("ui font: {} (subpixel: {subpixel:?})", path.display());
-                    return Some(Self { font, data, hinting: RefCell::new(None), subpixel });
+                    return Some(Self {
+                        font,
+                        data,
+                        hinting: RefCell::new(None),
+                        subpixel,
+                    });
                 }
                 Err(e) => tracing::warn!("{}: not a usable font: {e}", path.display()),
             }
@@ -61,7 +72,11 @@ impl Text {
 
     /// Kerning before `id` and its advance after, both rounded so every glyph starts on a
     /// whole pixel. `width` and `draw` must agree on these.
-    fn spacing(font: &ab_glyph::PxScaleFont<&FontVec>, prev: Option<ab_glyph::GlyphId>, id: ab_glyph::GlyphId) -> (f32, f32) {
+    fn spacing(
+        font: &ab_glyph::PxScaleFont<&FontVec>,
+        prev: Option<ab_glyph::GlyphId>,
+        id: ab_glyph::GlyphId,
+    ) -> (f32, f32) {
         let kern = prev.map_or(0.0, |p| font.kern(p, id));
         (kern.round(), font.h_advance(id).round())
     }
@@ -106,7 +121,9 @@ impl Text {
     pub fn draw(&self, canvas: &mut Canvas, text: &str, px: f32, at: (f32, f32), color: Color, clip: (i32, i32)) {
         let (x, baseline) = (at.0.round(), at.1.round());
         let font = self.font.as_scaled(PxScale::from(px));
-        let Ok(sk) = FontRef::from_index(&self.data, 0) else { return };
+        let Ok(sk) = FontRef::from_index(&self.data, 0) else {
+            return;
+        };
         let outlines = sk.outline_glyphs();
         // ab_glyph sizes text by ascent-to-descent height; skrifa by the em square.
         let ppem = px * self.font.units_per_em().unwrap_or(1000.0) / self.font.height_unscaled();
@@ -114,7 +131,11 @@ impl Text {
         let mut hinting = self.hinting.borrow_mut();
         if hinting.as_ref().is_none_or(|(size, _)| *size != ppem) {
             let options = HintingOptions::from(Target::Smooth {
-                mode: if self.subpixel == Subpixel::None { SmoothMode::Normal } else { SmoothMode::Lcd },
+                mode: if self.subpixel == Subpixel::None {
+                    SmoothMode::Normal
+                } else {
+                    SmoothMode::Lcd
+                },
                 symmetric_rendering: true,
                 // Keep the font's own advances, so `width` (from ab_glyph) stays exact.
                 preserve_linear_metrics: true,
@@ -136,7 +157,9 @@ impl Text {
             caret += advance;
             prev = Some(id);
 
-            let Some(glyph) = outlines.get(GlyphId::new(id.0 as u32)) else { continue };
+            let Some(glyph) = outlines.get(GlyphId::new(id.0 as u32)) else {
+                continue;
+            };
             let settings = match hinting.as_ref() {
                 Some((_, h)) => DrawSettings::hinted(h, false),
                 None => DrawSettings::unhinted(Size::new(ppem), LocationRef::default()),
@@ -274,7 +297,8 @@ impl OutlinePen for Path {
     }
 
     fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
-        self.segments.push(Segment::Cubic([self.last, (cx0, cy0), (cx1, cy1), (x, y)]));
+        self.segments
+            .push(Segment::Cubic([self.last, (cx0, cy0), (cx1, cy1), (x, y)]));
         self.last = (x, y);
     }
 
@@ -355,7 +379,11 @@ impl Canvas {
             return;
         }
         let dst = &mut self.px[(y * self.w + x) as usize];
-        let rgb = if dst[3] < 0.999 { [(rgb[0] + rgb[1] + rgb[2]) / 3.0; 3] } else { rgb };
+        let rgb = if dst[3] < 0.999 {
+            [(rgb[0] + rgb[1] + rgb[2]) / 3.0; 3]
+        } else {
+            rgb
+        };
         let rgb = rgb.map(|c| text_coverage(c, src) * src[3]);
         // Straight alpha: the channels share one alpha, so use their average for it.
         let a = (rgb[0] + rgb[1] + rgb[2]) / 3.0;
@@ -470,4 +498,3 @@ mod tests {
         assert_eq!(c.to_premultiplied_rgba().len(), 16);
     }
 }
-

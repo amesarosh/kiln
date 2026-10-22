@@ -558,8 +558,7 @@ impl Config {
                 return Err(err(format!("theme.name \"{name}\" can't be used as a file name")));
             }
             let text = theme_text(name).map_err(|e| err(format!("theme \"{name}\": {e}")))?;
-            let table: toml::Table =
-                toml::from_str(&text).map_err(|e| err(format!("theme \"{name}\": {e}")))?;
+            let table: toml::Table = toml::from_str(&text).map_err(|e| err(format!("theme \"{name}\": {e}")))?;
             if table.contains_key("name") {
                 return Err(err(format!("theme \"{name}\": a theme file can't pick another theme")));
             }
@@ -1218,9 +1217,18 @@ mod tests {
         assert_eq!(parse_action("master-ratio -0.05").unwrap(), Action::MasterRatio(-0.05));
         assert_eq!(parse_action("workspace 3").unwrap(), Action::Workspace(3));
         assert_eq!(parse_action("power-off-monitors").unwrap(), Action::PowerOffMonitors);
-        assert_eq!(parse_action("volume +5").unwrap(), Action::Volume(VolumeChange::Step(5)));
-        assert_eq!(parse_action("volume -2%").unwrap(), Action::Volume(VolumeChange::Step(-2)));
-        assert_eq!(parse_action("volume mute").unwrap(), Action::Volume(VolumeChange::ToggleMute));
+        assert_eq!(
+            parse_action("volume +5").unwrap(),
+            Action::Volume(VolumeChange::Step(5))
+        );
+        assert_eq!(
+            parse_action("volume -2%").unwrap(),
+            Action::Volume(VolumeChange::Step(-2))
+        );
+        assert_eq!(
+            parse_action("volume mute").unwrap(),
+            Action::Volume(VolumeChange::ToggleMute)
+        );
         assert!(parse_action("volume 5").is_err());
         assert!(parse_action("volume +0").is_err());
         assert_eq!(

@@ -5,7 +5,9 @@ use smithay::{
     },
     input::{
         keyboard::{FilterResult, Keysym, ModifiersState},
-        pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GrabStartData, MotionEvent, RelativeMotionEvent},
+        pointer::{
+            AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GrabStartData, MotionEvent, RelativeMotionEvent,
+        },
     },
     utils::{Logical, Point, SERIAL_COUNTER},
 };

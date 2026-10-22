@@ -212,12 +212,17 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                 });
 
                 widgets::divider(ui, p);
-                widgets::row(ui, p, info("Clock", "A 12-hour clock at the bottom of this bar."), |ui| {
-                    let mut on = get("clock").and_then(|i| i.as_bool()).unwrap_or(false);
-                    if widgets::toggle(ui, p, &mut on).changed() {
-                        edits.push(("clock", on.then(|| true.into())));
-                    }
-                });
+                widgets::row(
+                    ui,
+                    p,
+                    info("Clock", "A 12-hour clock at the bottom of this bar."),
+                    |ui| {
+                        let mut on = get("clock").and_then(|i| i.as_bool()).unwrap_or(false);
+                        if widgets::toggle(ui, p, &mut on).changed() {
+                            edits.push(("clock", on.then(|| true.into())));
+                        }
+                    },
+                );
 
                 widgets::divider(ui, p);
                 widgets::row(ui, p, info("Layout", "What its workspaces start with."), |ui| {

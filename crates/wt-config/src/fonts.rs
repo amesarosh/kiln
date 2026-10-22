@@ -61,8 +61,15 @@ pub enum Subpixel {
 /// Vertical stripes and an unset order fall back to grayscale.
 pub fn subpixel(name: &str) -> Subpixel {
     let query = if name.contains('/') { "sans" } else { name };
-    let out = std::process::Command::new("fc-match").args(["-f", "%{rgba}", query]).output();
-    match out.ok().and_then(|o| String::from_utf8(o.stdout).ok()).as_deref().map(str::trim) {
+    let out = std::process::Command::new("fc-match")
+        .args(["-f", "%{rgba}", query])
+        .output();
+    match out
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .as_deref()
+        .map(str::trim)
+    {
         Some("1") => Subpixel::Rgb,
         Some("2") => Subpixel::Bgr,
         _ => Subpixel::None,
