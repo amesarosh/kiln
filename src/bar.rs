@@ -1,5 +1,5 @@
 //! The built-in bar: workspace buttons, one tab per window, status widgets (tray icons, media,
-//! network, battery, brightness, notifications), a row of buttons at the end (layout,
+//! network, battery, brightness), a row of buttons at the end (layout, the notifications bell,
 //! settings, power), and optionally a clock.
 //!
 //! The bar is painted on the CPU into a single image, and only repainted when what it shows
@@ -116,6 +116,16 @@ pub struct BarDrag {
 /// bottom row of a side bar. New buttons go here. `Layout` must stay first: it's the wide one,
 /// and on a side bar it takes whatever room the others leave in their row.
 const END_BUTTONS: [Part; 3] = [Part::Layout, Part::Settings, Part::Power];
+
+/// The end buttons for this bar: the notifications bell, when shown, goes right after the
+/// layout button.
+fn end_buttons(m: &Model) -> Vec<Part> {
+    let mut parts = END_BUTTONS.to_vec();
+    if m.status.iter().any(|i| i.part == Part::Bell) {
+        parts.insert(1, Part::Bell);
+    }
+    parts
+}
 
 /// What the settings button runs, and the app id its window has.
 const SETTINGS_APP: &str = "wayland-time-settings";
@@ -336,7 +346,7 @@ impl Bar {
 
         // End buttons, placed from the right edge inwards.
         let mut end = width;
-        for part in END_BUTTONS.into_iter().rev() {
+        for part in end_buttons(m).into_iter().rev() {
             let w = if part == Part::Layout { h + 8 } else { h };
             end -= w;
             parts.push((Rect::new(end, 0, w, h), part));
@@ -347,7 +357,7 @@ impl Bar {
             parts.push((Rect::new(end, 0, w, h), Part::Clock));
         }
         // Status widgets before the clock, as long as they leave room for the workspaces.
-        for item in m.status.iter().rev() {
+        for item in m.status.iter().rev().filter(|i| i.part != Part::Bell) {
             if end - item.w < x + 40 {
                 break;
             }
@@ -390,8 +400,14 @@ impl Bar {
             parts.push((Rect::new(0, bottom, w, row), Part::Clock));
             bottom -= row;
         }
-        let mut items: Vec<(i32, Part)> = m.status.iter().map(|i| (i.w.min(w), i.part)).collect();
-        items.extend(END_BUTTONS.map(|p| (row, p)));
+        let buttons = end_buttons(m);
+        let mut items: Vec<(i32, Part)> = m
+            .status
+            .iter()
+            .filter(|i| i.part != Part::Bell)
+            .map(|i| (i.w.min(w), i.part))
+            .collect();
+        items.extend(buttons.iter().map(|&p| (row, p)));
         let mut end = items.len();
         while end > 0 {
             // Room for this row, but always room for the bottom one with the buttons.
@@ -408,13 +424,13 @@ impl Bar {
             let mut x = 0;
             let mut right = w;
             for &(iw, part) in items[start..end].iter().rev() {
-                if END_BUTTONS.contains(&part) {
+                if buttons.contains(&part) {
                     right -= iw;
                     parts.push((Rect::new(right, bottom, iw, row), part));
                 }
             }
             for &(iw, part) in &items[start..end] {
-                if !END_BUTTONS.contains(&part) {
+                if !buttons.contains(&part) {
                     parts.push((Rect::new(x, bottom, iw, row), part));
                     x += iw;
                 }
@@ -1587,7 +1603,7 @@ mod tests {
             ys.dedup();
             ys.len()
         };
-        // Two tray icons, the bell and three buttons: 6 x 28 fits in 180.
+        // Two tray icons and four buttons (with the bell): 6 x 28 fits in 180.
         let mut m = model((180, 1400), BarPosition::Left, &[], None);
         m.status = tray(2);
         let parts = bar.layout(&m);
@@ -1600,9 +1616,28 @@ mod tests {
         let parts = bar.layout(&m);
         assert_eq!(rows(&parts), 2);
         let bottom = parts.iter().map(|(r, _)| r.y).max().unwrap();
-        for b in END_BUTTONS {
+        for b in end_buttons(&m) {
             assert_eq!(parts.iter().find(|(_, p)| *p == b).unwrap().0.y, bottom);
         }
+        // The bell sits right after the layout button.
+        let x = |part: Part| parts.iter().find(|(_, p)| *p == part).unwrap().0.x;
+        assert_eq!(x(Part::Bell), x(Part::Layout) + 28);
+        assert_eq!(x(Part::Settings), x(Part::Bell) + 28);
+    }
+
+    #[test]
+    fn bell_goes_after_the_layout_button() {
+        let bar = Bar::new(&Config::default().bar);
+        let mut m = model((1200, 28), BarPosition::Top, &[], None);
+        m.status = vec![StatusItem {
+            part: Part::Bell,
+            w: 28,
+            look: Look::Bell { unread: false, dnd: false },
+        }];
+        let parts = bar.layout(&m);
+        let x = |part: Part| parts.iter().find(|(_, p)| *p == part).unwrap().0;
+        assert_eq!(x(Part::Bell).x, x(Part::Layout).x + x(Part::Layout).w);
+        assert_eq!(x(Part::Settings).x, x(Part::Bell).x + 28);
     }
 
     #[test]
@@ -1656,6 +1691,21 @@ mod tests {
         );
         let mut m = m;
         m.clock = Some(clock_text());
+        m.status = vec![
+            StatusItem {
+                part: Part::Battery,
+                w: 64,
+                look: Look::Icon {
+                    name: "battery-good-symbolic".into(),
+                    label: Some("80%".into()),
+                },
+            },
+            StatusItem {
+                part: Part::Bell,
+                w: size.1.min(m.config.height),
+                look: Look::Bell { unread: true, dnd: false },
+            },
+        ];
         // Two named workspaces, one with an icon too.
         for (i, name, icon) in [(0, "web", "firefox"), (2, "chat", "")] {
             m.workspaces[i].name = name.into();
