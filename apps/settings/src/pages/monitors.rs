@@ -1,4 +1,5 @@
-//! Per-monitor settings (`[[outputs]]`): mode, scale, position, rotation, bar, clock and layout.
+//! Per-monitor settings (`[[outputs]]`): mode, scale, position, rotation, HDR, bar, clock and
+//! layout.
 
 use toml_edit::{Item, Table, Value};
 use wt_config::theme::Palette;
@@ -194,6 +195,38 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                         edits.push(("transform", (t != "normal").then(|| t.into())));
                     }
                 });
+
+                widgets::divider(ui, p);
+                let hdr = get("hdr").and_then(|i| i.as_bool()).unwrap_or(false);
+                widgets::row(
+                    ui,
+                    p,
+                    info("HDR", "Brighter highlights and richer colours, on monitors that support HDR10."),
+                    |ui| {
+                        let mut on = hdr;
+                        if widgets::toggle(ui, p, &mut on).changed() {
+                            edits.push(("hdr", on.then(|| true.into())));
+                        }
+                    },
+                );
+                if hdr {
+                    widgets::divider(ui, p);
+                    widgets::row(
+                        ui,
+                        p,
+                        info("SDR brightness", "How bright ordinary windows are in HDR mode."),
+                        |ui| {
+                            let mut nits = get("sdr_brightness")
+                                .and_then(|i| crate::doc::as_number(&i))
+                                .unwrap_or(wt_config::config::DEFAULT_SDR_BRIGHTNESS as f64);
+                            if widgets::slider(ui, p, &mut nits, 80.0..=600.0, 0, "nits").changed() {
+                                let v = nits.round() as i64;
+                                let default = wt_config::config::DEFAULT_SDR_BRIGHTNESS as i64;
+                                edits.push(("sdr_brightness", (v != default).then(|| v.into())));
+                            }
+                        },
+                    );
+                }
 
                 widgets::divider(ui, p);
                 widgets::row(ui, p, info("Bar", ""), |ui| {

@@ -97,11 +97,13 @@ impl State {
         let mut parts = cmd.split_whitespace();
         let name = parts.next().unwrap_or_default();
         let num = |p: Option<&str>, default: f64| -> Result<f64, String> {
-            p.map_or(Ok(default), |s| s.parse().map_err(|_| format!("\"{s}\" is not a number")))
+            p.map_or(Ok(default), |s| {
+                s.parse().map_err(|_| format!("\"{s}\" is not a number"))
+            })
         };
         let time = self.start_time.elapsed().as_millis() as u32;
         // Fake input counts as activity, like real input does.
-        if matches!(name, "pointer" | "press" | "click" | "key") {
+        if matches!(name, "pointer" | "press" | "click" | "key" | "keydown" | "keyup") {
             let seat = self.seat.clone();
             self.idle_notifier.notify_activity(&seat);
             self.note_activity(true);
@@ -124,6 +126,32 @@ impl State {
                 let code = num(parts.next(), 1.0)? as u32 + 8;
                 self.on_key_raw(code.into(), KeyState::Pressed, time);
                 self.on_key_raw(code.into(), KeyState::Released, time);
+            }
+            // Hold a key (a modifier, say) down, or let it go, to test combinations.
+            "keydown" | "keyup" => {
+                let code = num(parts.next(), 1.0)? as u32 + 8;
+                let st = if name == "keydown" {
+                    KeyState::Pressed
+                } else {
+                    KeyState::Released
+                };
+                self.on_key_raw(code.into(), st, time);
+            }
+            // Which monitors would flip without vsync now (a fullscreen game asked to tear).
+            "tearing" => {
+                let outputs: Vec<_> = self.monitors.iter().map(|m| m.output.clone()).collect();
+                let lines: Vec<String> = outputs
+                    .iter()
+                    .map(|o| format!("{} {}", o.name(), self.output_wants_tearing(o)))
+                    .collect();
+                return Ok(lines.join("; "));
+            }
+            // Save what a headless output last showed, as a monitor would get it.
+            "dump" => {
+                let (Some(name), Some(path)) = (parts.next(), parts.next()) else {
+                    return Err("usage: test-dump <output> <file.ppm>".into());
+                };
+                crate::backend::headless::dump(self, name, path)?;
             }
             // Where everything on the focused monitor's bar is, one "part x y w h" per line.
             "bar" => return Ok(self.bar_parts_debug().join("; ")),

@@ -6,7 +6,7 @@ use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer, Texture,
         element::{
-            AsRenderElements, Id, Kind,
+            AsRenderElements, Element, Id, Kind,
             memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             render_elements,
             solid::SolidColorRenderElement,
@@ -33,6 +33,42 @@ render_elements! {
     Memory=MemoryRenderBufferRenderElement<R>,
     /// Windows drawn smaller, as overview thumbnails.
     Rescaled=smithay::backend::renderer::element::utils::RescaleRenderElement<WaylandSurfaceRenderElement<R>>,
+}
+
+render_elements! {
+    /// What a backend actually draws: the scene, with colour-managed surfaces converted, and on
+    /// an HDR monitor the encoded frame.
+    pub FrameElement<=smithay::backend::renderer::gles::GlesRenderer>;
+    Plain=OutputElement<smithay::backend::renderer::gles::GlesRenderer>,
+    Color=crate::hdr::ColorElement,
+    Encode=crate::hdr::HdrEncodeElement,
+}
+
+/// The scene for `output`, ready to draw onto `target`: surfaces that described their colours
+/// are converted for it.
+pub fn frame_elements(
+    state: &State,
+    renderer: &mut smithay::backend::renderer::gles::GlesRenderer,
+    output: &Output,
+    cursor: CursorDraw<'_>,
+    target: crate::color::Target,
+) -> Vec<FrameElement> {
+    let elements = output_elements(state, renderer, output, cursor);
+    let described = state.color_described_surfaces();
+    if described.is_empty() {
+        return elements.into_iter().map(FrameElement::Plain).collect();
+    }
+    let hdr = target == crate::color::Target::HdrIntermediate;
+    elements
+        .into_iter()
+        .map(|e| {
+            let Some((_, desc)) = described.iter().find(|(id, _)| id == e.id()) else {
+                return FrameElement::Plain(e);
+            };
+            let params = crate::color::ConvertParams::new(desc, target);
+            crate::hdr::ColorElement::wrap(renderer, e, &params, hdr)
+        })
+        .collect()
 }
 
 /// What the pointer should look like this frame, for backends that draw it.

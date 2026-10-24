@@ -30,7 +30,7 @@ use smithay::{
 
 use super::Backend;
 use crate::{
-    render::{self, CursorDraw, OutputElement},
+    render::{self, CursorDraw, FrameElement},
     state::State,
 };
 
@@ -40,6 +40,9 @@ const FRAME: Duration = Duration::from_micros(16_667);
 pub struct HeadlessData {
     renderer: GlesRenderer,
     outputs: Vec<(Output, OutputDamageTracker, GlesTexture)>,
+    /// Outputs with `hdr = true` in the config are drawn like an HDR monitor would be, so the
+    /// HDR path can be tested (see `msg test-dump`).
+    hdr: std::collections::HashMap<String, crate::hdr::HdrPipeline>,
 }
 
 impl HeadlessData {
@@ -153,7 +156,11 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
         outputs.push((output, tracker, texture));
     }
     let list: Vec<Output> = outputs.iter().map(|(o, _, _)| o.clone()).collect();
-    state.backend = Some(Backend::Headless(HeadlessData { renderer, outputs }));
+    state.backend = Some(Backend::Headless(HeadlessData {
+        renderer,
+        outputs,
+        hdr: Default::default(),
+    }));
     state.layout_monitors();
     for o in list {
         state.add_monitor(o);
@@ -168,7 +175,9 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
 
 /// Re-apply output scales after a config change.
 pub fn apply_output_config(state: &mut State) {
-    let Some(Backend::Headless(data)) = &state.backend else { return };
+    let Some(Backend::Headless(data)) = &state.backend else {
+        return;
+    };
     let outputs: Vec<Output> = data.outputs.iter().map(|(o, _, _)| o.clone()).collect();
     for o in &outputs {
         let cfg = state.output_config(&o.name());
@@ -191,16 +200,57 @@ fn render(state: &mut State) {
     let clear = state.config.decoration.background;
     let mut feedback = Vec::new();
     let mut damaged = Vec::new();
-    for (output, tracker, texture) in &mut data.outputs {
-        let elements: Vec<OutputElement<GlesRenderer>> =
-            render::output_elements(state, &mut data.renderer, output, CursorDraw::None);
-        let Ok(mut fb) = data.renderer.bind(texture) else { continue };
-        match tracker.render_output(&mut data.renderer, &mut fb, 0, &elements, clear) {
+    let HeadlessData { renderer, outputs, hdr } = &mut data;
+    for (output, tracker, texture) in outputs.iter_mut() {
+        let cfg = state.output_config(&output.name());
+        let mut hdr_states = None;
+        let elements = if cfg.hdr {
+            // Pretend to be an HDR400 monitor.
+            let params = crate::color::HdrOutputParams {
+                sdr_white: cfg.sdr_brightness as f64,
+                peak: 400.0,
+            };
+            if hdr.get(&output.name()).is_none_or(|p| !p.matches(output, params)) {
+                match crate::hdr::HdrPipeline::new(renderer, output, params) {
+                    Ok(p) => {
+                        hdr.insert(output.name(), p);
+                    }
+                    Err(e) => tracing::warn!("headless HDR: {e}"),
+                }
+            }
+            let scene = render::frame_elements(
+                state,
+                renderer,
+                output,
+                CursorDraw::None,
+                crate::color::Target::HdrIntermediate,
+            );
+            match hdr
+                .get_mut(&output.name())
+                .map(|p| (p.render(renderer, &scene, clear), p))
+            {
+                Some((Ok((states, _)), p)) => {
+                    hdr_states = Some(states);
+                    p.element(renderer).map(FrameElement::Encode).into_iter().collect()
+                }
+                Some((Err(e), _)) => {
+                    tracing::warn!("headless HDR render failed: {e}");
+                    Vec::new()
+                }
+                None => scene,
+            }
+        } else {
+            hdr.remove(&output.name());
+            render::frame_elements(state, renderer, output, CursorDraw::None, crate::color::Target::Sdr)
+        };
+        let Ok(mut fb) = renderer.bind(texture) else { continue };
+        match tracker.render_output(renderer, &mut fb, 0, &elements, clear) {
             Ok(result) => {
                 if result.damage.is_some_and(|d| !d.is_empty()) {
                     damaged.push(output.clone());
                 }
-                feedback.push(render::take_presentation_feedback(state, output, &result.states));
+                let states = hdr_states.as_ref().unwrap_or(&result.states);
+                feedback.push(render::take_presentation_feedback(state, output, states));
             }
             Err(e) => tracing::warn!("headless render failed: {e:?}"),
         }
@@ -213,7 +263,9 @@ fn render(state: &mut State) {
     for mut f in feedback {
         let refresh = f
             .output()
-            .map_or(smithay::wayland::presentation::Refresh::Unknown, |o| render::refresh_of(&o));
+            .map_or(smithay::wayland::presentation::Refresh::Unknown, |o| {
+                render::refresh_of(&o)
+            });
         f.presented(now, refresh, 0, Kind::Vsync);
     }
     for o in &damaged {
@@ -235,13 +287,44 @@ fn render(state: &mut State) {
 pub fn capture<T>(
     state: &mut State,
     output: &Output,
-    f: impl FnOnce(&mut GlesRenderer, &[OutputElement<GlesRenderer>]) -> T,
+    f: impl FnOnce(&mut GlesRenderer, &[FrameElement]) -> T,
 ) -> Option<T> {
     let Some(Backend::Headless(mut data)) = state.backend.take() else {
         return None;
     };
-    let elements = render::output_elements(state, &mut data.renderer, output, CursorDraw::None);
+    let elements = render::frame_elements(
+        state,
+        &mut data.renderer,
+        output,
+        CursorDraw::None,
+        crate::color::Target::Sdr,
+    );
     let result = f(&mut data.renderer, &elements);
     state.backend = Some(Backend::Headless(data));
     Some(result)
+}
+
+/// Save what `output` last showed (what a monitor would be sent: PQ-encoded on an HDR output)
+/// as a binary PPM, for tests.
+pub fn dump(state: &mut State, name: &str, path: &str) -> Result<(), String> {
+    use smithay::backend::renderer::{ExportMem, Texture};
+    let Some(Backend::Headless(data)) = state.backend.as_mut() else {
+        return Err("not the headless backend".into());
+    };
+    let HeadlessData { renderer, outputs, .. } = data;
+    let (_, _, texture) = outputs
+        .iter_mut()
+        .find(|(o, _, _)| o.name() == name)
+        .ok_or_else(|| format!("no output {name}"))?;
+    let size = texture.size();
+    let fb = renderer.bind(texture).map_err(|e| e.to_string())?;
+    let mapping = renderer
+        .copy_framebuffer(&fb, smithay::utils::Rectangle::from_size(size), Fourcc::Abgr8888)
+        .map_err(|e| e.to_string())?;
+    let pixels = renderer.map_texture(&mapping).map_err(|e| e.to_string())?;
+    let mut ppm = format!("P6\n{} {}\n255\n", size.w, size.h).into_bytes();
+    for px in pixels.chunks_exact(4) {
+        ppm.extend_from_slice(&px[..3]);
+    }
+    std::fs::write(path, ppm).map_err(|e| e.to_string())
 }

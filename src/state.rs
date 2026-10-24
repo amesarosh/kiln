@@ -118,6 +118,9 @@ pub struct State {
     #[allow(dead_code)]
     pub cursor_shape_state: smithay::wayland::cursor_shape::CursorShapeManagerState,
     pub activation_state: smithay::wayland::xdg_activation::XdgActivationState,
+    pub shortcuts_inhibit_state: smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
+    /// wp_color_management_v1: image descriptions handed out, and who watches what.
+    pub color: crate::handlers::color_management::ColorManagement,
     /// Tells apps (video players, games) exactly when their frames reached the screen.
     #[allow(dead_code)]
     pub presentation_state: smithay::wayland::presentation::PresentationState,
@@ -275,6 +278,8 @@ impl State {
             smithay::wayland::pointer_constraints::PointerConstraintsState::new::<Self>(&dh);
         let relative_pointer_state = smithay::wayland::relative_pointer::RelativePointerManagerState::new::<Self>(&dh);
         let activation_state = smithay::wayland::xdg_activation::XdgActivationState::new::<Self>(&dh);
+        let shortcuts_inhibit_state =
+            smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState::new::<Self>(&dh);
         let cursor_shape_state = smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
         let pointer_gestures_state = smithay::wayland::pointer_gestures::PointerGesturesState::new::<Self>(&dh);
         let clock = smithay::utils::Clock::<smithay::utils::Monotonic>::new();
@@ -282,6 +287,8 @@ impl State {
             smithay::wayland::presentation::PresentationState::new::<Self>(&dh, clock.id() as u32);
         Self::create_output_power_global(&dh);
         Self::create_screencopy_global(&dh);
+        Self::create_tearing_control_global(&dh);
+        Self::create_color_management_global(&dh);
         Self::create_output_management_global(&dh);
         let foreign_toplevels = crate::handlers::foreign_toplevel::ForeignToplevels::new(&dh);
 
@@ -298,6 +305,9 @@ impl State {
             tracing::error!("keyboard layout \"{}\" failed to load, falling back to us", kb.layout);
             seat.add_keyboard(XkbConfig::default(), kb.repeat_delay, kb.repeat_rate)
                 .expect("default keymap");
+        }
+        if kb.numlock {
+            set_numlock(&seat.get_keyboard().unwrap());
         }
         seat.add_pointer();
 
@@ -336,6 +346,8 @@ impl State {
             relative_pointer_state,
             cursor_shape_state,
             activation_state,
+            shortcuts_inhibit_state,
+            color: Default::default(),
             presentation_state,
             clock,
             keyboard_focus_moved: false,
@@ -1322,6 +1334,7 @@ impl State {
             Action::Launcher => self.toggle_launcher(),
             Action::Lock => self.power(crate::power::PowerAction::Lock),
             Action::Media(change) => self.media_key(change),
+            Action::ToggleShortcutsInhibit => self.toggle_shortcuts_inhibit(),
         }
     }
 
@@ -1459,6 +1472,9 @@ impl State {
             };
             if keyboard.set_xkb_config(self, xkb).is_err() {
                 tracing::error!("keyboard layout \"{}\" failed to load", kb.layout);
+            } else if kb.numlock {
+                // A new keymap starts with every lock off.
+                set_numlock(&keyboard);
             }
             keyboard.change_repeat_info(kb.repeat_rate, kb.repeat_delay);
         }
@@ -1890,4 +1906,11 @@ fn restart_portals() {
         Ok(s) => tracing::warn!("restarting desktop portals: systemctl exited with {s}"),
         Err(e) => tracing::warn!("could not restart desktop portals: {e}"),
     }
+}
+
+/// Turn Num Lock on, keeping the other modifiers as they are.
+fn set_numlock(keyboard: &KeyboardHandle<State>) {
+    let mut mods = keyboard.modifier_state();
+    mods.num_lock = true;
+    keyboard.set_modifier_state(mods);
 }

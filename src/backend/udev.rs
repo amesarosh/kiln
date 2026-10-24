@@ -47,12 +47,21 @@ use super::Backend;
 use crate::{
     config::ModeSpec,
     cursor::Cursor,
-    render::{self, CursorDraw, OutputElement},
+    render::{self, CursorDraw, FrameElement},
     state::State,
 };
 
-/// 8-bit formats are universally supported; 10-bit can be added later behind a config flag.
+/// 8-bit formats are universally supported.
 const COLOR_FORMATS: [Fourcc; 2] = [Fourcc::Abgr8888, Fourcc::Argb8888];
+/// HDR monitors get 10 bits per colour, so PQ doesn't band; 8-bit is the fallback.
+const HDR_COLOR_FORMATS: [Fourcc; 6] = [
+    Fourcc::Xrgb2101010,
+    Fourcc::Xbgr2101010,
+    Fourcc::Argb2101010,
+    Fourcc::Abgr2101010,
+    Fourcc::Abgr8888,
+    Fourcc::Argb8888,
+];
 
 type Allocator = GbmAllocator<DrmDeviceFd>;
 type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
@@ -92,6 +101,19 @@ struct Surface {
     redraw_after_vblank: bool,
     /// The queued frame was rendered while locked; once it's on screen the lock can be confirmed.
     lock_frame_queued: bool,
+    /// Frames may flip without waiting for vblank (a fullscreen game asked to tear).
+    tearing: bool,
+    /// The queued frame was flipped without waiting for vblank.
+    torn: bool,
+    /// What the monitor's EDID says about its colours and brightness.
+    display: crate::color::DisplayColor,
+    /// Driven in HDR mode: everything is composited in half-float, then PQ-encoded.
+    hdr: Option<HdrState>,
+}
+
+struct HdrState {
+    params: crate::color::HdrOutputParams,
+    pipeline: Option<crate::hdr::HdrPipeline>,
 }
 
 pub fn init(
@@ -211,6 +233,15 @@ pub fn init(
                         s.redraw_after_vblank = false;
                         s.lock_frame_queued = false;
                         s.drm_output.reset_buffers();
+                        // Whoever had the screens may have changed their HDR signalling.
+                        if s.hdr.is_some()
+                            && let Err(e) = set_connector_hdr(gpu.outputs.device(), s.connector, Some(&s.display))
+                        {
+                            tracing::warn!("{}: could not turn HDR back on: {e}", s.output.name());
+                        }
+                        if let Some(hdr) = &mut s.hdr {
+                            hdr.pipeline = None;
+                        }
                     }
                 }
             }
@@ -501,6 +532,22 @@ pub fn apply_output_config(state: &mut State) {
             remove_surface(state, crtc);
             continue;
         }
+        // Switching HDR on or off needs a modeset and other buffers: light the monitor again.
+        let gpu = udev_data_mut(state).unwrap().gpu.as_mut().unwrap();
+        if let Some(surface) = gpu.surfaces.get_mut(&crtc) {
+            let want_hdr = cfg.hdr && hdr_capable(&name, &surface.display);
+            if want_hdr != surface.hdr.is_some() {
+                let info = gpu.scanner.connectors().get(&surface.connector).cloned();
+                remove_surface(state, crtc);
+                if let Some(info) = info {
+                    connector_connected(state, info, crtc);
+                }
+                continue;
+            }
+            if let Some(hdr) = &mut surface.hdr {
+                hdr.params = hdr_params(&cfg, &surface.display);
+            }
+        }
         let gpu = udev_data_mut(state).unwrap().gpu.as_mut().unwrap();
         let Some(info) = gpu
             .surfaces
@@ -515,7 +562,7 @@ pub fn apply_output_config(state: &mut State) {
             && mode != surface.mode
         {
             let wl = WlMode::from(mode);
-            match surface.drm_output.use_mode::<_, OutputElement<GlesRenderer>>(
+            match surface.drm_output.use_mode::<_, FrameElement>(
                 mode,
                 &mut gpu.renderer,
                 &DrmOutputRenderElements::default(),
@@ -567,6 +614,28 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
         cfg.scale
     );
 
+    let display = udev_data(state)
+        .and_then(|u| u.gpu.as_ref())
+        .map(|g| read_display_color(g.outputs.device(), connector.handle()))
+        .unwrap_or_default();
+    let want_hdr = cfg.hdr && hdr_capable(&name, &display);
+    if let Some(gpu) = udev_data(state).and_then(|u| u.gpu.as_ref()) {
+        // Set (or clear, after an earlier HDR session) the monitor's HDR signalling before the
+        // first modeset, which picks it up.
+        match set_connector_hdr(gpu.outputs.device(), connector.handle(), want_hdr.then_some(&display)) {
+            Ok(()) if want_hdr => {
+                let peak = display.peak();
+                tracing::info!(
+                    "{name}: HDR on (peak {peak:.0} nits, SDR white {} nits)",
+                    cfg.sdr_brightness
+                );
+            }
+            Ok(()) => {}
+            Err(e) if want_hdr => tracing::warn!("{name}: could not turn HDR on: {e}"),
+            Err(e) => tracing::debug!("{name}: could not reset HDR properties: {e}"),
+        }
+    }
+
     let (phys_w, phys_h) = connector.size().unwrap_or((0, 0));
     let output = Output::new(
         name.clone(),
@@ -603,7 +672,12 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
     let Some(gpu) = udev_data_mut(state).and_then(|u| u.gpu.as_mut()) else {
         return;
     };
-    let drm_output = match gpu.outputs.initialize_output::<_, OutputElement<GlesRenderer>>(
+    if want_hdr {
+        gpu.outputs.set_color_formats(HDR_COLOR_FORMATS);
+    } else {
+        gpu.outputs.set_color_formats(COLOR_FORMATS);
+    }
+    let drm_output = match gpu.outputs.initialize_output::<_, FrameElement>(
         crtc,
         drm_mode,
         &[connector.handle()],
@@ -615,6 +689,9 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
         Ok(o) => o,
         Err(e) => {
             tracing::warn!("{name}: failed to initialize output: {e}");
+            if want_hdr {
+                let _ = set_connector_hdr(gpu.outputs.device(), connector.handle(), None);
+            }
             state.space.unmap_output(&output);
             state.display_handle.remove_global::<State>(global);
             return;
@@ -631,8 +708,24 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
             waiting_vblank: false,
             redraw_after_vblank: false,
             lock_frame_queued: false,
+            tearing: false,
+            torn: false,
+            hdr: want_hdr.then(|| HdrState {
+                params: hdr_params(&cfg, &display),
+                pipeline: None,
+            }),
+            display,
         },
     );
+    if want_hdr && let Some(s) = gpu.surfaces.get(&crtc) {
+        let format = s.drm_output.format();
+        if !matches!(
+            format,
+            Fourcc::Xrgb2101010 | Fourcc::Xbgr2101010 | Fourcc::Argb2101010 | Fourcc::Abgr2101010
+        ) {
+            tracing::warn!("{name}: no 10-bit buffers ({format:?}); HDR may show banding");
+        }
+    }
     layer_map_for_output(&output).arrange();
     state.add_monitor(output);
 }
@@ -755,10 +848,14 @@ fn frame_finished(state: &mut State, crtc: crtc::Handle, (when, seq): (Option<st
         Ok(Some(Some(mut feedback))) => {
             use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
             // A kernel timestamp is the moment of the flip, taken by the hardware.
-            let (time, flags) = match when {
+            let (time, mut flags) = match when {
                 Some(t) => (t, Kind::Vsync | Kind::HwClock | Kind::HwCompletion),
                 None => (now, Kind::Vsync),
             };
+            // A torn frame went up mid-refresh, not in sync with it.
+            if surface.torn {
+                flags.remove(Kind::Vsync);
+            }
             let refresh = render::refresh_of(&surface.output);
             feedback.presented::<_, smithay::utils::Monotonic>(time, refresh, seq, flags);
         }
@@ -800,23 +897,65 @@ fn render_surface(state: &mut State, crtc: crtc::Handle) {
         let themed = themed_cursor(state, &mut u.cursor, output);
         let cursor = cursor_draw(state, &themed);
         let locked = state.is_locked();
-        let elements = render::output_elements(state, &mut gpu.renderer, output, cursor);
+        let tearing = state.output_wants_tearing(output);
         let clear = state.config.decoration.background;
+        let hdr_on = gpu.surfaces.get(&crtc).is_some_and(|s| s.hdr.is_some());
+        let target = if hdr_on {
+            crate::color::Target::HdrIntermediate
+        } else {
+            crate::color::Target::Sdr
+        };
+        let mut elements = render::frame_elements(state, &mut gpu.renderer, output, cursor, target);
+        // HDR: composite into the half-float buffer, then hand the monitor just the encoded frame.
+        let mut hdr_states = None;
+        if let Some(hdr) = gpu.surfaces.get_mut(&crtc).and_then(|s| s.hdr.as_mut()) {
+            if hdr.pipeline.as_ref().is_none_or(|p| !p.matches(output, hdr.params)) {
+                hdr.pipeline = match crate::hdr::HdrPipeline::new(&mut gpu.renderer, output, hdr.params) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        tracing::warn!("{}: HDR compositing unavailable: {e}", output.name());
+                        None
+                    }
+                };
+            }
+            if let Some(pipeline) = &mut hdr.pipeline {
+                match pipeline.render(&mut gpu.renderer, &elements, clear) {
+                    Ok((states, _)) => {
+                        hdr_states = Some(states);
+                        elements = pipeline
+                            .element(&mut gpu.renderer)
+                            .map(FrameElement::Encode)
+                            .into_iter()
+                            .collect();
+                    }
+                    Err(e) => tracing::warn!("{}: HDR compositing failed: {e}", output.name()),
+                }
+            }
+        }
 
         if let Some(surface) = gpu.surfaces.get_mut(&crtc) {
+            if surface.tearing != tearing {
+                surface.tearing = tearing;
+                tracing::info!(
+                    "{}: tearing {} (fullscreen app asked for it)",
+                    output.name(),
+                    if tearing { "on" } else { "off" }
+                );
+                surface.drm_output.with_compositor(|c| c.set_tearing(tearing));
+            }
             match surface
                 .drm_output
                 .render_frame(&mut gpu.renderer, &elements, clear, FrameFlags::DEFAULT)
             {
                 // Only flip when the frame differs; an idle screen stays untouched.
-                Ok(result) if !result.is_empty => match surface
-                    .drm_output
-                    .queue_frame(Some(render::take_presentation_feedback(state, output, &result.states)))
-                {
+                Ok(result) if !result.is_empty => match surface.drm_output.queue_frame(Some(
+                    render::take_presentation_feedback(state, output, hdr_states.as_ref().unwrap_or(&result.states)),
+                )) {
                     Ok(()) => {
                         damaged = true;
                         surface.waiting_vblank = true;
                         surface.lock_frame_queued = locked;
+                        surface.torn = tearing && surface.drm_output.with_compositor(|c| c.last_flip_torn());
                     }
                     Err(e) => tracing::warn!("failed to queue frame: {e}"),
                 },
@@ -865,7 +1004,7 @@ pub fn capture<T>(
     state: &mut State,
     output: &Output,
     with_cursor: bool,
-    f: impl FnOnce(&mut GlesRenderer, &[OutputElement<GlesRenderer>]) -> T,
+    f: impl FnOnce(&mut GlesRenderer, &[FrameElement]) -> T,
 ) -> Option<T> {
     let Some(Backend::Udev(mut u)) = state.backend.take() else {
         return None;
@@ -884,7 +1023,7 @@ pub fn capture<T>(
         } else {
             CursorDraw::None
         };
-        let elements = render::output_elements(state, &mut gpu.renderer, output, cursor);
+        let elements = render::frame_elements(state, &mut gpu.renderer, output, cursor, crate::color::Target::Sdr);
         result = Some(f(&mut gpu.renderer, &elements));
     }
     state.backend = Some(Backend::Udev(u));
@@ -914,9 +1053,133 @@ impl UdevData {
             .is_some_and(|g| g.renderer.import_dmabuf(dmabuf, None).is_ok())
     }
 
+    pub fn output_hdr(&self, output: &Output) -> Option<(crate::color::HdrOutputParams, crate::color::DisplayColor)> {
+        let s = self.gpu.as_ref()?.surfaces.values().find(|s| &s.output == output)?;
+        s.hdr.as_ref().map(|h| (h.params, s.display.clone()))
+    }
+
+    /// On exit: leave no monitor in HDR mode for whatever shows next (a console, the login screen).
+    pub fn reset_hdr(&self) {
+        let Some(gpu) = &self.gpu else { return };
+        if !self.session.is_active() {
+            return;
+        }
+        for s in gpu.surfaces.values().filter(|s| s.hdr.is_some()) {
+            if let Err(e) = set_connector_hdr(gpu.outputs.device(), s.connector, None) {
+                tracing::warn!("{}: could not switch HDR off: {e}", s.output.name());
+            }
+        }
+    }
+
     pub fn reapply_input_config(&mut self, config: &crate::config::InputConfig) {
         for dev in &mut self.pointers {
             apply_input_config(dev, config);
         }
     }
+}
+
+/// The monitor's colour information, from its EDID property.
+fn read_display_color(dev: &DrmDevice, connector: connector::Handle) -> crate::color::DisplayColor {
+    use drm::control::Device as _;
+    let edid = find_property(dev, connector, "EDID")
+        .and_then(|(_, _, blob)| (blob != 0).then_some(blob))
+        .and_then(|blob| dev.get_property_blob(blob).ok());
+    edid.map(|e| crate::color::DisplayColor::from_edid(&e))
+        .unwrap_or_default()
+}
+
+/// Whether to drive this monitor in HDR: it must say it understands HDR10.
+fn hdr_capable(name: &str, display: &crate::color::DisplayColor) -> bool {
+    if !display.pq {
+        tracing::warn!("{name}: hdr = true, but the monitor doesn't say it supports HDR10; staying SDR");
+    }
+    display.pq
+}
+
+fn hdr_params(
+    cfg: &crate::config::OutputConfig,
+    display: &crate::color::DisplayColor,
+) -> crate::color::HdrOutputParams {
+    crate::color::HdrOutputParams {
+        sdr_white: cfg.sdr_brightness as f64,
+        peak: display.peak(),
+    }
+}
+
+/// A connector property's handle, info and current value, by name.
+fn find_property(
+    dev: &DrmDevice,
+    connector: connector::Handle,
+    name: &str,
+) -> Option<(drm::control::property::Handle, drm::control::property::Info, u64)> {
+    use drm::control::Device as _;
+    let props = dev.get_properties(connector).ok()?;
+    let (handles, values) = props.as_props_and_values();
+    handles.iter().zip(values).find_map(|(h, v)| {
+        let info = dev.get_property(*h).ok()?;
+        (info.name().to_bytes() == name.as_bytes()).then_some((*h, info, *v))
+    })
+}
+
+/// Turn a monitor's HDR signalling on (HDR10 metadata, BT.2020 colours, 10 bits per colour) or
+/// back to the defaults. Needs a modeset, so it's done while the monitor isn't being driven.
+fn set_connector_hdr(
+    dev: &DrmDevice,
+    connector: connector::Handle,
+    hdr: Option<&crate::color::DisplayColor>,
+) -> Result<(), String> {
+    use drm::control::{
+        AtomicCommitFlags, Device as _,
+        atomic::AtomicModeReq,
+        property::{Value, ValueType},
+    };
+    let mut req = AtomicModeReq::new();
+    let mut blob = None;
+    match find_property(dev, connector, "HDR_OUTPUT_METADATA") {
+        Some((h, _, _)) => {
+            let value = match hdr {
+                Some(d) => {
+                    let v = dev
+                        .create_property_blob(&crate::hdr::hdr_output_metadata(d))
+                        .map_err(|e| format!("HDR metadata: {e}"))?;
+                    if let Value::Blob(id) = v {
+                        blob = Some(id);
+                    }
+                    v
+                }
+                None => Value::Blob(0),
+            };
+            req.add_property(connector, h, value);
+        }
+        None if hdr.is_some() => return Err("the driver can't send HDR metadata to this monitor".into()),
+        None => return Ok(()),
+    }
+    if let Some((h, info, _)) = find_property(dev, connector, "Colorspace")
+        && let ValueType::Enum(e) = info.value_type()
+    {
+        let want = if hdr.is_some() { "BT2020_RGB" } else { "Default" };
+        let (raws, entries) = e.values();
+        if let Some(raw) = raws
+            .iter()
+            .zip(entries)
+            .find(|(_, en)| en.name().to_bytes() == want.as_bytes())
+            .map(|(r, _)| *r)
+        {
+            req.add_property(connector, h, Value::Unknown(raw));
+        }
+    }
+    if hdr.is_some()
+        && let Some((h, info, _)) = find_property(dev, connector, "max bpc")
+        && let ValueType::UnsignedRange(min, max) = info.value_type()
+    {
+        req.add_property(connector, h, Value::UnsignedRange(10u64.clamp(min, max)));
+    }
+    let result = dev
+        .atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)
+        .map_err(|e| format!("commit: {e}"));
+    if let Some(id) = blob {
+        // The kernel keeps its own reference while the property uses it.
+        let _ = dev.destroy_property_blob(id);
+    }
+    result
 }

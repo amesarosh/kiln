@@ -11,7 +11,7 @@ use smithay::{
 
 use smithay::backend::renderer::gles::GlesRenderer;
 
-use crate::{render::OutputElement, state::State};
+use crate::{render::FrameElement, state::State};
 
 pub enum Backend {
     /// A window inside another desktop.
@@ -39,13 +39,42 @@ impl State {
         &mut self,
         output: &smithay::output::Output,
         with_cursor: bool,
-        f: impl FnOnce(&mut GlesRenderer, &[OutputElement<GlesRenderer>]) -> T,
+        f: impl FnOnce(&mut GlesRenderer, &[FrameElement]) -> T,
     ) -> Option<T> {
         match &self.backend {
             Some(Backend::Winit(_)) => winit::capture(self, output, f),
             Some(Backend::Udev(_)) => udev::capture(self, output, with_cursor, f),
             Some(Backend::Headless(_)) => headless::capture(self, output, f),
             None => None,
+        }
+    }
+
+    /// Whether `output` is driven in HDR, and with what. Headless outputs with `hdr = true`
+    /// act like an HDR400 monitor, for tests.
+    pub fn output_hdr(
+        &self,
+        output: &smithay::output::Output,
+    ) -> Option<(crate::color::HdrOutputParams, crate::color::DisplayColor)> {
+        match &self.backend {
+            Some(Backend::Udev(u)) => u.output_hdr(output),
+            Some(Backend::Headless(_)) => {
+                let cfg = self.output_config(&output.name());
+                cfg.hdr.then(|| {
+                    (
+                        crate::color::HdrOutputParams {
+                            sdr_white: cfg.sdr_brightness as f64,
+                            peak: 400.0,
+                        },
+                        crate::color::DisplayColor {
+                            pq: true,
+                            bt2020: true,
+                            max_luminance: Some(400.0),
+                            ..Default::default()
+                        },
+                    )
+                })
+            }
+            _ => None,
         }
     }
 

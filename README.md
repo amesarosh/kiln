@@ -17,7 +17,9 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - Server-side decorations requested by default, so apps don't draw title bars; clipboard and primary selection supported, including clipboard managers (cliphist, `wl-paste --watch`); what you copy stays available after the app you copied from closes (`keep_clipboard`)
 - **X11 apps through Xwayland** (Steam, games, the VS Code snap, older programs): tiled and focused like any window, with copy and paste working between X11 and Wayland apps
 - **Window list for other programs**: taskbars (waybar's `wlr/taskbar`), window switchers and scripts (`wlrctl`, `lswt`) can list, focus, fullscreen and close windows
-- **Screenshots and recording** (grim, slurp, wf-recorder) and screen sharing through xdg-desktop-portal-wlr
+- **Screenshots and recording** (grim, slurp, wf-recorder) and screen sharing through xdg-desktop-portal-wlr; recorders and screen sharing can take frames as GPU buffers, so nothing is copied through the CPU
+- **HDR** per monitor (`hdr = true` under `[[outputs]]`, or the settings app): HDR10 signalling with 10-bit output, ordinary windows at an adjustable SDR brightness, and HDR video and games shown in HDR through the color-management protocol (also tone-mapped onto SDR monitors)
+- **Games**: fullscreen games that ask can skip vsync for lower input lag (tearing control), and virtual machines, remote desktops and games can take every key, binds included (`Mod+Ctrl+Escape` takes them back)
 - **Sessions come back**: apps open when you quit, log out or shut down are started again at the next login, with each window on the same monitor and workspace, in the same tiling order, size and floating position
 - **Screen locking** with its own lock screen (`wayland-time-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 - **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
@@ -27,7 +29,9 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 
 - **Nested** inside an existing X11 or Wayland session (development setup): working.
 - **TTY / real hardware** (DRM/KMS, libinput, libseat): implemented, needs testing on more machines.
-  Single GPU only. Mode, scale, position and rotation are set per monitor with `[[outputs]]`.
+  Single GPU only. Mode, scale, position, rotation and HDR are set per monitor with `[[outputs]]`.
+
+`vendor/smithay` is Smithay 0.7.0 with a few small additions (tearing page flips, per-monitor buffer formats); see `vendor/smithay/PATCHES.md`.
 
 ## Build and run
 

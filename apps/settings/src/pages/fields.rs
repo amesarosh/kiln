@@ -91,6 +91,18 @@ pub const GENERAL: &[Section] = &[
                 "Keep what you copied after the app you copied from closes.",
                 Kind::Toggle,
             ),
+            f(
+                &["general", "allow_shortcuts_inhibit"],
+                "Apps can take every key",
+                "Virtual machines, remote desktops and games can ask for all keys, binds included. A bind to toggle-shortcuts-inhibit takes them back.",
+                Kind::Toggle,
+            ),
+            f(
+                &["general", "allow_tearing"],
+                "Games can skip vsync",
+                "Fullscreen games that ask can show each frame as soon as it's drawn: less input lag, but the picture can tear.",
+                Kind::Toggle,
+            ),
         ],
     },
     Section {
@@ -356,6 +368,12 @@ pub const KEYBOARD: &[Section] = &[
                 "",
                 Kind::Int(1, 100, "per second"),
             ),
+            f(
+                &["keyboard", "numlock"],
+                "Num Lock on at start",
+                "So the number pad types numbers.",
+                Kind::Toggle,
+            ),
         ],
     },
 ];
@@ -586,6 +604,7 @@ fn keymap_error(ui: &mut Ui, p: &Palette, doc: &ConfigDoc) {
         options: doc.str(&["keyboard", "options"]),
         repeat_rate: 0,
         repeat_delay: 0,
+        numlock: false,
     };
     if let Err(e) = wt_config::check_keymap(&kb) {
         widgets::error(ui, p, &e);

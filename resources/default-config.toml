@@ -30,6 +30,14 @@ xwayland = true
 # Keep what you copied after the app you copied from closes. The compositor
 # holds its own copy (up to 64 MiB); the middle-click selection isn't kept.
 keep_clipboard = true
+# Let apps that ask for every key get them, so your binds reach a virtual
+# machine, remote desktop or game instead of the compositor. A bind to
+# "toggle-shortcuts-inhibit" always works, to take the keys back.
+allow_shortcuts_inhibit = true
+# Let fullscreen games that ask for it put each frame on screen as soon as it's
+# drawn instead of waiting for the next refresh. Less input lag, but the
+# picture can tear. Only on real hardware, and only for games that ask.
+allow_tearing = true
 # Screen locker used by Lock and Suspend in the bar's power menu. Empty picks
 # the first one installed of wayland-time-lock (our own), hyprlock, swaylock,
 # gtklock and waylock.
@@ -115,6 +123,7 @@ variant = ""
 options = ""        # e.g. "caps:escape,compose:ralt"
 repeat_rate = 30    # keys per second
 repeat_delay = 250  # milliseconds
+numlock = true      # Num Lock on at start, so the number pad types numbers
 
 # Pointer and touchpad settings (only apply when running from a TTY).
 [input]
@@ -200,6 +209,8 @@ duration = 220        # milliseconds
 "Mod+Shift+e" = "quit"
 "Mod+Shift+r" = "reload"
 "Mod+Escape" = "lock"
+# Take your binds back from an app holding every key (a VM, a remote desktop).
+"Mod+Ctrl+Escape" = "toggle-shortcuts-inhibit"
 # Screenshots: pick a region and copy it, or save every monitor to a file
 # (in your Pictures folder). Needs grim, slurp and wl-clipboard.
 "Print" = 'spawn grim -g "$(slurp)" - | wl-copy'
@@ -313,6 +324,8 @@ duration = 220        # milliseconds
 # bar = "left"            # this monitor's bar: "top", "bottom", "left", "right" or "none"
 # clock = true            # show a 12-hour clock at the bottom (or end) of this bar
 # layout = "monocle"       # this monitor's default layout, instead of [layout] default
+# hdr = true               # HDR mode, on monitors that support it (real hardware only)
+# sdr_brightness = 203     # in HDR mode, how bright ordinary content is, in nits (80-1000)
 #
 # [[outputs]]
 # name = "HDMI-A-1"

@@ -1,4 +1,5 @@
 mod activation;
+pub mod color_management;
 mod compositor;
 pub mod foreign_toplevel;
 mod idle;
@@ -8,6 +9,8 @@ pub mod output_management;
 mod output_power;
 pub mod pointer_lock;
 pub mod screencopy;
+mod shortcuts_inhibit;
+pub mod tearing;
 mod xdg_shell;
 pub mod xwayland;
 

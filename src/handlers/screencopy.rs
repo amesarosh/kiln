@@ -1,14 +1,15 @@
 //! Screenshots and screen recording: wlr-screencopy (used by `grim`, `wf-recorder` and
-//! xdg-desktop-portal-wlr for screen sharing). Frames are drawn into an offscreen texture and
-//! copied into the client's shared-memory buffer.
+//! xdg-desktop-portal-wlr for screen sharing). Clients pick a shared-memory buffer (frames are
+//! drawn offscreen and read back) or a GPU buffer (dmabuf), which is drawn into directly and never
+//! leaves the GPU. Screen sharing uses the GPU path when it can, which is much cheaper.
 
 use std::sync::Mutex;
 
 use smithay::{
     backend::{
-        allocator::Fourcc,
+        allocator::{Buffer as _, Fourcc, dmabuf::Dmabuf},
         renderer::{
-            Bind, ExportMem, Offscreen,
+            Bind, Blit, ExportMem, Offscreen, TextureFilter,
             damage::OutputDamageTracker,
             gles::{GlesRenderer, GlesTexture},
         },
@@ -24,14 +25,16 @@ use smithay::{
             protocol::{wl_buffer::WlBuffer, wl_output::WlOutput, wl_shm},
         },
     },
-    utils::{Buffer, Clock, Logical, Monotonic, Point, Rectangle, Size},
-    wayland::shm::with_buffer_contents_mut,
+    utils::{Buffer, Clock, Logical, Monotonic, Physical, Point, Rectangle, Size},
+    wayland::{dmabuf::get_dmabuf, shm::with_buffer_contents_mut},
 };
 
-use crate::{config::Color, render::OutputElement, state::State};
+use crate::{config::Color, render::FrameElement, state::State};
 
-/// The only buffer format offered. Every shm client supports it.
+/// The shared-memory format offered. Every shm client supports it.
 const SHM_FORMAT: wl_shm::Format = wl_shm::Format::Xrgb8888;
+/// The GPU buffer format offered (same layout as the shm one); every GL driver renders to it.
+const DMABUF_FORMAT: Fourcc = Fourcc::Xrgb8888;
 
 pub struct FrameData {
     manager: ZwlrScreencopyManagerV1,
@@ -106,9 +109,11 @@ impl State {
         }
         let region = data.region;
         let clear = self.config.decoration.background;
+        let dmabuf = get_dmabuf(buffer).ok().cloned();
         let result = self
-            .capture_output(&output, data.overlay_cursor, |renderer, elements| {
-                render_to_shm(renderer, &output, elements, clear, region, buffer)
+            .capture_output(&output, data.overlay_cursor, |renderer, elements| match dmabuf {
+                Some(dmabuf) => render_to_dmabuf(renderer, &output, elements, clear, region, dmabuf),
+                None => render_to_shm(renderer, &output, elements, clear, region, buffer),
             })
             .unwrap_or_else(|| Err("the screen isn't available right now".into()));
         match result {
@@ -130,6 +135,61 @@ impl State {
     }
 }
 
+/// Draw `elements` for the whole output, ending up with `region` of it in the client's GPU
+/// buffer. A whole-output capture (screen sharing) is drawn straight into it; a region goes
+/// through an offscreen texture first and is copied over on the GPU.
+fn render_to_dmabuf(
+    renderer: &mut GlesRenderer,
+    output: &Output,
+    elements: &[FrameElement],
+    clear: Color,
+    region: Rectangle<i32, Buffer>,
+    mut dmabuf: Dmabuf,
+) -> Result<(), String> {
+    let mode = output.current_mode().ok_or("output has no mode")?;
+    let size: Size<i32, Buffer> = (mode.size.w, mode.size.h).into();
+    let sync = if region.size == size {
+        let mut target = renderer
+            .bind(&mut dmabuf)
+            .map_err(|e| format!("bind client buffer: {e}"))?;
+        OutputDamageTracker::from_output(output)
+            .render_output(renderer, &mut target, 0, elements, clear)
+            .map_err(|e| format!("render: {e:?}"))?
+            .sync
+    } else {
+        let mut texture: GlesTexture = renderer
+            .create_buffer(Fourcc::Abgr8888, size)
+            .map_err(|e| format!("offscreen buffer: {e}"))?;
+        {
+            let mut target = renderer.bind(&mut texture).map_err(|e| format!("bind: {e}"))?;
+            OutputDamageTracker::from_output(output)
+                .render_output(renderer, &mut target, 0, elements, clear)
+                .map_err(|e| format!("render: {e:?}"))?;
+        }
+        let from = renderer.bind(&mut texture).map_err(|e| format!("bind: {e}"))?;
+        let mut to = renderer
+            .bind(&mut dmabuf)
+            .map_err(|e| format!("bind client buffer: {e}"))?;
+        let src = Rectangle::<i32, Physical>::new(
+            (region.loc.x, region.loc.y).into(),
+            (region.size.w, region.size.h).into(),
+        );
+        let dst = Rectangle::<i32, Physical>::from_size((region.size.w, region.size.h).into());
+        renderer
+            .blit(&from, &mut to, src, dst, TextureFilter::Nearest)
+            .map_err(|e| format!("copy: {e}"))?;
+        drop((from, to));
+        // A blit gives no sync point; finishing the GL queue covers it.
+        // SAFETY: plain GL call on the renderer's own current context.
+        renderer
+            .with_context(|gl| unsafe { gl.Finish() })
+            .map_err(|e| format!("finish: {e}"))?;
+        smithay::backend::renderer::sync::SyncPoint::signaled()
+    };
+    // The client may read the buffer as soon as it hears "ready", so the GPU must be done.
+    sync.wait().map_err(|_| "waiting for the GPU failed".to_string())
+}
+
 fn frame_data(frame: &ZwlrScreencopyFrameV1) -> &FrameData {
     frame.data::<FrameData>().expect("screencopy frame without data")
 }
@@ -138,7 +198,7 @@ fn frame_data(frame: &ZwlrScreencopyFrameV1) -> &FrameData {
 fn render_to_shm(
     renderer: &mut GlesRenderer,
     output: &Output,
-    elements: &[OutputElement<GlesRenderer>],
+    elements: &[FrameElement],
     clear: Color,
     region: Rectangle<i32, Buffer>,
     buffer: &WlBuffer,
@@ -270,6 +330,10 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for State {
         let (w, h) = (region.size.w as u32, region.size.h as u32);
         frame.buffer(SHM_FORMAT, w, h, w * 4);
         if frame.version() >= 3 {
+            // Only with a GPU that shares buffers with clients.
+            if state.dmabuf_global.is_some() {
+                frame.linux_dmabuf(DMABUF_FORMAT as u32, w, h);
+            }
             frame.buffer_done();
         }
     }
@@ -359,8 +423,18 @@ impl Dispatch<ZwlrScreencopyFrameV1, FrameData> for State {
     }
 }
 
-/// The client's buffer must be shm in the format and size we announced.
+/// The client's buffer must be in a format and size we announced.
 fn check_buffer(buffer: &WlBuffer, size: Size<i32, Buffer>) -> Result<(), &'static str> {
+    if let Ok(dmabuf) = get_dmabuf(buffer) {
+        let s = dmabuf.size();
+        return if dmabuf.format().code != DMABUF_FORMAT {
+            Err("dmabuf format must be xrgb8888")
+        } else if (s.w, s.h) != (size.w, size.h) {
+            Err("buffer size doesn't match the frame")
+        } else {
+            Ok(())
+        };
+    }
     smithay::wayland::shm::with_buffer_contents(buffer, |_, _, info| {
         if info.format != SHM_FORMAT {
             Err("buffer format must be xrgb8888")
@@ -372,5 +446,5 @@ fn check_buffer(buffer: &WlBuffer, size: Size<i32, Buffer>) -> Result<(), &'stat
             Ok(())
         }
     })
-    .unwrap_or(Err("only shm buffers are supported"))
+    .unwrap_or(Err("only shm and dmabuf buffers are supported"))
 }

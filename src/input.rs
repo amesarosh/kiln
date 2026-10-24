@@ -277,11 +277,21 @@ impl State {
                     let sym = normalize_keysym(sym);
                     let pressed = crate::config::mods_from_state(mods);
                     let mod_key = state.mod_key();
+                    // An app holding every key gets them all, bar the bind that takes them back.
+                    let inhibited = state.shortcuts_inhibited();
                     if is_mod_sym(sym, mod_key) && pressed == Mods::only_mod(mod_key) {
-                        state.mod_tap = Some(code);
+                        if !inhibited {
+                            state.mod_tap = Some(code);
+                        }
                         return FilterResult::Forward;
                     }
-                    match state.config.binds.iter().find(|b| b.matches(pressed, sym, mod_key)) {
+                    match state
+                        .config
+                        .binds
+                        .iter()
+                        .filter(|b| !inhibited || matches!(b.action, Action::ToggleShortcutsInhibit))
+                        .find(|b| b.matches(pressed, sym, mod_key))
+                    {
                         Some(bind) => {
                             state.suppressed_keys.push(code);
                             if let Action::Volume(change @ VolumeChange::Step(_)) = bind.action {
@@ -663,7 +673,9 @@ impl State {
                 if self.overview_open() {
                     return;
                 }
-                let Some(m) = self.monitors.get(self.active_mon) else { return };
+                let Some(m) = self.monitors.get(self.active_mon) else {
+                    return;
+                };
                 let target = m.active_ws as i32 + step;
                 if (0..m.workspaces.len() as i32).contains(&target) {
                     self.switch_workspace(target as usize);

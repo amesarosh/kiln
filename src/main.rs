@@ -2,12 +2,14 @@ mod anim;
 mod backend;
 mod bar;
 mod clipboard;
+mod color;
 mod config;
 mod cursor;
 mod dbus;
 mod focus;
 mod grabs;
 mod handlers;
+mod hdr;
 mod icons;
 mod input;
 mod ipc;
@@ -18,8 +20,8 @@ mod overview;
 mod power;
 mod render;
 mod session;
-mod status;
 mod state;
+mod status;
 mod switcher;
 // Text and canvas drawing are shared with the lock screen.
 use wt_draw as text;
@@ -202,6 +204,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => Config::default(),
     };
 
+    // Headless runs are tests: they neither bring back nor overwrite a saved session.
+    let mut config = config;
+    if matches!(args.backend, BackendChoice::Headless) {
+        config.session.restore = false;
+    }
+
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
     let handle = event_loop.handle();
@@ -249,12 +257,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state.track_focus_history();
         state.sync_constraint_focus();
         state.refresh_foreign_toplevels();
+        state.refresh_color_feedback();
         state.track_session();
         let _ = state.display_handle.flush_clients();
     })?;
 
     if let Some(p) = ipc_path {
         let _ = std::fs::remove_file(p);
+    }
+    if let Some(backend::Backend::Udev(u)) = &state.backend {
+        u.reset_hdr();
     }
     tracing::info!("exiting");
     Ok(())

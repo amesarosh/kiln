@@ -26,7 +26,7 @@ use smithay::{
 
 use super::Backend;
 use crate::{
-    render::{self, CursorDraw, OutputElement},
+    render::{self, CursorDraw, FrameElement},
     state::State,
 };
 
@@ -275,13 +275,13 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
 pub fn capture<T>(
     state: &mut State,
     output: &Output,
-    f: impl FnOnce(&mut GlesRenderer, &[OutputElement<GlesRenderer>]) -> T,
+    f: impl FnOnce(&mut GlesRenderer, &[FrameElement]) -> T,
 ) -> Option<T> {
     let Some(Backend::Winit(mut data)) = state.backend.take() else {
         return None;
     };
     let renderer = data.renderer();
-    let elements = render::output_elements(state, renderer, output, CursorDraw::None);
+    let elements = render::frame_elements(state, renderer, output, CursorDraw::None, crate::color::Target::Sdr);
     let result = f(renderer, &elements);
     state.backend = Some(Backend::Winit(data));
     Some(result)
@@ -303,7 +303,7 @@ fn render(state: &mut State) {
             for (output, &offset) in data.outputs.iter().zip(&data.offsets) {
                 let scale = smithay::utils::Scale::from(output.current_scale().fractional_scale());
                 elements.extend(
-                    render::output_elements(state, renderer, output, CursorDraw::None)
+                    render::frame_elements(state, renderer, output, CursorDraw::None, crate::color::Target::Sdr)
                         .into_iter()
                         .map(|e| {
                             RelocateRenderElement::from_element(AtScale { inner: e, scale }, offset, Relocate::Relative)
@@ -344,7 +344,11 @@ fn render(state: &mut State) {
         use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback::Kind;
         let now = state.clock.now();
         for mut f in feedback {
-            let refresh = f.output().map_or(smithay::wayland::presentation::Refresh::Unknown, |o| render::refresh_of(&o));
+            let refresh = f
+                .output()
+                .map_or(smithay::wayland::presentation::Refresh::Unknown, |o| {
+                    render::refresh_of(&o)
+                });
             f.presented(now, refresh, 0, Kind::Vsync);
         }
     }

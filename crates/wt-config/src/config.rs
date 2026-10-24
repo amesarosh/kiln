@@ -128,6 +128,11 @@ pub struct General {
     pub xwayland: bool,
     /// Keep the clipboard after the app that copied closes.
     pub keep_clipboard: bool,
+    /// Let apps (virtual machines, remote desktops, games) take every key, binds included.
+    pub allow_shortcuts_inhibit: bool,
+    /// Let fullscreen games that ask for it show frames right away, tearing, instead of at the
+    /// next refresh. Lower input lag.
+    pub allow_tearing: bool,
     /// Command the power menu locks the screen with; empty picks an installed locker.
     pub locker: String,
 }
@@ -231,6 +236,8 @@ pub struct KeyboardConfig {
     pub options: String,
     pub repeat_rate: i32,
     pub repeat_delay: i32,
+    /// Num Lock is on when the compositor starts.
+    pub numlock: bool,
 }
 
 /// Saving open windows on quit and bringing them back at the next start.
@@ -397,6 +404,11 @@ struct RawOutput {
     clock: bool,
     /// This monitor's default layout, overriding `[layout] default`.
     layout: Option<LayoutKind>,
+    /// Drive the monitor in HDR (BT.2100 PQ) mode, if it supports it.
+    #[serde(default)]
+    hdr: bool,
+    /// How bright ordinary (SDR) content is in HDR mode, in nits.
+    sdr_brightness: Option<u32>,
 }
 
 fn yes() -> bool {
@@ -424,7 +436,14 @@ pub struct OutputConfig {
     /// None: placed to the right of the other monitors.
     pub position: Option<(i32, i32)>,
     pub transform: Transform,
+    /// HDR (BT.2100 PQ) mode, when the monitor supports it.
+    pub hdr: bool,
+    /// In HDR mode, the brightness of ordinary (SDR) white, in nits.
+    pub sdr_brightness: u32,
 }
+
+/// SDR white in HDR mode when the config doesn't say: the BT.2408 reference white.
+pub const DEFAULT_SDR_BRIGHTNESS: u32 = 203;
 
 impl Default for OutputConfig {
     fn default() -> Self {
@@ -435,6 +454,8 @@ impl Default for OutputConfig {
             scale: 1.0,
             position: None,
             transform: Transform::Normal,
+            hdr: false,
+            sdr_brightness: DEFAULT_SDR_BRIGHTNESS,
         }
     }
 }
@@ -627,6 +648,9 @@ pub enum Action {
     Lock,
     /// Play/pause or skip in the media player the bar shows (Spotify, browsers, mpv...).
     Media(MediaChange),
+    /// Take keys back from an app that holds all of them (or hand them back). Works even while
+    /// the app has them.
+    ToggleShortcutsInhibit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -995,6 +1019,10 @@ impl Config {
                 problems.push(format!("{at}: transform: {e}"));
                 Transform::Normal
             });
+            let sdr_brightness = o.sdr_brightness.unwrap_or(DEFAULT_SDR_BRIGHTNESS);
+            if !(80..=1000).contains(&sdr_brightness) {
+                problems.push(format!("{at}: sdr_brightness must be between 80 and 1000 (nits)"));
+            }
             outputs.push(OutputConfig {
                 name: o.name,
                 enabled: o.enabled,
@@ -1002,6 +1030,8 @@ impl Config {
                 scale,
                 position: o.position.map(|[x, y]| (x, y)),
                 transform,
+                hdr: o.hdr,
+                sdr_brightness,
             });
         }
 
@@ -1166,6 +1196,7 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
         "overview" => Action::Overview,
         "launcher" => Action::Launcher,
         "lock" => Action::Lock,
+        "toggle-shortcuts-inhibit" => Action::ToggleShortcutsInhibit,
         "volume" => Action::Volume(match need_arg()? {
             "mute" => VolumeChange::ToggleMute,
             a => VolumeChange::Step(
@@ -1220,6 +1251,11 @@ pub const ACTIONS: &[(&str, &str, &str)] = &[
     ("overview", "", "Show every workspace at once, or go back"),
     ("launcher", "", "Find and start an app"),
     ("lock", "", "Lock the screen"),
+    (
+        "toggle-shortcuts-inhibit",
+        "",
+        "Take keys back from an app holding all of them, or hand them back",
+    ),
     ("volume", "+5|-5|mute", "Change the volume by a percentage, or mute"),
     ("media", "play-pause|next|prev", "Play/pause or skip in the media player"),
     ("reload", "", "Reload the config file"),
