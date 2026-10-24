@@ -11,6 +11,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **Animations**: workspaces slide or fade, tiles glide into place; touchpad swipes change workspace and open the overview
 - **One TOML file** for keybinds, gaps, borders, colors, keyboard layout and window rules, **reloaded on save**
 - **Settings app** (`wayland-time-settings`) that edits that file for you, with every change applied as you make it
+- **Task manager** (`wayland-time-tasks`, `Ctrl+Shift+Escape`): the running processes, to search, sort and end, and graphs of CPU, memory, disk and network use
 - **Idle costs nothing:** frames are only drawn when something changes, and only damaged regions are repainted
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
 - Runs nested for development or **on real hardware from a TTY**, with hardware cursor planes, direct scanout and GPU buffer sharing (linux-dmabuf)
@@ -75,6 +76,9 @@ sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
 # The settings app, and its launcher entry:
 sudo install -m755 target/release/wayland-time-settings /usr/local/bin/
 sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applications/
+# The task manager, and its launcher entry:
+sudo install -m755 target/release/wayland-time-tasks /usr/local/bin/
+sudo install -m644 resources/wayland-time-tasks.desktop /usr/share/applications/
 # The app launcher:
 sudo install -m755 target/release/wayland-time-launcher /usr/local/bin/
 # The lock screen, and the PAM rules it checks passwords with:
@@ -240,6 +244,16 @@ duration = 220        # milliseconds
 `wayland-time msg <action>` runs any action from `[binds]` in the running compositor, e.g.
 `wayland-time msg "workspace 3"` or `wayland-time msg overview`. It talks to a socket in
 `$XDG_RUNTIME_DIR` (programs the compositor starts get its path in `$WAYLAND_TIME_SOCKET`).
+
+### Task manager
+
+`wayland-time-tasks` (also `Ctrl+Shift+Escape`) lists your processes with their CPU and memory
+use; "All users and system" adds other users' processes and kernel threads. Click a column to
+sort by it, type to search by name, command line or PID, and select a process to end it ("End
+process" asks it to quit, like closing it; "Force quit" stops it at once). Delete ends the
+selected process; right-click for more. Ending the desktop itself, Xwayland or the system's first
+process asks first. The Performance page graphs the last minute of CPU (and each core), memory and
+swap, disk and network use. CPU is a share of the whole machine, so all processes add up to 100%.
 
 ### Settings app
 

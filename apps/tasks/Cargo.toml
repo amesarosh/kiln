@@ -1,0 +1,13 @@
+[package]
+name = "wayland-time-tasks"
+version = "0.1.0"
+edition = "2024"
+description = "Task manager for the wayland-time compositor: processes, CPU, memory, disk and network"
+license = "MIT"
+
+[dependencies]
+wt-config = { path = "../../crates/wt-config" }
+wt-ui = { path = "../../crates/wt-ui" }
+libc = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

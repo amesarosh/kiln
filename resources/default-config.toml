@@ -209,6 +209,7 @@ duration = 220        # milliseconds
 "Mod+Shift+e" = "quit"
 "Mod+Shift+r" = "reload"
 "Mod+Escape" = "lock"
+"Ctrl+Shift+Escape" = "spawn wayland-time-tasks"
 # Take your binds back from an app holding every key (a VM, a remote desktop).
 "Mod+Ctrl+Escape" = "toggle-shortcuts-inhibit"
 # Screenshots: pick a region and copy it, or save every monitor to a file

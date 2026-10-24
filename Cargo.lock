@@ -3792,6 +3792,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wayland-time-tasks"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tracing",
+ "tracing-subscriber",
+ "wt-config",
+ "wt-ui",
+]
+
+[[package]]
 name = "web-sys"
 version = "0.3.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
