@@ -124,6 +124,9 @@ pub struct General {
     pub monitors_off_after: u64,
     /// Seconds without input before the computer suspends (locking first); 0 never.
     pub suspend_after: u64,
+    /// Lock the screen when monitors turn off from `monitors_off_after` or the
+    /// `power-off-monitors` action.
+    pub lock_when_monitors_off: bool,
     /// Run X11 apps through Xwayland. Read at startup only.
     pub xwayland: bool,
     /// Keep the clipboard after the app that copied closes.

@@ -323,6 +323,7 @@ red; press any key to start the locker again. From another VT you can also start
 
 To turn monitors off when idle, set `monitors_off_after` (seconds) under `[general]`, or bind
 the `power-off-monitors` action. Any key press, click or pointer movement turns them back on.
+The screen locks as they turn off; set `lock_when_monitors_off = false` to stop that.
 Tools like `wlopm` can also switch them through the standard output power protocol, e.g. from
 swayidle: `timeout 600 'wlopm --off \*' resume 'wlopm --on \*'`.
 

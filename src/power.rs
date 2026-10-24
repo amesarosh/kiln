@@ -87,7 +87,7 @@ impl State {
 
     /// Start the locker unless the screen is already locked, or start it again if it crashed
     /// while locked. False if there's no locker.
-    fn lock_screen(&mut self) -> bool {
+    pub fn lock_screen(&mut self) -> bool {
         if self.is_locked() && !self.locker_dead() {
             return true;
         }

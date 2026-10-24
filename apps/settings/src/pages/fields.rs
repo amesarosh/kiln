@@ -116,6 +116,12 @@ pub const GENERAL: &[Section] = &[
                 Kind::Seconds,
             ),
             f(
+                &["general", "lock_when_monitors_off"],
+                "Lock when monitors turn off",
+                "Lock the screen when monitors turn off on their own or from the power-off-monitors bind.",
+                Kind::Toggle,
+            ),
+            f(
                 &["general", "suspend_after"],
                 "Suspend after",
                 "Time without input before the computer suspends. The screen locks first.",

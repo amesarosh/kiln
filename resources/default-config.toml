@@ -21,6 +21,9 @@ autostart = []
 # Turn monitors off after this many seconds without input (0 = never). Any key,
 # click or pointer movement turns them back on. Video players can hold it off.
 monitors_off_after = 0
+# Lock the screen when monitors turn off, from monitors_off_after or the
+# power-off-monitors action. Tools like wlopm turning them off don't lock.
+lock_when_monitors_off = true
 # Suspend after this many seconds without input (0 = never). The screen locks
 # first, as with Suspend in the power menu. Video players can hold it off.
 suspend_after = 0

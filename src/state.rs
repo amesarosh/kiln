@@ -1327,7 +1327,7 @@ impl State {
             Action::FocusMonitor(dir) => self.focus_monitor(dir),
             Action::MoveToMonitor(dir) => self.move_to_monitor(dir),
             Action::SwitchVt(vt) => self.switch_vt(vt),
-            Action::PowerOffMonitors => self.set_all_monitors_power(false),
+            Action::PowerOffMonitors => self.blank_monitors(),
             Action::WindowSwitcher(dir) => self.window_switcher(dir),
             Action::Volume(change) => self.change_volume(change),
             Action::Overview => self.toggle_overview(),

@@ -63,6 +63,15 @@ impl State {
         }
     }
 
+    /// Turn every monitor off because of idle or the `power-off-monitors` action, locking
+    /// first if `lock_when_monitors_off` is set.
+    pub fn blank_monitors(&mut self) {
+        if self.config.general.lock_when_monitors_off {
+            self.lock_screen();
+        }
+        self.set_all_monitors_power(false);
+    }
+
     pub fn set_all_monitors_power(&mut self, on: bool) {
         let outputs: Vec<Output> = self.monitors.iter().map(|m| m.output.clone()).collect();
         for o in &outputs {
@@ -102,7 +111,7 @@ impl State {
             if state.idle_notifier.is_inhibited() {
                 return TimeoutAction::ToDuration(timeout);
             }
-            state.set_all_monitors_power(false);
+            state.blank_monitors();
             // Re-armed when input wakes the monitors.
             state.idle_power_timer = None;
             TimeoutAction::Drop
