@@ -538,9 +538,9 @@ pub fn apply_output_config(state: &mut State) {
             let want_hdr = cfg.hdr && hdr_capable(&name, &surface.display);
             if want_hdr != surface.hdr.is_some() {
                 let info = gpu.scanner.connectors().get(&surface.connector).cloned();
-                remove_surface(state, crtc);
-                if let Some(info) = info {
-                    connector_connected(state, info, crtc);
+                match info {
+                    Some(info) => relight_surface(state, info, crtc, want_hdr),
+                    None => remove_surface(state, crtc),
                 }
                 continue;
             }
@@ -728,6 +728,106 @@ fn connector_connected(state: &mut State, connector: connector::Info, crtc: crtc
     }
     layer_map_for_output(&output).arrange();
     state.add_monitor(output);
+}
+
+/// Light a monitor again with HDR switched on or off. Only the DRM side is rebuilt: the
+/// Output, its global and its workspaces stay, so windows don't move to another monitor.
+fn relight_surface(state: &mut State, connector: connector::Info, crtc: crtc::Handle, want_hdr: bool) {
+    let name = connector_name(&connector);
+    let cfg = state.output_config(&name);
+    let Some(gpu) = udev_data_mut(state).and_then(|u| u.gpu.as_mut()) else {
+        return;
+    };
+    let Some(old) = gpu.surfaces.remove(&crtc) else {
+        return;
+    };
+    let Some(drm_mode) = pick_mode(&connector, cfg.mode) else {
+        gpu.surfaces.insert(crtc, old);
+        return tracing::warn!("{name}: no usable modes");
+    };
+    let Surface {
+        output,
+        connector: conn,
+        global,
+        display,
+        drm_output,
+        ..
+    } = old;
+    if let Err(e) = drm_output.with_compositor(|c| c.clear()) {
+        tracing::debug!("could not turn off {name}: {e}");
+    }
+    // Free the CRTC before setting it up again.
+    drop(drm_output);
+
+    match set_connector_hdr(gpu.outputs.device(), conn, want_hdr.then_some(&display)) {
+        Ok(()) if want_hdr => {
+            let peak = display.peak();
+            tracing::info!("{name}: HDR on (peak {peak:.0} nits, SDR white {} nits)", cfg.sdr_brightness);
+        }
+        Ok(()) => tracing::info!("{name}: HDR off"),
+        Err(e) if want_hdr => tracing::warn!("{name}: could not turn HDR on: {e}"),
+        Err(e) => tracing::debug!("{name}: could not reset HDR properties: {e}"),
+    }
+    if want_hdr {
+        gpu.outputs.set_color_formats(HDR_COLOR_FORMATS);
+    } else {
+        gpu.outputs.set_color_formats(COLOR_FORMATS);
+    }
+    let drm_output = match gpu.outputs.initialize_output::<_, FrameElement>(
+        crtc,
+        drm_mode,
+        &[conn],
+        &output,
+        None,
+        &mut gpu.renderer,
+        &DrmOutputRenderElements::default(),
+    ) {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::warn!("{name}: failed to initialize output: {e}");
+            if want_hdr {
+                let _ = set_connector_hdr(gpu.outputs.device(), conn, None);
+            }
+            state.remove_monitor(&output);
+            state.space.unmap_output(&output);
+            state.display_handle.remove_global::<State>(global);
+            state.needs_redraw = true;
+            return;
+        }
+    };
+    if want_hdr {
+        let format = drm_output.format();
+        if !matches!(
+            format,
+            Fourcc::Xrgb2101010 | Fourcc::Xbgr2101010 | Fourcc::Argb2101010 | Fourcc::Abgr2101010
+        ) {
+            tracing::warn!("{name}: no 10-bit buffers ({format:?}); HDR may show banding");
+        }
+    }
+    let wl = WlMode::from(drm_mode);
+    output.set_preferred(wl);
+    output.change_current_state(Some(wl), None, None, None);
+    gpu.surfaces.insert(
+        crtc,
+        Surface {
+            output,
+            connector: conn,
+            mode: drm_mode,
+            drm_output,
+            global,
+            waiting_vblank: false,
+            redraw_after_vblank: false,
+            lock_frame_queued: false,
+            tearing: false,
+            torn: false,
+            hdr: want_hdr.then(|| HdrState {
+                params: hdr_params(&cfg, &display),
+                pipeline: None,
+            }),
+            display,
+        },
+    );
+    state.needs_redraw = true;
 }
 
 fn connector_disconnected(state: &mut State, connector: connector::Info, crtc: crtc::Handle) {
