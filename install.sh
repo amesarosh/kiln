@@ -4,6 +4,7 @@
 #
 #   ./install.sh            build and install
 #   PREFIX=/usr ./install.sh  install binaries under /usr/bin instead of /usr/local/bin
+#   PROFILE=release ./install.sh  fully optimized build (slower to build) instead of the fast profile
 #
 # The build runs as you; only the copy into system folders uses sudo. Installing while
 # wayland-time is running is safe, but the new version only takes effect after you log
@@ -12,20 +13,22 @@ set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 
+# fast rebuilds in seconds; release takes ~1.5 minutes but runs a little faster.
+PROFILE="${PROFILE:-fast}"
 PREFIX="${PREFIX:-/usr/local}"
 BIN_DIR="$PREFIX/bin"
 SESSIONS_DIR=/usr/share/wayland-sessions
 APPS_DIR=/usr/share/applications
 
-echo "==> Building (release)"
-cargo build --release --workspace
+echo "==> Building ($PROFILE)"
+cargo build --profile "$PROFILE" --workspace
 
 echo "==> Installing (needs sudo)"
-sudo install -Dm755 target/release/wayland-time "$BIN_DIR/wayland-time"
-sudo install -Dm755 target/release/wayland-time-settings "$BIN_DIR/wayland-time-settings"
-sudo install -Dm755 target/release/wayland-time-tasks "$BIN_DIR/wayland-time-tasks"
-sudo install -Dm755 target/release/wayland-time-launcher "$BIN_DIR/wayland-time-launcher"
-sudo install -Dm755 target/release/wayland-time-lock "$BIN_DIR/wayland-time-lock"
+sudo install -Dm755 target/$PROFILE/wayland-time "$BIN_DIR/wayland-time"
+sudo install -Dm755 target/$PROFILE/wayland-time-settings "$BIN_DIR/wayland-time-settings"
+sudo install -Dm755 target/$PROFILE/wayland-time-tasks "$BIN_DIR/wayland-time-tasks"
+sudo install -Dm755 target/$PROFILE/wayland-time-launcher "$BIN_DIR/wayland-time-launcher"
+sudo install -Dm755 target/$PROFILE/wayland-time-lock "$BIN_DIR/wayland-time-lock"
 # The lock screen checks passwords with these PAM rules.
 sudo install -Dm644 resources/pam.d/wayland-time-lock /etc/pam.d/wayland-time-lock
 sudo install -Dm644 resources/wayland-time.desktop "$SESSIONS_DIR/wayland-time.desktop"

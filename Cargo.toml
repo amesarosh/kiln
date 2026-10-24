@@ -59,6 +59,15 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
+# Optimized build for testing: rebuilds in seconds instead of ~1.5 minutes, runs a little
+# slower than release. `cargo build --profile fast`, binaries land in target/fast/.
+[profile.fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+strip = false
+
 # Smithay 0.7 with small changes we need (tearing page flips, per-monitor buffer formats).
 # What changed is listed in vendor/smithay/PATCHES.md.
 [patch.crates-io]
