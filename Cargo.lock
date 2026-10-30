@@ -3799,6 +3799,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wt-config",
+ "wt-icons",
  "wt-ui",
 ]
 
