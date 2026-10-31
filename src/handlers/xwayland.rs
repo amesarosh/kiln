@@ -294,6 +294,18 @@ impl XwmHandler for State {
         }
     }
 
+    fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Some(w) = self.window_for_x11(&window) {
+            self.minimize_window(&w);
+        }
+    }
+
+    fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Some(w) = self.window_for_x11(&window) {
+            self.activate_window(&w);
+        }
+    }
+
     // Tiling decides sizes; answer with the current geometry.
     fn maximize_request(&mut self, _xwm: XwmId, _window: X11Surface) {
         self.arrange();

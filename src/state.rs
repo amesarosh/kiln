@@ -944,7 +944,7 @@ impl State {
         let shown: Vec<Window> = self
             .monitors
             .iter()
-            .flat_map(|m| m.ws().entries.iter().map(|e| e.window.clone()))
+            .flat_map(|m| m.ws().entries.iter().filter(|e| !e.minimized).map(|e| e.window.clone()))
             .collect();
         let stale: Vec<Window> = self.space.elements().filter(|w| !shown.contains(w)).cloned().collect();
         for w in stale {
@@ -1122,17 +1122,33 @@ impl State {
         })
     }
 
-    /// Focus a visible window, and its monitor.
+    /// Focus a window on a shown workspace, and its monitor. A minimized one comes back.
     pub fn focus_window(&mut self, window: &Window) {
         let Some(mon) = self.monitor_showing(window) else {
             return;
         };
+        if self.monitors[mon].ws_mut().restore(window) {
+            set_x11_minimized(window, false);
+            self.arrange();
+        }
         if mon == self.active_mon && self.ws().focus.as_ref() == Some(window) && self.focused_layer.is_none() {
             return;
         }
         self.active_mon = mon;
         self.focused_layer = None;
         self.ws_mut().focus = Some(window.clone());
+        self.refocus();
+    }
+
+    /// Hide a window until it's focused again (from its bar tab, Alt+Tab or a taskbar).
+    pub fn minimize_window(&mut self, window: &Window) {
+        let Some(ws) = self.workspace_of_mut(window) else { return };
+        if !ws.minimize(window) {
+            return;
+        }
+        window.set_activated(false);
+        set_x11_minimized(window, true);
+        self.arrange();
         self.refocus();
     }
 
@@ -1321,6 +1337,11 @@ impl State {
                     Some(w)
                 };
                 self.arrange();
+            }
+            Action::Minimize => {
+                if let Some(w) = self.ws().focus.clone() {
+                    self.minimize_window(&w);
+                }
             }
             Action::Workspace(n) => self.switch_workspace(n - 1),
             Action::MoveToWorkspace(n) => self.move_to_workspace(n - 1),
@@ -1753,6 +1774,14 @@ fn configure_x11(w: &Window, rect: Rectangle<i32, Logical>, fullscreen: bool) {
         if x.geometry() != rect {
             let _ = x.configure(rect);
         }
+    }
+}
+
+/// Tell an X11 window it's minimized (_NET_WM_STATE_HIDDEN) or not. Wayland's xdg-shell has
+/// no such state to send.
+fn set_x11_minimized(w: &Window, minimized: bool) {
+    if let Some(x) = w.x11_surface() {
+        let _ = x.set_suspended(minimized);
     }
 }
 

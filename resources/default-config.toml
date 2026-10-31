@@ -179,6 +179,8 @@ duration = 220        # milliseconds
 #                             the master on top, the rest side by side below)
 #   toggle-floating           float or re-tile the focused window
 #   toggle-fullscreen
+#   minimize                  hide the focused window; its bar tab, Alt+Tab
+#                             or a taskbar brings it back
 #   workspace <n>             switch to workspace n
 #   move-to-workspace <n>     send the focused window to workspace n
 #   focus-monitor next|prev   move focus (and the pointer) to another monitor

@@ -139,6 +139,12 @@ impl XdgShellHandler for State {
         }
     }
 
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(w) = self.window_for_surface(surface.wl_surface()) {
+            self.minimize_window(&w);
+        }
+    }
+
     // Tiling decides window sizes, so maximize is acknowledged but ignored.
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         if surface.is_initial_configure_sent() {

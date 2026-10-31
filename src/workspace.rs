@@ -14,6 +14,14 @@ pub struct Entry<W> {
     pub floating: Option<Rect>,
     /// Share of its tiling column's height; 1.0 is an equal share. Changed by Mod+right-drag.
     pub weight: f32,
+    /// Hidden until it's focused again; it keeps its tab and its place in the order.
+    pub minimized: bool,
+}
+
+impl<W> Entry<W> {
+    fn is_tiled(&self) -> bool {
+        self.floating.is_none() && !self.minimized
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +67,10 @@ impl<W: Clone + PartialEq> Workspace<W> {
         self.entries.iter_mut().find(|e| &e.window == w)
     }
 
+    pub fn is_minimized(&self, w: &W) -> bool {
+        self.entry(w).is_some_and(|e| e.minimized)
+    }
+
     pub fn is_floating(&self, w: &W) -> bool {
         self.entry(w).is_some_and(|e| e.floating.is_some())
     }
@@ -67,17 +79,20 @@ impl<W: Clone + PartialEq> Workspace<W> {
     pub fn tiled_weights(&self) -> Vec<f32> {
         self.entries
             .iter()
-            .filter(|e| e.floating.is_none())
+            .filter(|e| e.is_tiled())
             .map(|e| e.weight)
             .collect()
     }
 
     pub fn tiled(&self) -> impl Iterator<Item = &W> {
-        self.entries.iter().filter(|e| e.floating.is_none()).map(|e| &e.window)
+        self.entries.iter().filter(|e| e.is_tiled()).map(|e| &e.window)
     }
 
     pub fn floating(&self) -> impl Iterator<Item = (&W, Rect)> {
-        self.entries.iter().filter_map(|e| e.floating.map(|r| (&e.window, r)))
+        self.entries
+            .iter()
+            .filter(|e| !e.minimized)
+            .filter_map(|e| e.floating.map(|r| (&e.window, r)))
     }
 
     pub fn add(&mut self, window: W, at_master: bool, floating: Option<Rect>) {
@@ -85,6 +100,7 @@ impl<W: Clone + PartialEq> Workspace<W> {
             window: window.clone(),
             floating,
             weight: 1.0,
+            minimized: false,
         };
         if at_master {
             self.entries.insert(0, entry);
@@ -100,6 +116,7 @@ impl<W: Clone + PartialEq> Workspace<W> {
             window: window.clone(),
             floating,
             weight,
+            minimized: false,
         };
         self.entries.insert(index.min(self.entries.len()), entry);
         self.focus = Some(window);
@@ -113,19 +130,59 @@ impl<W: Clone + PartialEq> Workspace<W> {
             self.fullscreen = None;
         }
         if self.focus.as_ref() == Some(w) {
-            let next = idx.min(self.entries.len().saturating_sub(1));
-            self.focus = self.entries.get(next).map(|e| e.window.clone());
+            self.focus = self.shown_near(idx);
         }
         true
     }
 
+    /// The shown (not minimized) window at `idx`, or the nearest one after it, or before it.
+    fn shown_near(&self, idx: usize) -> Option<W> {
+        let after = self.entries.iter().skip(idx).find(|e| !e.minimized);
+        let before = || self.entries.iter().take(idx).rev().find(|e| !e.minimized);
+        after.or_else(before).map(|e| e.window.clone())
+    }
+
+    /// Hide a window, moving focus to a shown neighbour. Returns false if it wasn't here or
+    /// was already minimized.
+    pub fn minimize(&mut self, w: &W) -> bool {
+        let Some(idx) = self.index_of(w) else { return false };
+        if self.entries[idx].minimized {
+            return false;
+        }
+        self.entries[idx].minimized = true;
+        if self.fullscreen.as_ref() == Some(w) {
+            self.fullscreen = None;
+        }
+        if self.focus.as_ref() == Some(w) {
+            self.focus = self.shown_near(idx);
+        }
+        true
+    }
+
+    /// Show a minimized window again, in its old place, and focus it. Returns false if it
+    /// wasn't minimized.
+    pub fn restore(&mut self, w: &W) -> bool {
+        let Some(e) = self.entry_mut(w) else { return false };
+        if !e.minimized {
+            return false;
+        }
+        e.minimized = false;
+        self.focus = Some(w.clone());
+        true
+    }
+
+    /// Focus the next or previous shown window; minimized ones are skipped.
     pub fn focus_dir(&mut self, dir: Dir) {
-        let n = self.entries.len();
-        if n == 0 {
+        let shown: Vec<usize> = (0..self.entries.len()).filter(|&i| !self.entries[i].minimized).collect();
+        if shown.is_empty() {
             return;
         }
-        let cur = self.focus.as_ref().and_then(|f| self.index_of(f)).unwrap_or(0);
-        let next = step(cur, n, dir);
+        let cur = self
+            .focus
+            .as_ref()
+            .and_then(|f| shown.iter().position(|&i| &self.entries[i].window == f))
+            .unwrap_or(0);
+        let next = shown[step(cur, shown.len(), dir)];
         self.focus = Some(self.entries[next].window.clone());
     }
 
@@ -133,7 +190,7 @@ impl<W: Clone + PartialEq> Workspace<W> {
     pub fn swap_dir(&mut self, dir: Dir) {
         let Some(focus) = self.focus.clone() else { return };
         let tiled: Vec<usize> = (0..self.entries.len())
-            .filter(|&i| self.entries[i].floating.is_none())
+            .filter(|&i| self.entries[i].is_tiled())
             .collect();
         let Some(pos) = tiled.iter().position(|&i| self.entries[i].window == focus) else {
             return;
@@ -224,7 +281,7 @@ impl<W: Clone + PartialEq> Workspace<W> {
     pub fn zoom(&mut self) {
         let Some(focus) = self.focus.clone() else { return };
         let tiled: Vec<usize> = (0..self.entries.len())
-            .filter(|&i| self.entries[i].floating.is_none())
+            .filter(|&i| self.entries[i].is_tiled())
             .collect();
         let Some(pos) = tiled.iter().position(|&i| self.entries[i].window == focus) else {
             return;
@@ -254,12 +311,16 @@ pub fn merge_workspaces<W: Clone + PartialEq>(into: &mut [Workspace<W>], from: V
                 r.x += offset.0;
                 r.y += offset.1;
             }
-            target.add(e.window, false, e.floating);
+            let minimized = e.minimized;
+            target.add(e.window.clone(), false, e.floating);
+            if minimized {
+                target.minimize(&e.window);
+            }
         }
         // Keep what the target had focused; otherwise use what was focused on the old monitor.
         target.focus = focus_before
             .or(ws.focus)
-            .or_else(|| target.entries.first().map(|e| e.window.clone()));
+            .or_else(|| target.shown_near(0));
     }
 }
 
@@ -407,6 +468,55 @@ mod tests {
         assert_eq!(order(&w), vec![4, 2, 1, 3]);
         w.move_before(&1, &99);
         assert_eq!(order(&w), vec![4, 2, 1, 3]);
+    }
+
+    #[test]
+    fn minimized_windows_leave_the_tiling_and_focus() {
+        let mut w = ws(&[1, 2, 3]);
+        w.focus = Some(2);
+        w.fullscreen = Some(2);
+        assert!(w.minimize(&2));
+        assert!(!w.minimize(&2), "already minimized");
+        assert_eq!(w.focus, Some(3));
+        assert_eq!(w.fullscreen, None);
+        assert_eq!(w.tiled().copied().collect::<Vec<_>>(), vec![1, 3]);
+        assert_eq!(w.tiled_weights().len(), 2);
+        // Focus cycling skips it.
+        w.focus_dir(Dir::Next);
+        assert_eq!(w.focus, Some(1));
+        w.focus_dir(Dir::Next);
+        assert_eq!(w.focus, Some(3));
+        // Removing the last shown neighbour falls back to one before it.
+        w.minimize(&3);
+        assert_eq!(w.focus, Some(1));
+        w.minimize(&1);
+        assert_eq!(w.focus, None);
+        w.focus_dir(Dir::Next);
+        assert_eq!(w.focus, None);
+        // Restoring puts it back in its old slot, focused.
+        assert!(w.restore(&2));
+        assert!(!w.restore(&2));
+        assert_eq!(w.focus, Some(2));
+        assert_eq!(order(&w), vec![1, 2, 3]);
+        assert_eq!(w.tiled().copied().collect::<Vec<_>>(), vec![2]);
+    }
+
+    #[test]
+    fn minimized_floating_windows_are_hidden() {
+        let mut w = ws(&[1]);
+        w.add(2, false, Some(Rect::new(0, 0, 10, 10)));
+        w.minimize(&2);
+        assert_eq!(w.floating().count(), 0);
+        assert_eq!(w.focus, Some(1));
+    }
+
+    #[test]
+    fn removing_focus_skips_minimized_neighbours() {
+        let mut w = ws(&[1, 2, 3]);
+        w.minimize(&3);
+        w.focus = Some(2);
+        w.remove(&2);
+        assert_eq!(w.focus, Some(1));
     }
 
     #[test]

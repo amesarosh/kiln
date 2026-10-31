@@ -39,6 +39,8 @@ pub enum MenuAction {
     Close,
     ToggleFloating,
     ToggleFullscreen,
+    /// Minimize the window, or bring it back.
+    ToggleMinimized,
     /// Workspace index on the window's monitor.
     MoveToWorkspace(usize),
     /// Monitor index.
@@ -442,6 +444,7 @@ impl State {
         let ws = m.ws();
         let floating = ws.entry(&window).is_some_and(|e| e.floating.is_some());
         let fullscreen = ws.fullscreen.as_ref() == Some(&window);
+        let minimized = ws.is_minimized(&window);
         let (app_id, title) = toplevel_ids(&window);
         let name = title
             .filter(|t| !t.is_empty())
@@ -459,6 +462,12 @@ impl State {
             Entry::Item {
                 label: if fullscreen { "Exit fullscreen" } else { "Fullscreen" }.into(),
                 action: MenuAction::ToggleFullscreen,
+                danger: false,
+                checked: None,
+            },
+            Entry::Item {
+                label: if minimized { "Restore" } else { "Minimize" }.into(),
+                action: MenuAction::ToggleMinimized,
                 danger: false,
                 checked: None,
             },
@@ -708,7 +717,9 @@ impl State {
         }
         let MenuTarget::Window(w) = menu.target else { return };
         let Some(mon) = self.monitor_showing(&w) else { return };
-        // Every action works on the focused window, so focus the menu's window first.
+        let was_minimized = self.monitors[mon].ws().is_minimized(&w);
+        // Every action works on the focused window, so focus the menu's window first. That
+        // also brings a minimized window back.
         self.active_mon = mon;
         self.focused_layer = None;
         self.focus_window(&w);
@@ -716,6 +727,11 @@ impl State {
             MenuAction::Close => close_window(&w),
             MenuAction::ToggleFloating => self.run_action(Action::ToggleFloating),
             MenuAction::ToggleFullscreen => self.run_action(Action::ToggleFullscreen),
+            MenuAction::ToggleMinimized => {
+                if !was_minimized {
+                    self.minimize_window(&w);
+                }
+            }
             MenuAction::MoveToWorkspace(n) => self.run_action(Action::MoveToWorkspace(n + 1)),
             MenuAction::MoveToMonitor(target) => self.move_window_to_monitor(target),
             MenuAction::Power(_)

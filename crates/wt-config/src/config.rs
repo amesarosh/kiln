@@ -629,6 +629,8 @@ pub enum Action {
     Layout(LayoutChoice),
     ToggleFloating,
     ToggleFullscreen,
+    /// Hide the focused window until it's focused again.
+    Minimize,
     Workspace(usize),
     MoveToWorkspace(usize),
     /// Move keyboard focus (and the pointer) to the next or previous monitor.
@@ -1190,6 +1192,7 @@ pub fn parse_action(s: &str) -> Result<Action, String> {
         }),
         "toggle-floating" => Action::ToggleFloating,
         "toggle-fullscreen" => Action::ToggleFullscreen,
+        "minimize" => Action::Minimize,
         "workspace" => Action::Workspace(workspace()?),
         "move-to-workspace" => Action::MoveToWorkspace(workspace()?),
         "focus-monitor" => Action::FocusMonitor(dir()?),
@@ -1233,6 +1236,11 @@ pub const ACTIONS: &[(&str, &str, &str)] = &[
     ("layout", "tile|monocle|next", "Change the workspace layout"),
     ("toggle-floating", "", "Float or re-tile the focused window"),
     ("toggle-fullscreen", "", "Fullscreen the focused window, or stop"),
+    (
+        "minimize",
+        "",
+        "Hide the focused window; its bar tab or Alt+Tab brings it back",
+    ),
     ("workspace", "number", "Switch to a workspace"),
     ("move-to-workspace", "number", "Send the focused window to a workspace"),
     (

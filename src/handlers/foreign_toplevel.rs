@@ -44,6 +44,7 @@ struct Info {
     app_id: String,
     activated: bool,
     fullscreen: bool,
+    minimized: bool,
     /// The monitor the window belongs to (shown or on a hidden workspace).
     output: Option<Output>,
 }
@@ -140,6 +141,7 @@ impl State {
                             app_id: app_id.unwrap_or_default(),
                             activated: focused.as_ref() == Some(&e.window),
                             fullscreen: ws.fullscreen.as_ref() == Some(&e.window),
+                            minimized: e.minimized,
                             output: Some(m.output.clone()),
                         },
                     ));
@@ -226,7 +228,11 @@ fn send_changes(h: &ZwlrForeignToplevelHandleV1, old: &Info, new: &Info) {
             h.output_enter(&wl);
         }
     }
-    if old.activated != new.activated || old.fullscreen != new.fullscreen || old == &Info::default() {
+    if old.activated != new.activated
+        || old.fullscreen != new.fullscreen
+        || old.minimized != new.minimized
+        || old == &Info::default()
+    {
         h.state(state_bytes(new));
     }
     h.done();
@@ -236,6 +242,9 @@ fn send_changes(h: &ZwlrForeignToplevelHandleV1, old: &Info, new: &Info) {
 fn state_bytes(info: &Info) -> Vec<u8> {
     use zwlr_foreign_toplevel_handle_v1::State as S;
     let mut states = Vec::new();
+    if info.minimized {
+        states.push(S::Minimized as u32);
+    }
     if info.activated {
         states.push(S::Activated as u32);
     }
@@ -311,7 +320,13 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, u64> for State {
                     state.run_action(Action::ToggleFullscreen);
                 }
             }
-            // Tiled windows can't be maximized or minimized here; taskbars cope with that.
+            Request::SetMinimized => state.minimize_window(&w),
+            Request::UnsetMinimized => {
+                if state.workspace_of_mut(&w).is_some_and(|ws| ws.is_minimized(&w)) {
+                    state.activate_window(&w);
+                }
+            }
+            // Tiled windows can't be maximized here; taskbars cope with that.
             _ => {}
         }
     }
@@ -340,10 +355,11 @@ mod tests {
         assert!(state_bytes(&info).is_empty());
         info.activated = true;
         info.fullscreen = true;
+        info.minimized = true;
         let values: Vec<u32> = state_bytes(&info)
             .chunks_exact(4)
             .map(|c| u32::from_ne_bytes(c.try_into().unwrap()))
             .collect();
-        assert_eq!(values, [2, 3]);
+        assert_eq!(values, [1, 2, 3]);
     }
 }

@@ -258,6 +258,7 @@ struct Tab {
     /// For finding the icon.
     app_id: String,
     focused: bool,
+    minimized: bool,
 }
 
 pub struct Bar {
@@ -634,7 +635,11 @@ impl Bar {
                     let right = area.x + area.w - pad;
                     if right > x {
                         let label = text.fit(&tab.title, px, (right - x) as f32);
-                        let color = if tab.focused { p.text } else { p.muted };
+                        let color = match (tab.focused, tab.minimized) {
+                            (true, _) => p.text,
+                            (false, true) => p.subtext,
+                            (false, false) => p.muted,
+                        };
                         let baseline = text.centered_baseline(r.y as f32, r.h as f32, px);
                         text.draw(&mut canvas, &label, px, (x as f32, baseline), color, (x, right));
                     }
@@ -1040,6 +1045,7 @@ impl State {
                     title: label,
                     app_id: toplevel_ids(&e.window).0.unwrap_or_default(),
                     focused: ws.focus.as_ref() == Some(&e.window),
+                    minimized: e.minimized,
                 }
             })
             .collect();
@@ -1522,6 +1528,7 @@ mod tests {
                     title: t.to_string(),
                     app_id: "Alacritty".into(),
                     focused: *f,
+                    minimized: false,
                 })
                 .collect(),
             layout: LayoutKind::Tile,
