@@ -138,6 +138,9 @@ pub struct General {
     pub allow_tearing: bool,
     /// Command the power menu locks the screen with; empty picks an installed locker.
     pub locker: String,
+    /// Program that asks for passwords when apps need admin rights (a polkit agent), started
+    /// at login; empty picks an installed one, "none" starts none. Read at startup only.
+    pub polkit_agent: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

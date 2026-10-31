@@ -17,6 +17,7 @@ mod layout;
 mod menu;
 mod notifications;
 mod overview;
+mod polkit;
 mod power;
 mod render;
 mod session;
@@ -242,6 +243,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     state.start_status_timer();
     state.start_dbus();
     state.startup_commands = state.config.general.autostart.clone();
+    // A nested session has the host's password agent; headless runs are tests.
+    let headless = matches!(args.backend, BackendChoice::Headless);
+    if !nested
+        && !headless
+        && let Some(agent) = polkit::agent_command(&state.config.general.polkit_agent, &state.config.general.autostart)
+    {
+        tracing::info!("starting the password agent: {agent}");
+        state.startup_commands.insert(0, agent);
+    }
     state.startup_commands.extend(args.exec.iter().cloned());
     if state.config.general.xwayland {
         state.start_xwayland();

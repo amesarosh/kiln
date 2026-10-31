@@ -3794,6 +3794,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "wayland-time-polkit"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "libc",
+ "smithay-client-toolkit 0.20.0",
+ "tracing",
+ "tracing-subscriber",
+ "wayland-client",
+ "wt-config",
+ "wt-draw",
+ "zbus",
+]
+
+[[package]]
 name = "wayland-time-settings"
 version = "0.1.0"
 dependencies = [

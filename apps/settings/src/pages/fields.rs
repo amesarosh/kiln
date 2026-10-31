@@ -153,6 +153,12 @@ pub const GENERAL: &[Section] = &[
                 "Run X11-only apps (Steam, many games) through Xwayland.",
                 Kind::Toggle,
             )),
+            at_start(f(
+                &["general", "polkit_agent"],
+                "Password prompt for admin rights",
+                "The polkit agent that asks for your password when an app needs admin rights. Empty uses wayland-time-polkit, or another one installed; \"none\" starts none.",
+                Kind::Text("automatic"),
+            )),
         ],
     },
 ];

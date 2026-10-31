@@ -71,6 +71,8 @@ palette! {
     locked,
     /// Screen shown while locked if the locker crashed.
     lock_failed,
+    /// Laid over the screen behind a dialog that needs an answer, like a password prompt.
+    scrim,
 }
 
 /// The unresolved palette: names to expressions.

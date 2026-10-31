@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build wayland-time, its settings app, task manager, launcher and lock screen from this checkout, then install them
+# Build wayland-time, its settings app, task manager, launcher, lock screen and password prompt from this checkout,
+# then install them
 # system-wide.
 #
 #   ./install.sh            build and install
@@ -29,6 +30,7 @@ sudo install -Dm755 target/$PROFILE/wayland-time-settings "$BIN_DIR/wayland-time
 sudo install -Dm755 target/$PROFILE/wayland-time-tasks "$BIN_DIR/wayland-time-tasks"
 sudo install -Dm755 target/$PROFILE/wayland-time-launcher "$BIN_DIR/wayland-time-launcher"
 sudo install -Dm755 target/$PROFILE/wayland-time-lock "$BIN_DIR/wayland-time-lock"
+sudo install -Dm755 target/$PROFILE/wayland-time-polkit "$BIN_DIR/wayland-time-polkit"
 # The lock screen checks passwords with these PAM rules.
 sudo install -Dm644 resources/pam.d/wayland-time-lock /etc/pam.d/wayland-time-lock
 sudo install -Dm644 resources/wayland-time.desktop "$SESSIONS_DIR/wayland-time.desktop"
@@ -43,6 +45,7 @@ echo "    $BIN_DIR/wayland-time-settings"
 echo "    $BIN_DIR/wayland-time-tasks"
 echo "    $BIN_DIR/wayland-time-launcher"
 echo "    $BIN_DIR/wayland-time-lock"
+echo "    $BIN_DIR/wayland-time-polkit"
 echo "    /etc/pam.d/wayland-time-lock"
 echo "    $SESSIONS_DIR/wayland-time.desktop"
 echo "    $APPS_DIR/wayland-time-settings.desktop"

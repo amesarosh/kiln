@@ -45,6 +45,13 @@ allow_tearing = true
 # the first one installed of wayland-time-lock (our own), hyprlock, swaylock,
 # gtklock and waylock.
 locker = ""
+# Program that asks for your password when an app needs admin rights (installing
+# software, mounting a disk, `pkexec`): a polkit agent, started at login. Empty
+# picks the first one installed of wayland-time-polkit (our own),
+# polkit-gnome, polkit-kde, polkit-mate and lxpolkit; "none" starts none (if
+# you start one yourself in autostart). Changing this takes effect at the next
+# start.
+polkit_agent = ""
 
 # The look shared by everything the compositor draws: the bar, window borders,
 # the lock screen, and menus and panels as they are added.
@@ -97,6 +104,7 @@ border = "#313244"                             # other window borders
 backdrop = "mix(base, #000000, 0.35)"          # behind the workspaces in the overview
 locked = "#000000"                             # lock screen, before the locker draws
 lock_failed = "#590000"                        # lock screen if the locker crashed
+scrim = "#00000099"                            # dims the screen behind a password prompt
 
 [layout]
 default = "tile"      # "tile", "vertical" (master on top) or "monocle"

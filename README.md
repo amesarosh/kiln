@@ -22,6 +22,8 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **HDR** per monitor (`hdr = true` under `[[outputs]]`, or the settings app): HDR10 signalling with 10-bit output, ordinary windows at an adjustable SDR brightness, and HDR video and games shown in HDR through the color-management protocol (also tone-mapped onto SDR monitors)
 - **Games**: fullscreen games that ask can skip vsync for lower input lag (tearing control), and virtual machines, remote desktops and games can take every key, binds included (`Mod+Ctrl+Escape` takes them back)
 - **Sessions come back**: apps open when you quit, log out or shut down are started again at the next login, with each window on the same monitor and workspace, in the same tiling order, size and floating position
+- **Wallpaper** built in (`[theme] wallpaper`, or one per monitor): fill, fit, stretch, center or tile, picked in the settings app
+- **Password prompt for admin rights** (`wayland-time-polkit`, a polkit agent in the theme's look), started at login, so installing software, mounting disks and `pkexec` can ask for your password
 - **Screen locking** with its own lock screen (`wayland-time-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 - **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
 - **Scripting**: `wayland-time msg "<action>"` runs any action from a shell
@@ -83,6 +85,8 @@ sudo install -m644 resources/wayland-time-tasks.desktop /usr/share/applications/
 sudo install -m755 target/release/wayland-time-launcher /usr/local/bin/
 # The lock screen, and the PAM rules it checks passwords with:
 sudo install -m755 target/release/wayland-time-lock /usr/local/bin/
+# The password prompt for apps that need admin rights:
+sudo install -m755 target/release/wayland-time-polkit /usr/local/bin/
 sudo install -m644 resources/pam.d/wayland-time-lock /etc/pam.d/
 ```
 
@@ -337,6 +341,17 @@ swayidle: `timeout 600 'wlopm --off \*' resume 'wlopm --on \*'`.
 Apps like video players can ask to keep the screen awake. That only counts while their window
 is on screen.
 
+### Password prompts for admin rights
+
+When an app needs admin rights (installing software, mounting a disk, `pkexec`), polkit asks
+the session's authentication agent for a password. The compositor starts one at login:
+`[general] polkit_agent`, or when that's empty the first one installed of
+`wayland-time-polkit` (our own), polkit-gnome, polkit-kde, polkit-mate and lxpolkit; `"none"`
+starts none. `wayland-time-polkit` dims the screen and shows what is being asked, whose password
+it wants (Tab or "Switch user" when several people could answer) and a password field, in the
+theme's colors. The password goes to polkit's own `polkit-agent-helper-1`, which checks it, so
+the prompt never decides anything itself. Nested and headless runs don't start an agent.
+
 ## Code map
 
 The repository is a Cargo workspace:
@@ -350,6 +365,7 @@ The repository is a Cargo workspace:
 | `crates/wt-icons/` | icons from the icon themes: app icons via .desktop files, symbolic icons tinted one color, PNG/SVG loading |
 | `apps/settings/` | the settings app (`wayland-time-settings`) |
 | `apps/launcher/` | the app launcher (`wayland-time-launcher`) |
+| `apps/polkit/` | the password prompt (`wayland-time-polkit`): polkit agent on the system bus, talks to `polkit-agent-helper-1`, drawn with `wt-draw` on a layer surface |
 | `apps/lock/` | the lock screen (`wayland-time-lock`): session lock protocol, PAM, drawn with `wt-draw` since egui can't make lock surfaces |
 
 New apps go in `apps/`, use `wt-ui` for their window and look, and `wt-config` for anything

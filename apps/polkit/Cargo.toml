@@ -1,0 +1,21 @@
+[package]
+name = "wayland-time-polkit"
+version = "0.1.0"
+edition = "2024"
+description = "Password prompt for apps that need admin rights (a polkit agent) for the wayland-time compositor"
+license = "MIT"
+
+[dependencies]
+wt-config = { path = "../../crates/wt-config" }
+wt-draw = { path = "../../crates/wt-draw" }
+# Layer shell, keyboard with key repeat, pointer, shared-memory buffers. Its calloop and
+# protocols are used through its re-exports, so the versions always match.
+smithay-client-toolkit = "0.20"
+wayland-client = "0.31"
+# The system bus: polkitd calls us when an app needs a password.
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+# Hands each D-Bus call its answer once the dialog is done.
+async-channel = "2"
+libc = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
