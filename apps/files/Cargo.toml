@@ -16,3 +16,8 @@ async-channel = "2"
 libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Files dragged in from other apps (winit doesn't take Wayland drops): a listener of our own
+# on the window's connection.
+raw-window-handle = "0.6"
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }

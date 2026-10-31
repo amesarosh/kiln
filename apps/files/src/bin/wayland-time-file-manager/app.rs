@@ -21,11 +21,13 @@ use wt_config::theme::Palette;
 use wt_ui::{
     Look, color, eframe,
     egui::{
-        self, Align, Color32, Key, Layout, Margin, PointerButton, Rect, RichText, Sense, TextStyle, Ui, pos2, vec2,
+        self, Align, Color32, Key, Layout, Margin, PointerButton, Pos2, Rect, RichText, Sense, Stroke, TextStyle, Ui,
+        pos2, vec2,
     },
 };
 
 use crate::{
+    dnd::Dnd,
     drives::{self, Drive, Drives},
     open::{self, Apps},
     ops::{self, Job, Kind},
@@ -35,7 +37,6 @@ use crate::{
 /// What the window shows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Loc {
-    Recent,
     Trash,
     Dir(PathBuf),
 }
@@ -126,6 +127,11 @@ pub struct Manager {
     scroll_to: Option<usize>,
     list_view: (f32, f32),
     focus_search: bool,
+    /// Files dragged in from other apps.
+    dnd: Option<Dnd>,
+    /// Where a drag carrying files is over the window, and the folder row under it.
+    drop_hover: Option<Pos2>,
+    drop_folder: Option<PathBuf>,
 }
 
 impl Manager {
@@ -137,10 +143,10 @@ impl Manager {
             icons,
             mime: Mime::load(),
             apps: Apps::load(),
-            places: fs::places(),
+            places: places(),
             drives: Drives::start(&cc.egui_ctx),
             drive_list: Vec::new(),
-            loc: Loc::Recent,
+            loc: start.clone(),
             back: Vec::new(),
             forward: Vec::new(),
             all: Vec::new(),
@@ -171,6 +177,9 @@ impl Manager {
             scroll_to: None,
             list_view: (0.0, 0.0),
             focus_search: false,
+            dnd: Dnd::start(cc),
+            drop_hover: None,
+            drop_folder: None,
         };
         me.open(start, false);
         if let Some(i) = select.and_then(|s| me.shown.iter().position(|e| e.path == s)) {
@@ -196,7 +205,7 @@ impl Manager {
         self.anchor = None;
         self.editing_path = None;
         self.renaming = None;
-        // Recent files are newest first, the trash newest deleted first.
+        // The trash is newest deleted first.
         (self.sort, self.descending) = match self.loc {
             Loc::Trash => (SortBy::Modified, true),
             _ => (SortBy::Name, false),
@@ -210,7 +219,6 @@ impl Manager {
         self.error = None;
         self.trash_origin.clear();
         self.all = match &self.loc {
-            Loc::Recent => fs::recent(200),
             Loc::Trash => {
                 let items = trash::list();
                 self.trash_full = !items.is_empty();
@@ -245,7 +253,6 @@ impl Manager {
         match &self.loc {
             Loc::Dir(d) => Some(d.clone()),
             Loc::Trash => Some(trash::home_trash().join("info")),
-            Loc::Recent => Some(fs::home().join(".local/share/recently-used.xbel")),
         }
     }
 
@@ -259,10 +266,7 @@ impl Manager {
             .filter(|e| needle.is_empty() || e.name.to_lowercase().contains(&needle))
             .cloned()
             .collect();
-        // Recent files stay newest first unless a column is picked.
-        if self.loc != Loc::Recent || self.sort != SortBy::Name || self.descending {
-            fs::sort(&mut shown, self.sort, self.descending);
-        }
+        fs::sort(&mut shown, self.sort, self.descending);
         self.shown = shown;
         self.selected.retain(|p| self.shown.iter().any(|e| e.path == *p));
         // Keep the keyboard on the same file if it moved.
@@ -628,7 +632,7 @@ impl Manager {
             .filter(|e| e.name.to_lowercase().contains(&needle))
             .cloned()
             .collect();
-        // The trash and recent files are searched as listed; folders below too.
+        // The trash is searched as listed; folders below too.
         self.searching = self
             .loc
             .dir()
@@ -803,7 +807,7 @@ impl Manager {
                 self.refresh();
             }
         }
-        let places = fs::places();
+        let places = places();
         if places != self.places {
             self.places = places;
         }
@@ -811,7 +815,6 @@ impl Manager {
 
     fn update_title(&mut self, ctx: &egui::Context) {
         let title = match &self.loc {
-            Loc::Recent => "Recent".to_string(),
             Loc::Trash => "Trash".to_string(),
             Loc::Dir(d) if d == Path::new("/") => "Computer".to_string(),
             Loc::Dir(d) if *d == fs::home() => "Home".to_string(),
@@ -849,6 +852,7 @@ impl eframe::App for Manager {
             self.job_done(kind, count, outcome, ctx);
         }
         self.drive_events();
+        self.drag_events(ctx);
         // Notes fade after a while; errors stay until the next one.
         if self
             .message
@@ -887,18 +891,78 @@ impl eframe::App for Manager {
                     .inner_margin(Margin::symmetric(12, 6)),
             )
             .show(ui, |ui| self.status(ui, &p));
-        egui::CentralPanel::default_margins()
+        let list = egui::CentralPanel::default_margins()
             .frame(
                 egui::Frame::new()
                     .fill(color(p.base))
                     .inner_margin(Margin::symmetric(8, 6)),
             )
             .show(ui, |ui| self.list(ui, &p));
+        // A drag over the files, not on a folder row: they'll land in the place shown.
+        if let Some(at) = self.drop_hover
+            && list.response.rect.contains(at)
+            && self.drop_folder.is_none()
+        {
+            let radius = ui.visuals().widgets.inactive.corner_radius;
+            let edge = Stroke::new(2.0, color(p.accent));
+            ui.painter()
+                .rect_stroke(list.response.rect.shrink(2.0), radius, edge, egui::StrokeKind::Inside);
+        }
         self.confirm_dialog(ui.ctx(), &p);
     }
 }
 
 impl Manager {
+    /// Files dragged in from other apps: where they hover, and what's dropped.
+    fn drag_events(&mut self, ctx: &egui::Context) {
+        let mut drops = Vec::new();
+        self.drop_hover = None;
+        if let Some(d) = &self.dnd {
+            // Folders take drops, and so does the trash (it trashes them).
+            d.set_can_drop(true);
+            let (hover, dropped) = d.poll();
+            // The other app gives window coordinates; egui's are those over the zoom.
+            let zoom = ctx.zoom_factor();
+            self.drop_hover = hover.map(|(x, y)| pos2(x as f32 / zoom, y as f32 / zoom));
+            drops.extend(dropped.into_iter().map(|d| (uris_to_paths(&d.uris), d.moved)));
+        }
+        // On X11, winit takes drops itself.
+        ctx.input(|i| {
+            if !i.raw.hovered_files.is_empty() {
+                self.drop_hover = i.pointer.latest_pos();
+            }
+            let paths: Vec<PathBuf> = i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect();
+            if !paths.is_empty() {
+                drops.push((paths, false));
+            }
+        });
+        for (paths, moved) in drops {
+            self.drop_files(paths, moved, ctx);
+        }
+    }
+
+    /// Files dropped on the window: into the folder row they landed on, else the folder shown
+    /// (or the trash, when that's shown).
+    fn drop_files(&mut self, paths: Vec<PathBuf>, moved: bool, ctx: &egui::Context) {
+        // The folder row under the drop, from the last frame drawn.
+        let folder = self.drop_folder.take();
+        if paths.is_empty() {
+            return self.say("Only files can be dropped here");
+        }
+        if folder.is_none() && self.loc == Loc::Trash {
+            return self.run_job(Kind::Trash, paths, None, ctx);
+        }
+        let Some(dest) = folder.or_else(|| self.loc.dir().map(Path::to_path_buf)) else {
+            return self.say("Drop onto a folder, or open one first");
+        };
+        // Dropping files where they already are does nothing.
+        let paths: Vec<PathBuf> = paths
+            .into_iter()
+            .filter(|p| p.parent() != Some(&dest) && *p != dest)
+            .collect();
+        self.run_job(if moved { Kind::Move } else { Kind::Copy }, paths, Some(dest), ctx);
+    }
+
     /// Drives listed, mounted or unmounted in the background.
     fn drive_events(&mut self) {
         for event in self.drives.poll() {
@@ -1004,7 +1068,7 @@ impl Manager {
                     view::sidebar_divider(ui, p);
                     drive_act = self.drive_rows(ui, p);
                 }
-                let loc = place.path.clone().map_or(Loc::Recent, Loc::Dir);
+                let Some(loc) = place.path.clone().map(Loc::Dir) else { continue };
                 let tip = place.path.as_ref().map(|d| d.display().to_string());
                 let current = self.loc == loc;
                 if view::place_row(
@@ -1100,9 +1164,6 @@ impl Manager {
                             Some(CrumbClick::Edit) => self.editing_path = Some(dir.to_string_lossy().into_owned()),
                             None => {}
                         },
-                        Loc::Recent => {
-                            ui.label(RichText::new("Recent files").color(color(p.text)));
-                        }
                         Loc::Trash => {
                             ui.label(RichText::new("Trash").color(color(p.text)));
                         }
@@ -1116,7 +1177,6 @@ impl Manager {
                 egui::Popup::menu(&r).show(|ui| self.background_menu(ui));
                 let hint = match self.loc {
                     Loc::Dir(_) => "Search in this folder",
-                    Loc::Recent => "Search recent files",
                     Loc::Trash => "Search the trash",
                 };
                 let focus = std::mem::take(&mut self.focus_search);
@@ -1165,7 +1225,6 @@ impl Manager {
                     self.confirm = Some(Confirm::EmptyTrash);
                 }
             }
-            Loc::Recent => {}
         }
         if ui
             .add(egui::Button::new("Select All").shortcut_text("Ctrl+A"))
@@ -1253,7 +1312,7 @@ impl Manager {
                 });
             });
         }
-        // Recent files and search results live elsewhere.
+        // Search results live elsewhere.
         if let Some(parent) = first.path.parent().filter(|d| Some(*d) != self.loc.dir())
             && sel.len() == 1
             && ui.button("Open Containing Folder").clicked()
@@ -1315,6 +1374,13 @@ impl Manager {
         let date_w = 130.0;
         let name_w = (width - size_w - date_w).max(120.0);
         let radius = ui.visuals().widgets.inactive.corner_radius;
+        // Files dragged over a folder row go into that folder (not in the trash, whose folders
+        // are trashed ones).
+        self.drop_folder = None;
+        let drop_at = self
+            .drop_hover
+            .filter(|at| self.loc != Loc::Trash && ui.clip_rect().contains(*at));
+        let mut drop_folder = None;
 
         let date_title = if self.loc == Loc::Trash { "Deleted" } else { "Modified" };
         let columns = [
@@ -1328,7 +1394,7 @@ impl Manager {
             &columns,
             &mut self.sort,
             &mut self.descending,
-            self.loc == Loc::Recent,
+            false,
         ) {
             self.refresh();
         }
@@ -1358,7 +1424,6 @@ impl Manager {
                 .into()
             } else {
                 match self.loc {
-                    Loc::Recent => "No recent files",
                     Loc::Trash => "The trash is empty",
                     Loc::Dir(_) => "This folder is empty",
                 }
@@ -1403,6 +1468,14 @@ impl Manager {
                 } else if r.hovered() {
                     ui.painter().rect_filled(rect, radius, color(p.hover));
                 }
+                if e.is_dir && drop_at.is_some_and(|at| rect.contains(at) && ui.clip_rect().contains(at)) {
+                    if !is_sel {
+                        ui.painter().rect_filled(rect, radius, color(p.hover));
+                    }
+                    let edge = Stroke::new(1.5, color(p.accent));
+                    ui.painter().rect_stroke(rect, radius, edge, egui::StrokeKind::Inside);
+                    drop_folder = Some(e.path.clone());
+                }
                 // Files waiting to be moved by a paste are dimmed.
                 let dim = cut.contains(&e.path) || e.hidden;
                 let icon_rect =
@@ -1442,7 +1515,7 @@ impl Manager {
                     None => {
                         let text_c = color(if dim { p.subtext } else { p.text });
                         let name_end = clipped_text(ui, name_cell, &e.name, text_c, name_font(e));
-                        // Search results, recent files and trashed files say where they're from.
+                        // Search results and trashed files say where they're from.
                         let elsewhere = match trash_origin.get(&e.path) {
                             Some(orig) => orig.parent(),
                             None => e.path.parent().filter(|d| Some(*d) != dir),
@@ -1481,6 +1554,7 @@ impl Manager {
             }
         });
         self.list_view = (out.state.offset.y, out.inner_rect.height());
+        self.drop_folder = drop_folder;
         match rename_done {
             Some(true) => self.finish_rename(),
             Some(false) => self.renaming = None,
@@ -1607,6 +1681,11 @@ impl Manager {
 }
 
 /// "1 item", "3 items".
+/// The sidebar's places: the picker's, less Recent (the file manager only shows folders).
+fn places() -> Vec<Place> {
+    fs::places().into_iter().filter(|p| p.path.is_some()).collect()
+}
+
 fn plural(n: usize, word: &str) -> String {
     if n == 1 {
         format!("1 {word}")
@@ -1624,6 +1703,17 @@ fn free_space(dir: &Path) -> Option<u64> {
         let mut s: libc::statvfs = std::mem::zeroed();
         (libc::statvfs(c.as_ptr(), &mut s) == 0).then(|| s.f_bavail as u64 * s.f_frsize as u64)
     }
+}
+
+/// Files in a dropped `text/uri-list`: file:// URIs that exist (others, like web links, are
+/// left out).
+fn uris_to_paths(list: &str) -> Vec<PathBuf> {
+    list.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(fs::uri_to_path)
+        .filter(|p| p.symlink_metadata().is_ok())
+        .collect()
 }
 
 /// Files named in clipboard text: one path or file:// URI per line, all existing. GNOME's
@@ -1667,5 +1757,14 @@ mod tests {
         assert!(paths_in_text("hello world").is_none());
         assert!(paths_in_text("/no/such/file/here").is_none());
         assert!(paths_in_text("").is_none());
+    }
+
+    #[test]
+    fn uri_lists() {
+        assert_eq!(
+            uris_to_paths("# from somewhere\r\nfile:///tmp\r\nhttps://example.com/\r\nfile:///no/such/file\r\n"),
+            vec![PathBuf::from("/tmp")]
+        );
+        assert!(uris_to_paths("").is_empty());
     }
 }

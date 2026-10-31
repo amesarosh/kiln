@@ -2,6 +2,7 @@
 //! colors and font. Built on the same listing, places and icons as the file picker.
 
 mod app;
+mod dnd;
 mod drives;
 mod open;
 mod ops;
@@ -19,7 +20,7 @@ USAGE:
     wayland-time-file-manager [FOLDER | FILE]
 
 Opens FOLDER (a path or a file:// URI), or the folder holding FILE with it selected, or
-your home folder.
+your Downloads folder.
 ";
 
 fn main() {
@@ -45,9 +46,9 @@ fn main() {
         },
         Some(p) => {
             eprintln!("wayland-time-file-manager: {} doesn't exist", p.display());
-            (Loc::Dir(fs::home()), None::<PathBuf>)
+            (Loc::Dir(fs::downloads()), None::<PathBuf>)
         }
-        None => (Loc::Dir(fs::home()), None),
+        None => (Loc::Dir(fs::downloads()), None),
     };
     let viewport = wt_ui::egui::ViewportBuilder::default()
         .with_inner_size([1000.0, 640.0])

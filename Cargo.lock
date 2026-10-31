@@ -3775,8 +3775,11 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "libc",
+ "raw-window-handle",
  "tracing",
  "tracing-subscriber",
+ "wayland-backend",
+ "wayland-client",
  "wt-config",
  "wt-icons",
  "wt-ui",

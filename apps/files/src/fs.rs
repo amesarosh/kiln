@@ -128,6 +128,15 @@ pub fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
+/// The Downloads folder (from `user-dirs.dirs`), or home if there isn't one.
+pub fn downloads() -> PathBuf {
+    let home = home();
+    let dir = user_dirs(&home)
+        .remove("DOWNLOAD")
+        .unwrap_or_else(|| home.join("Downloads"));
+    if dir.is_dir() { dir } else { home }
+}
+
 /// A place in the sidebar.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Place {
