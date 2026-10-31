@@ -29,6 +29,8 @@ rustix = { version = "1", features = ["pipe", "fs"] }
 libc = "0.2"
 # The session bus: notifications, tray icons, media players. Blocking API on our own thread.
 zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+# Wallpapers.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
 [dev-dependencies]
 # Writes preview images in tests.

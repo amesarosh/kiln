@@ -187,6 +187,13 @@ output = "DP-5"   # monitor names are in the log
 workspace = 2
 ```
 
+The wallpaper is `[theme] wallpaper = "~/Pictures/x.jpg"` (PNG, JPEG or WebP), fitted with
+`wallpaper_fit`: `fill` (cover the monitor, cropping the edges), `fit` (all of it, with the
+`base` color around it), `stretch`, `center` or `tile`. A monitor can have its own with
+`wallpaper` under its `[[outputs]]` entry (`""` for none). Pictures are scaled once per monitor
+on a background thread, so drawing them costs nothing; saving the config or changing a
+monitor's mode remakes them. Wallpaper tools like swaybg still work and draw on top.
+
 Everything the compositor draws (the bar, window borders, the lock screen) takes its font and
 colors from `[theme]`. Colors are named once in `[theme.colors]` and referred to by name, and
 shades like `hover = "mix(surface, text, 0.1)"` are built from them, so changing `surface` or
@@ -194,7 +201,7 @@ shades like `hover = "mix(surface, text, 0.1)"` are built from them, so changing
 its own table, e.g. `[bar.colors]`.
 
 Themes can be saved and switched. A saved theme is a file in `~/.config/wayland-time/themes/`
-holding the same keys as `[theme]` (`font`, `font_size`, `radius`, `icon_theme` and a `[colors]`
+holding the same keys as `[theme]` (`font`, `font_size`, `radius`, `icon_theme`, `wallpaper` and a `[colors]`
 table), and `[theme] name = "Nord"` uses `themes/Nord.toml`. Its values go on top of the built-in
 theme, and anything else set in `[theme]` goes on top of the saved theme. Editing the theme file
 in use reloads it like the config. The settings app's Appearance page can pick a theme, save the
@@ -372,6 +379,7 @@ in the config file.
 | `src/input.rs` | keyboard binds, pointer focus, Mod+drag |
 | `src/grabs.rs` | interactive move/resize |
 | `src/render.rs` | builds the frame: layers, windows, borders, lock screen |
+| `src/wallpaper.rs` | the wallpaper: decoded and fitted to each monitor on a worker thread |
 | `src/handlers/` | Wayland protocol handlers (xdg-shell, layer-shell, decorations, seat, clipboard, viewporter, fractional scale) |
 | `src/handlers/lock.rs` | screen locking: lock state, lock surfaces, who may unlock |
 | `src/handlers/idle.rs` | idle notifications and idle inhibit |

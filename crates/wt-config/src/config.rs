@@ -175,7 +175,62 @@ struct RawTheme {
     font_size: f32,
     radius: f32,
     icon_theme: String,
+    /// Picture behind the windows; empty shows the `base` color.
+    #[serde(default)]
+    wallpaper: String,
+    #[serde(default)]
+    wallpaper_fit: WallpaperFit,
     colors: ColorDefs,
+}
+
+/// How a wallpaper is fitted to a monitor.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WallpaperFit {
+    /// Cover the monitor, cropping what doesn't fit.
+    #[default]
+    Fill,
+    /// Show all of it, with `base` around it.
+    Fit,
+    /// Cover the monitor, squashed or stretched to its shape.
+    Stretch,
+    /// At its own size in the middle, with `base` around it.
+    Center,
+    /// Repeated at its own size from the top-left corner.
+    Tile,
+}
+
+/// The wallpaper for each monitor.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WallpaperConfig {
+    /// Image file for monitors without their own, `~` expanded; empty for none.
+    pub path: String,
+    pub fit: WallpaperFit,
+    /// `[[outputs]] wallpaper`, by monitor name; an empty path means none on that monitor.
+    pub per_output: Vec<(String, String)>,
+}
+
+impl WallpaperConfig {
+    /// The image for the monitor with this name, if it has one.
+    pub fn for_output(&self, output: &str) -> Option<&str> {
+        let path = self
+            .per_output
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(output))
+            .map_or(self.path.as_str(), |(_, p)| p.as_str());
+        (!path.is_empty()).then_some(path)
+    }
+}
+
+/// `~/x` and `~` as paths in the home folder; anything else unchanged.
+pub fn expand_home(path: &str) -> String {
+    let path = path.trim();
+    let home = || std::env::var("HOME").ok().filter(|h| !h.is_empty());
+    match path.strip_prefix('~') {
+        Some("") => home().unwrap_or_else(|| path.to_string()),
+        Some(rest) if rest.starts_with('/') => home().map_or_else(|| path.to_string(), |h| format!("{h}{rest}")),
+        _ => path.to_string(),
+    }
 }
 
 /// Every component section can carry a `colors` table that overrides theme colors for it alone.
@@ -412,6 +467,8 @@ struct RawOutput {
     hdr: bool,
     /// How bright ordinary (SDR) content is in HDR mode, in nits.
     sdr_brightness: Option<u32>,
+    /// This monitor's wallpaper, overriding `[theme] wallpaper`; "" for none.
+    wallpaper: Option<String>,
 }
 
 fn yes() -> bool {
@@ -556,6 +613,8 @@ pub struct Config {
     pub workspace_labels: Vec<WorkspaceLabel>,
     pub rules: Vec<WindowRule>,
     pub outputs: Vec<OutputConfig>,
+    /// Kept apart from `outputs`, so changing a wallpaper doesn't reapply monitor modes.
+    pub wallpaper: WallpaperConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1004,6 +1063,16 @@ impl Config {
             }
         }
 
+        let wallpaper = WallpaperConfig {
+            path: expand_home(&raw.theme.wallpaper),
+            fit: raw.theme.wallpaper_fit,
+            per_output: raw
+                .outputs
+                .iter()
+                .filter_map(|o| Some((o.name.clone(), expand_home(o.wallpaper.as_deref()?))))
+                .collect(),
+        };
+
         let mut outputs: Vec<OutputConfig> = Vec::with_capacity(raw.outputs.len());
         for o in raw.outputs {
             let at = format!("outputs \"{}\"", o.name);
@@ -1059,6 +1128,7 @@ impl Config {
             workspace_labels,
             rules: raw.rules,
             outputs,
+            wallpaper,
         })
     }
 
@@ -1532,6 +1602,31 @@ mod tests {
             ..kb
         };
         assert!(check_keymap(&bad).is_err());
+    }
+
+    #[test]
+    fn wallpapers() {
+        let c = Config::parse_user("").unwrap();
+        assert_eq!(c.wallpaper.for_output("DP-1"), None);
+        let c = Config::parse_user(
+            "[theme]\nwallpaper = \"/w/a.jpg\"\nwallpaper_fit = \"tile\"\n\
+             [[outputs]]\nname = \"DP-2\"\nwallpaper = \"/w/b.png\"\n\
+             [[outputs]]\nname = \"DP-3\"\nwallpaper = \"\"\n",
+        )
+        .unwrap();
+        assert_eq!(c.wallpaper.fit, WallpaperFit::Tile);
+        assert_eq!(c.wallpaper.for_output("DP-1"), Some("/w/a.jpg"));
+        assert_eq!(c.wallpaper.for_output("dp-2"), Some("/w/b.png"));
+        assert_eq!(c.wallpaper.for_output("DP-3"), None, "an empty one turns it off");
+        assert!(Config::parse_user("[theme]\nwallpaper_fit = \"zoom\"\n").is_err());
+    }
+
+    #[test]
+    fn home_expansion() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(expand_home("~/p.png"), format!("{home}/p.png"));
+        assert_eq!(expand_home("~bob/p.png"), "~bob/p.png");
+        assert_eq!(expand_home("/a/b"), "/a/b");
     }
 
     #[test]

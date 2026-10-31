@@ -72,6 +72,7 @@ pub struct Cache {
     fonts: Option<Vec<String>>,
     icon_themes: Option<Vec<String>>,
     monitors: Option<Vec<Monitor>>,
+    wallpapers: Option<Vec<(String, String)>>,
 }
 
 impl Cache {
@@ -85,6 +86,11 @@ impl Cache {
 
     pub fn monitors(&mut self) -> &[Monitor] {
         self.monitors.get_or_insert_with(crate::monitors::detect)
+    }
+
+    /// Pictures that could be wallpapers: (path as written to the config, label).
+    pub fn wallpapers(&mut self) -> &[(String, String)] {
+        self.wallpapers.get_or_insert_with(find_wallpapers)
     }
 
     pub fn refresh_monitors(&mut self) {
@@ -120,4 +126,58 @@ fn find_icon_themes() -> Vec<String> {
     themes.sort_by_key(|t| t.to_lowercase());
     themes.dedup();
     themes
+}
+
+/// Pictures in the usual folders: Pictures (and Wallpapers in it), and the backgrounds that
+/// come with the system. Paths in the home folder are written with `~`.
+fn find_wallpapers() -> Vec<(String, String)> {
+    const MAX: usize = 2000;
+    let home = std::env::var("HOME").ok().filter(|h| !h.is_empty());
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(h) = &home {
+        let h = std::path::Path::new(h);
+        roots.extend([h.join("Pictures"), h.join(".local/share/backgrounds")]);
+    }
+    let data_dirs = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    roots.extend(data_dirs.split(':').map(|d| std::path::Path::new(d).join("backgrounds")));
+    roots.dedup();
+
+    let mut found = Vec::new();
+    // Three folders deep is enough for Pictures/Wallpapers/<set>/x.jpg.
+    let mut stack: Vec<(std::path::PathBuf, u32)> = roots.into_iter().map(|r| (r, 0)).collect();
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let path = e.path();
+            let Ok(kind) = e.file_type() else { continue };
+            if kind.is_dir() {
+                if depth < 3 && !e.file_name().to_string_lossy().starts_with('.') {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            let ext = path.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
+            if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp") {
+                continue;
+            }
+            let full = path.to_string_lossy().into_owned();
+            let written = match &home {
+                Some(h) if full.starts_with(&format!("{h}/")) => format!("~{}", &full[h.len()..]),
+                _ => full,
+            };
+            let name = path.file_stem().map(|n| n.to_string_lossy().replace(['_', '-'], " ")).unwrap_or_default();
+            let folder = path.parent().and_then(|p| p.file_name()).map(|f| f.to_string_lossy().into_owned());
+            let label = match folder {
+                Some(f) => format!("{name}  ({f})"),
+                None => name,
+            };
+            found.push((written, label));
+            if found.len() >= MAX {
+                break;
+            }
+        }
+    }
+    found.sort_by_key(|(_, l)| l.to_lowercase());
+    found.dedup_by(|a, b| a.0 == b.0);
+    found
 }

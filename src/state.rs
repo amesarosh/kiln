@@ -177,6 +177,8 @@ pub struct State {
     pub switcher: Option<crate::switcher::Switcher>,
     /// Volume keys and the panel that shows the level.
     pub volume: crate::volume::Volume,
+    /// Each monitor's wallpaper picture.
+    pub wallpapers: crate::wallpaper::Wallpapers,
     /// Windows by when they last had focus, most recent first.
     pub focus_history: Vec<Window>,
     /// The open pop-up menu, if any.
@@ -379,6 +381,7 @@ impl State {
             pointer_gestures_state,
             overview: None,
             volume: Default::default(),
+            wallpapers: Default::default(),
             focus_history: Vec::new(),
             ui_text: None,
             screencopy_pending: Vec::new(),

@@ -26,6 +26,7 @@ mod switcher;
 // Text and canvas drawing are shared with the lock screen.
 use wt_draw as text;
 mod volume;
+mod wallpaper;
 use wt_config::theme;
 mod workspace;
 

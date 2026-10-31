@@ -57,6 +57,14 @@ font = "sans"     # fontconfig name, or a path to a .ttf/.otf file
 font_size = 14
 radius = 6           # corner rounding of buttons, tabs and menus (0 = square)
 icon_theme = "auto"  # icon theme for app icons; "auto" uses your GTK/GNOME setting
+# Picture behind the windows: a PNG, JPEG or WebP file ("~/" is your home
+# folder). Empty shows the base color. A monitor can have its own with
+# `wallpaper` under [[outputs]]. Other wallpaper tools (swaybg) draw on top.
+wallpaper = ""
+# How it's fitted to each monitor: "fill" (cover it, cropping the edges), "fit"
+# (all of it, with the base color around it), "stretch", "center" (its own
+# size) or "tile".
+wallpaper_fit = "fill"
 
 # Colors are named here and every part of the UI refers to them by name, so
 # changing one changes it everywhere. A value can be:
@@ -332,6 +340,7 @@ duration = 220        # milliseconds
 # layout = "monocle"       # this monitor's default layout, instead of [layout] default
 # hdr = true               # HDR mode, on monitors that support it (real hardware only)
 # sdr_brightness = 203     # in HDR mode, how bright ordinary content is, in nits (80-1000)
+# wallpaper = "~/Pictures/wide.jpg"  # this monitor's wallpaper; "" for none
 #
 # [[outputs]]
 # name = "HDMI-A-1"

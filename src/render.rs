@@ -333,7 +333,39 @@ where
 
     push_layers(&mut out, renderer, Layer::Bottom);
     push_layers(&mut out, renderer, Layer::Background);
+    push_wallpaper(state, renderer, output, output_geo.size, &mut out);
     out
+}
+
+/// The wallpaper, under everything, covering the monitor.
+fn push_wallpaper<R>(
+    state: &State,
+    renderer: &mut R,
+    output: &Output,
+    size: smithay::utils::Size<i32, Logical>,
+    out: &mut Vec<OutputElement<R>>,
+) where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Clone + Texture + Send + 'static,
+{
+    let names: Vec<String> = state.space.outputs().map(|o| o.name()).collect();
+    state.wallpapers.retain_outputs(&names);
+    let want = crate::wallpaper::Want::for_output(state, output);
+    let Some(buffer) = state.wallpapers.buffer(&state.loop_handle, &output.name(), want) else {
+        return;
+    };
+    match MemoryRenderBufferRenderElement::from_buffer(
+        renderer,
+        (0.0, 0.0),
+        &buffer,
+        None,
+        None,
+        Some(size),
+        Kind::Unspecified,
+    ) {
+        Ok(e) => out.push(OutputElement::Memory(e)),
+        Err(e) => tracing::warn!("wallpaper upload failed: {e:?}"),
+    }
 }
 
 /// The lock screen: the locker's surface, or a plain fill until it has drawn one. The fill is

@@ -25,6 +25,8 @@ pub enum Kind {
     List(&'static str),
     Font,
     IconTheme,
+    /// An image file, picked from the pictures found or typed as a path.
+    Wallpaper,
     /// Some of a fixed set of values, kept in this order: (value, label).
     Flags(&'static [(&'static str, &'static str)]),
 }
@@ -173,6 +175,25 @@ pub const APPEARANCE: &[Section] = &[
                 "Icon theme",
                 "Where app icons come from.",
                 Kind::IconTheme,
+            ),
+        ],
+    },
+    Section {
+        title: "Wallpaper",
+        note: "A monitor can have its own: wallpaper under [[outputs]] in the config file.",
+        fields: &[
+            f(&["theme", "wallpaper"], "Wallpaper", "PNG, JPEG or WebP.", Kind::Wallpaper),
+            f(
+                &["theme", "wallpaper_fit"],
+                "Fit",
+                "How the picture is fitted to each monitor. Uncovered parts show the base color.",
+                Kind::Choice(&[
+                    ("fill", "Fill the screen (crop the edges)"),
+                    ("fit", "Show all of it"),
+                    ("stretch", "Stretch"),
+                    ("center", "Center at its own size"),
+                    ("tile", "Tile"),
+                ]),
             ),
         ],
     },
@@ -581,6 +602,12 @@ pub fn show_field(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cac
                 doc.set(path, v);
             }
         }
+        Kind::Wallpaper => {
+            let mut v = doc.str(path);
+            if wallpaper_picker(ui, cache, &mut v) {
+                doc.set(path, v);
+            }
+        }
         Kind::List(_) | Kind::Flags(_) => unreachable!(),
     });
     if reset {
@@ -637,6 +664,45 @@ fn font_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool {
             {
                 if q.is_empty() || family.to_lowercase().contains(&q) {
                     ui.selectable_value(value, family.clone(), family.as_str());
+                }
+            }
+        });
+    ui.data_mut(|d| d.insert_temp(id, filter));
+    *value != before
+}
+
+/// A searchable list of the pictures found, plus "none"; a full path can be typed in the
+/// search box too.
+fn wallpaper_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool {
+    let before = value.clone();
+    let id = ui.id().with("wallpaper-filter");
+    let mut filter: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
+    let shown = if value.is_empty() {
+        "None".to_string()
+    } else {
+        std::path::Path::new(value.as_str())
+            .file_name()
+            .map_or(value.clone(), |n| n.to_string_lossy().into_owned())
+    };
+    egui::ComboBox::from_id_salt("wallpaper")
+        .selected_text(shown)
+        .width(ui.available_width())
+        .height(360.0)
+        .show_ui(ui, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut filter).hint_text("Search, or type a file's path"))
+                .request_focus();
+            let typed = filter.trim();
+            if (typed.starts_with('/') || typed.starts_with('~'))
+                && std::path::Path::new(&wt_config::expand_home(typed)).is_file()
+            {
+                ui.selectable_value(value, typed.to_string(), format!("Use {typed}"));
+            }
+            ui.selectable_value(value, String::new(), "None");
+            let q = typed.to_lowercase();
+            for (path, label) in cache.wallpapers() {
+                if q.is_empty() || label.to_lowercase().contains(&q) {
+                    ui.selectable_value(value, path.clone(), label.as_str())
+                        .on_hover_text(path.as_str());
                 }
             }
         });
