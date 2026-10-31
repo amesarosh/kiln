@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build wayland-time, its settings app, task manager, launcher, lock screen and password prompt from this checkout,
-# then install them
+# Build wayland-time, its settings app, task manager, launcher, lock screen, password prompt and file picker from
+# this checkout, then install them
 # system-wide.
 #
 #   ./install.sh            build and install
@@ -20,6 +20,8 @@ PREFIX="${PREFIX:-/usr/local}"
 BIN_DIR="$PREFIX/bin"
 SESSIONS_DIR=/usr/share/wayland-sessions
 APPS_DIR=/usr/share/applications
+PORTALS_DIR=/usr/share/xdg-desktop-portal
+DBUS_DIR=/usr/share/dbus-1/services
 
 echo "==> Building ($PROFILE)"
 cargo build --profile "$PROFILE" --workspace
@@ -31,6 +33,21 @@ sudo install -Dm755 target/$PROFILE/wayland-time-tasks "$BIN_DIR/wayland-time-ta
 sudo install -Dm755 target/$PROFILE/wayland-time-launcher "$BIN_DIR/wayland-time-launcher"
 sudo install -Dm755 target/$PROFILE/wayland-time-lock "$BIN_DIR/wayland-time-lock"
 sudo install -Dm755 target/$PROFILE/wayland-time-polkit "$BIN_DIR/wayland-time-polkit"
+sudo install -Dm755 target/$PROFILE/wayland-time-files "$BIN_DIR/wayland-time-files"
+# The file picker is a desktop portal backend: the portal finds it through these files, and
+# D-Bus starts it when an app first asks for a file.
+sudo install -Dm644 resources/portal/wayland-time.portal "$PORTALS_DIR/portals/wayland-time.portal"
+sudo install -Dm644 resources/portal/wayland-time-portals.conf "$PORTALS_DIR/wayland-time-portals.conf"
+sudo mkdir -p "$DBUS_DIR"
+printf '[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.wayland-time\nExec=%s --portal\n' \
+    "$BIN_DIR/wayland-time-files" |
+    sudo tee "$DBUS_DIR/org.freedesktop.impl.portal.desktop.wayland-time.service" >/dev/null
+# A portal config of your own overrides the one above; make sure it picks our file picker.
+USER_PORTALS="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal/wayland-time-portals.conf"
+if [ -f "$USER_PORTALS" ] && ! grep -q 'FileChooser' "$USER_PORTALS"; then
+    echo 'org.freedesktop.impl.portal.FileChooser=wayland-time;gtk' >>"$USER_PORTALS"
+    echo "==> Added the file picker to $USER_PORTALS"
+fi
 # The lock screen checks passwords with these PAM rules.
 sudo install -Dm644 resources/pam.d/wayland-time-lock /etc/pam.d/wayland-time-lock
 sudo install -Dm644 resources/wayland-time.desktop "$SESSIONS_DIR/wayland-time.desktop"
@@ -46,6 +63,10 @@ echo "    $BIN_DIR/wayland-time-tasks"
 echo "    $BIN_DIR/wayland-time-launcher"
 echo "    $BIN_DIR/wayland-time-lock"
 echo "    $BIN_DIR/wayland-time-polkit"
+echo "    $BIN_DIR/wayland-time-files"
+echo "    $PORTALS_DIR/portals/wayland-time.portal"
+echo "    $PORTALS_DIR/wayland-time-portals.conf"
+echo "    $DBUS_DIR/org.freedesktop.impl.portal.desktop.wayland-time.service"
 echo "    /etc/pam.d/wayland-time-lock"
 echo "    $SESSIONS_DIR/wayland-time.desktop"
 echo "    $APPS_DIR/wayland-time-settings.desktop"

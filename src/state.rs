@@ -118,6 +118,8 @@ pub struct State {
     #[allow(dead_code)]
     pub cursor_shape_state: smithay::wayland::cursor_shape::CursorShapeManagerState,
     pub activation_state: smithay::wayland::xdg_activation::XdgActivationState,
+    /// Lets a desktop portal's dialog (a file picker) name the app window it belongs to.
+    pub xdg_foreign_state: smithay::wayland::xdg_foreign::XdgForeignState,
     pub shortcuts_inhibit_state: smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
     /// wp_color_management_v1: image descriptions handed out, and who watches what.
     pub color: crate::handlers::color_management::ColorManagement,
@@ -280,6 +282,7 @@ impl State {
             smithay::wayland::pointer_constraints::PointerConstraintsState::new::<Self>(&dh);
         let relative_pointer_state = smithay::wayland::relative_pointer::RelativePointerManagerState::new::<Self>(&dh);
         let activation_state = smithay::wayland::xdg_activation::XdgActivationState::new::<Self>(&dh);
+        let xdg_foreign_state = smithay::wayland::xdg_foreign::XdgForeignState::new::<Self>(&dh);
         let shortcuts_inhibit_state =
             smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState::new::<Self>(&dh);
         let cursor_shape_state = smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
@@ -348,6 +351,7 @@ impl State {
             relative_pointer_state,
             cursor_shape_state,
             activation_state,
+            xdg_foreign_state,
             shortcuts_inhibit_state,
             color: Default::default(),
             presentation_state,
@@ -757,6 +761,71 @@ impl State {
             .cloned()
     }
 
+    /// The window a dialog belongs to: its xdg parent (set directly, or through xdg-foreign
+    /// by a desktop portal), or the X11 window it's transient for.
+    pub fn parent_window(&self, window: &Window) -> Option<Window> {
+        if let Some(parent) = window.toplevel().and_then(|t| t.parent()) {
+            return self.window_for_surface(&parent);
+        }
+        let xid = window.x11_surface()?.is_transient_for()?;
+        self.all_workspaces()
+            .flat_map(|ws| ws.entries.iter().map(|e| &e.window))
+            .find(|w| w.x11_surface().is_some_and(|x| x.window_id() == xid))
+            .cloned()
+    }
+
+    /// Where a floating window of `size` goes on `mon`: over the window it belongs to if that's
+    /// on screen, else in the middle of the monitor. Never bigger than the work area.
+    fn place_dialog(&self, window: &Window, mon: usize, size: (i32, i32)) -> Option<Rect> {
+        let area = self.work_area(mon)?;
+        let anchor = || window.user_data().get::<DialogAnchor>().map(|a| a.0.clone());
+        let parent = self
+            .parent_window(window)
+            .or_else(anchor)
+            .and_then(|p| self.space.element_geometry(&p))
+            .filter(|g| g.overlaps(area));
+        let Some(parent) = parent else {
+            return Some(place_floating(area, size, None));
+        };
+        let (w, h) = (size.0.clamp(1, area.size.w.max(1)), size.1.clamp(1, area.size.h.max(1)));
+        let x = (parent.loc.x + (parent.size.w - w) / 2).clamp(area.loc.x, area.loc.x + area.size.w - w);
+        let y = (parent.loc.y + (parent.size.h - h) / 2).clamp(area.loc.y, area.loc.y + area.size.h - h);
+        Some(Rect::new(x, y, w, h))
+    }
+
+    /// An app's window got a parent after it was placed, as desktop portal dialogs do once
+    /// they're linked to the app that opened them: float it over that window.
+    pub fn parent_changed(&mut self, window: &Window) {
+        if self.parent_window(window).is_none() {
+            return;
+        }
+        let Some(mon) = self.monitor_of(window) else { return };
+        let size = window.geometry().size;
+        let Some(area) = self.work_area(mon) else { return };
+        let size = if size.w > 0 { (size.w, size.h) } else { picker_size(area) };
+        let rect = self.place_dialog(window, mon, size);
+        let Some(entry) = self.workspace_of_mut(window).and_then(|ws| ws.entry_mut(window)) else {
+            return;
+        };
+        let Some(rect) = rect else { return };
+        match &mut entry.floating {
+            // Already floating: just move it over its parent.
+            Some(r) if r.w > 0 => {
+                r.x = rect.x;
+                r.y = rect.y;
+            }
+            Some(_) => {}
+            None => {
+                entry.floating = Some(rect);
+                if let Some(t) = window.toplevel() {
+                    t.with_pending_state(|s| s.size = Some((rect.w, rect.h).into()));
+                }
+            }
+        }
+        self.arrange();
+        self.refocus();
+    }
+
     // ---------- window lifecycle ----------
 
     /// Called on a toplevel's first commit: apply rules, place it, and send the initial configure.
@@ -780,14 +849,21 @@ impl State {
         if let Some(o) = rule.opacity {
             set_window_opacity(&window, o);
         }
-        // Dialogs and fixed-size windows float.
+        // Dialogs and fixed-size windows float, and so does anything a desktop portal opens
+        // (file pickers, screen share pickers): those are always dialogs for another app, even
+        // when the app couldn't link them to its window.
+        let portal = is_portal(app_id.as_deref());
+        floating |= portal;
+        if portal && let Some(f) = self.ws().focus.clone() {
+            window.user_data().insert_if_missing(|| DialogAnchor(f));
+        }
         if !floating && let Some(t) = window.toplevel() {
             floating = t.parent().is_some();
         }
         if !floating && let Some(x) = window.x11_surface() {
             floating = x11_wants_float(x);
         }
-        let is_dialog = window.toplevel().is_some_and(|t| t.parent().is_some());
+        let is_dialog = portal || window.toplevel().is_some_and(|t| t.parent().is_some());
         let restored = (!is_dialog)
             .then(|| self.restored_placement(&window, app_id.as_deref().unwrap_or(""), title.as_deref().unwrap_or("")))
             .flatten();
@@ -808,7 +884,13 @@ impl State {
             (_, Some(area), Some([w, h])) => place_floating(area, (w, h), rule.position),
             (Some(x), Some(area), None) => {
                 let r = x11_float_rect(x, area);
-                place_floating(area, (r.w, r.h), rule.position)
+                match rule.position {
+                    Some(_) => place_floating(area, (r.w, r.h), rule.position),
+                    // Dialogs over the window they belong to.
+                    None => self
+                        .place_dialog(&window, target_mon, (r.w, r.h))
+                        .unwrap_or_else(|| place_floating(area, (r.w, r.h), None)),
+                }
             }
             _ => Rect::new(0, 0, 0, 0),
         });
@@ -867,6 +949,13 @@ impl State {
                 }
                 if let (Some(t), Some(r)) = (window.toplevel(), float_rect.filter(|r| r.w > 0)) {
                     t.with_pending_state(|s| s.size = Some((r.w, r.h).into()));
+                } else if portal
+                    && rule.size.is_none()
+                    && let (Some(t), Some(area)) = (window.toplevel(), area)
+                {
+                    // Portal file pickers remember huge sizes; offer one that fits.
+                    let (w, h) = picker_size(area);
+                    t.with_pending_state(|s| s.size = Some((w, h).into()));
                 }
             }
         }
@@ -926,7 +1015,20 @@ impl State {
         if let Some(rect) = &mut entry.floating {
             if rect.w == 0 && size.w > 0 {
                 let position = window.user_data().get::<RulePlacement>().and_then(|p| p.0.take());
-                *rect = place_floating(area, (size.w, size.h), position);
+                let placed = position
+                    .map(|p| place_floating(area, (size.w, size.h), Some(p)))
+                    .or_else(|| self.place_dialog(window, mon, (size.w, size.h)));
+                let Some(entry) = self.workspace_of_mut(window).and_then(|ws| ws.entry_mut(window)) else {
+                    return;
+                };
+                let Some(placed) = placed else { return };
+                entry.floating = Some(placed);
+                // Bigger than the screen: ask it to fit.
+                if (placed.w, placed.h) != (size.w, size.h)
+                    && let Some(t) = window.toplevel()
+                {
+                    t.with_pending_state(|s| s.size = Some((placed.w, placed.h).into()));
+                }
                 if shown {
                     self.arrange();
                 }
@@ -1740,6 +1842,25 @@ fn place_floating(
         ),
     };
     Rect::new(x, y, w, h)
+}
+
+/// Windows from desktop portal backends (xdg-desktop-portal-gtk, -gnome, -kde...).
+fn is_portal(app_id: Option<&str>) -> bool {
+    app_id.is_some_and(|a| {
+        a.starts_with("xdg-desktop-portal") || a.starts_with("org.freedesktop.impl.portal") || a == "wayland-time-files"
+    })
+}
+
+/// The window that had focus when a portal dialog opened: the app that asked for it, as far
+/// as we can tell when the dialog wasn't linked to its window.
+struct DialogAnchor(Window);
+
+/// A comfortable size for a file picker: most of the screen on a laptop, not all of a big
+/// monitor.
+fn picker_size(area: Rectangle<i32, Logical>) -> (i32, i32) {
+    let w = (area.size.w as f32 * 0.7) as i32;
+    let h = (area.size.h as f32 * 0.75) as i32;
+    (w.clamp(480.min(area.size.w), 1100), h.clamp(360.min(area.size.h), 760))
 }
 
 /// How see-through a window is drawn, from a rule.

@@ -231,4 +231,11 @@ impl FractionalScaleHandler for State {
 delegate_fractional_scale!(State);
 
 smithay::delegate_presentation!(State);
+
+impl smithay::wayland::xdg_foreign::XdgForeignHandler for State {
+    fn xdg_foreign_state(&mut self) -> &mut smithay::wayland::xdg_foreign::XdgForeignState {
+        &mut self.xdg_foreign_state
+    }
+}
+smithay::delegate_xdg_foreign!(State);
 smithay::delegate_pointer_gestures!(State);

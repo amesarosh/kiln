@@ -30,6 +30,15 @@ impl XdgShellHandler for State {
         self.pending_windows.push(Window::new_wayland_window(surface));
     }
 
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
+        // Before the first commit, manage_window sees the parent itself.
+        if let Some(window) = self.window_for_surface(surface.wl_surface())
+            && !self.pending_windows.contains(&window)
+        {
+            State::parent_changed(self, &window);
+        }
+    }
+
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for_surface(surface.wl_surface()) {
             self.unmanage_window(&window);

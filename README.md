@@ -23,6 +23,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **Games**: fullscreen games that ask can skip vsync for lower input lag (tearing control), and virtual machines, remote desktops and games can take every key, binds included (`Mod+Ctrl+Escape` takes them back)
 - **Sessions come back**: apps open when you quit, log out or shut down are started again at the next login, with each window on the same monitor and workspace, in the same tiling order, size and floating position
 - **Wallpaper** built in (`[theme] wallpaper`, or one per monitor): fill, fit, stretch, center or tile, picked in the settings app
+- **File picker** (`wayland-time-files`) in the theme's look, given to apps through the desktop portal (Vivaldi, Firefox, Chrome, Flatpaks...): places, path bar, search, filters, open/save/folders. Dialogs always float, centered over the window that opened them, sized to fit the screen
 - **Password prompt for admin rights** (`wayland-time-polkit`, a polkit agent in the theme's look), started at login, so installing software, mounting disks and `pkexec` can ask for your password
 - **Screen locking** with its own lock screen (`wayland-time-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 - **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
@@ -341,6 +342,23 @@ swayidle: `timeout 600 'wlopm --off \*' resume 'wlopm --on \*'`.
 Apps like video players can ask to keep the screen awake. That only counts while their window
 is on screen.
 
+### File picker
+
+Apps that ask the desktop portal for a file (browsers, Flatpaks, most GTK and Qt apps) get
+`wayland-time-files`: places on the left (Recent, Home, your folders, bookmarks, drives), the
+path with back, forward and up, a sortable list, search below the folder, the app's file
+type filters and options, and a name field when saving (replacing a file asks first).
+Keys: arrows and Enter, Backspace or Alt+Up for the parent folder, Alt+Left/Right for back and
+forward, Ctrl+L to type a path, Ctrl+F or just typing to search, Ctrl+H for hidden files,
+Escape to cancel. `install.sh` registers it with the portal (`wayland-time-portals.conf` picks
+it for `FileChooser`, with GTK's as the fallback); log in again to use it. Run by hand,
+`wayland-time-files [--open-many | --folder | --save NAME]` prints the paths picked.
+
+Dialogs float rather than tile, and open over the window they belong to: windows with a parent,
+X11 dialogs, and anything a portal opens, including when the app couldn't link the dialog to
+its window (then it goes over the window that was focused). Portal dialogs from Wayland apps are
+linked through xdg-foreign. A dialog bigger than the screen is asked to fit.
+
 ### Password prompts for admin rights
 
 When an app needs admin rights (installing software, mounting a disk, `pkexec`), polkit asks
@@ -365,6 +383,7 @@ The repository is a Cargo workspace:
 | `crates/wt-icons/` | icons from the icon themes: app icons via .desktop files, symbolic icons tinted one color, PNG/SVG loading |
 | `apps/settings/` | the settings app (`wayland-time-settings`) |
 | `apps/launcher/` | the app launcher (`wayland-time-launcher`) |
+| `apps/files/` | the file picker (`wayland-time-files`): desktop portal FileChooser backend on the session bus, and the egui picker window it runs per request |
 | `apps/polkit/` | the password prompt (`wayland-time-polkit`): polkit agent on the system bus, talks to `polkit-agent-helper-1`, drawn with `wt-draw` on a layer surface |
 | `apps/lock/` | the lock screen (`wayland-time-lock`): session lock protocol, PAM, drawn with `wt-draw` since egui can't make lock surfaces |
 

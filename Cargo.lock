@@ -3770,6 +3770,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "wayland-time-files"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "libc",
+ "tracing",
+ "tracing-subscriber",
+ "wt-config",
+ "wt-icons",
+ "wt-ui",
+ "zbus",
+]
+
+[[package]]
 name = "wayland-time-launcher"
 version = "0.1.0"
 dependencies = [
