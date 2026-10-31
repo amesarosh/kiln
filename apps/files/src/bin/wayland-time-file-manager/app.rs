@@ -50,6 +50,17 @@ impl Loc {
     }
 }
 
+/// Where files dragged over the window would go.
+#[derive(Debug, Clone, PartialEq)]
+enum DropTarget {
+    /// A folder row, or a place in the sidebar.
+    Folder(PathBuf),
+    /// The Trash in the sidebar.
+    Trash,
+    /// The sidebar's empty space: folders dropped there are added to it.
+    Sidebar,
+}
+
 /// Files copied or cut, waiting to be pasted.
 struct Clip {
     paths: Vec<PathBuf>,
@@ -129,9 +140,13 @@ pub struct Manager {
     focus_search: bool,
     /// Files dragged in from other apps.
     dnd: Option<Dnd>,
-    /// Where a drag carrying files is over the window, and the folder row under it.
+    /// Where a drag carrying files is over the window, and what's under it (from the last
+    /// frame drawn).
     drop_hover: Option<Pos2>,
-    drop_folder: Option<PathBuf>,
+    drop_target: Option<DropTarget>,
+    /// A drag out started: the compositor now has the pointer, so the button's release never
+    /// reaches egui, which would wait for it forever. We hand it one.
+    release_pending: bool,
 }
 
 impl Manager {
@@ -179,7 +194,8 @@ impl Manager {
             focus_search: false,
             dnd: Dnd::start(cc),
             drop_hover: None,
-            drop_folder: None,
+            drop_target: None,
+            release_pending: false,
         };
         me.open(start, false);
         if let Some(i) = select.and_then(|s| me.shown.iter().position(|e| e.path == s)) {
@@ -686,6 +702,12 @@ impl Manager {
         if ctrl && pressed(Key::F) {
             self.focus_search = true;
         }
+        if ctrl && pressed(Key::D) {
+            let dirs = self.sidebar_candidates();
+            if !dirs.is_empty() {
+                self.add_to_sidebar(dirs);
+            }
+        }
         if ctrl && pressed(Key::A) {
             self.select_all();
         }
@@ -830,6 +852,19 @@ impl Manager {
 }
 
 impl eframe::App for Manager {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if std::mem::take(&mut self.release_pending) {
+            let pos = ctx.input(|i| i.pointer.latest_pos()).unwrap_or_default();
+            raw.events.push(egui::Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: raw.modifiers,
+            });
+            raw.events.push(egui::Event::PointerGone);
+        }
+    }
+
     fn logic(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         self.look.poll(ctx);
         if self.icons.theme != self.look.theme.icon_theme {
@@ -868,6 +903,8 @@ impl eframe::App for Manager {
 
     fn ui(&mut self, ui: &mut Ui, _: &mut eframe::Frame) {
         let p = self.look.theme.palette;
+        // Found again while drawing the sidebar and the list.
+        self.drop_target = None;
         egui::Panel::left("places")
             .resizable(false)
             .exact_size(200.0)
@@ -901,7 +938,7 @@ impl eframe::App for Manager {
         // A drag over the files, not on a folder row: they'll land in the place shown.
         if let Some(at) = self.drop_hover
             && list.response.rect.contains(at)
-            && self.drop_folder.is_none()
+            && self.drop_target.is_none()
         {
             let radius = ui.visuals().widgets.inactive.corner_radius;
             let edge = Stroke::new(2.0, color(p.accent));
@@ -913,6 +950,44 @@ impl eframe::App for Manager {
 }
 
 impl Manager {
+    /// Add folders to the sidebar (GTK's bookmarks, shared with other apps).
+    fn add_to_sidebar(&mut self, dirs: Vec<PathBuf>) {
+        let name = |d: &Path| d.file_name().map_or_else(|| d.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let mut added = Vec::new();
+        for dir in &dirs {
+            if self.places.iter().any(|p| p.path.as_ref() == Some(dir)) {
+                continue;
+            }
+            if let Err(e) = fs::add_bookmark(dir) {
+                return self.say_error(format!("Couldn't add {} to the sidebar: {e}", name(dir)));
+            }
+            added.push(dir);
+        }
+        self.places = places();
+        match added.as_slice() {
+            [] if dirs.len() == 1 => self.say(format!("{} is already in the sidebar", name(&dirs[0]))),
+            [] => self.say("Those folders are already in the sidebar"),
+            [one] => self.say(format!("Added {} to the sidebar", name(one))),
+            more => self.say(format!("Added {} to the sidebar", plural(more.len(), "folder"))),
+        }
+    }
+
+    fn remove_from_sidebar(&mut self, dir: &Path) {
+        match fs::remove_bookmark(dir) {
+            Ok(()) => self.places = places(),
+            Err(e) => self.say_error(format!("Couldn't change the sidebar: {e}")),
+        }
+    }
+
+    /// What Ctrl+D and the menus add: the folders selected, else the folder shown.
+    fn sidebar_candidates(&self) -> Vec<PathBuf> {
+        let dirs: Vec<PathBuf> = self.selection().into_iter().filter(|e| e.is_dir).map(|e| e.path).collect();
+        if !dirs.is_empty() || self.loc == Loc::Trash {
+            return dirs;
+        }
+        self.loc.dir().map(Path::to_path_buf).into_iter().collect()
+    }
+
     /// Files dragged in from other apps: where they hover, and what's dropped.
     fn drag_events(&mut self, ctx: &egui::Context) {
         let mut drops = Vec::new();
@@ -941,17 +1016,27 @@ impl Manager {
         }
     }
 
-    /// Files dropped on the window: into the folder row they landed on, else the folder shown
-    /// (or the trash, when that's shown).
+    /// Files dropped on the window: into the folder row or sidebar place they landed on, else
+    /// the folder shown (or the trash, when that's shown). Folders dropped on the sidebar's
+    /// empty space are added to it.
     fn drop_files(&mut self, paths: Vec<PathBuf>, moved: bool, ctx: &egui::Context) {
-        // The folder row under the drop, from the last frame drawn.
-        let folder = self.drop_folder.take();
+        let target = self.drop_target.take();
         if paths.is_empty() {
             return self.say("Only files can be dropped here");
         }
-        if folder.is_none() && self.loc == Loc::Trash {
-            return self.run_job(Kind::Trash, paths, None, ctx);
-        }
+        let folder = match target {
+            Some(DropTarget::Folder(f)) => Some(f),
+            Some(DropTarget::Trash) => return self.run_job(Kind::Trash, paths, None, ctx),
+            Some(DropTarget::Sidebar) => {
+                let dirs: Vec<PathBuf> = paths.into_iter().filter(|p| p.is_dir()).collect();
+                if dirs.is_empty() {
+                    return self.say("Only folders can be added to the sidebar");
+                }
+                return self.add_to_sidebar(dirs);
+            }
+            None if self.loc == Loc::Trash => return self.run_job(Kind::Trash, paths, None, ctx),
+            None => None,
+        };
         let Some(dest) = folder.or_else(|| self.loc.dir().map(Path::to_path_buf)) else {
             return self.say("Drop onto a folder, or open one first");
         };
@@ -1055,6 +1140,22 @@ impl Manager {
         ui.add_space(10.0);
         let mut go = None;
         let mut drive_act = None;
+        let mut remove = None;
+        // A drag over a place drops into it (highlighted like a folder row); over the empty
+        // space it adds folders to the sidebar (the whole sidebar outlined).
+        let panel = ui.clip_rect();
+        let drop_at = self.drop_hover.filter(|at| panel.contains(*at));
+        let mut target = drop_at.map(|_| DropTarget::Sidebar);
+        let accent = color(p.accent);
+        let radius = ui.visuals().widgets.inactive.corner_radius;
+        let drop_on = |ui: &Ui, r: &egui::Response| {
+            let on = drop_at.is_some_and(|at| r.rect.contains(at) && ui.clip_rect().contains(at));
+            if on {
+                let edge = Stroke::new(1.5, accent);
+                ui.painter().rect_stroke(r.rect, radius, edge, egui::StrokeKind::Inside);
+            }
+            on
+        };
         // Drives mounted under /media are listed with the other drives, not as plain places.
         let places: Vec<Place> = self
             .places
@@ -1068,21 +1169,24 @@ impl Manager {
                     view::sidebar_divider(ui, p);
                     drive_act = self.drive_rows(ui, p);
                 }
-                let Some(loc) = place.path.clone().map(Loc::Dir) else { continue };
-                let tip = place.path.as_ref().map(|d| d.display().to_string());
+                let Some(dir) = place.path.clone() else { continue };
+                let tip = dir.display().to_string();
+                let loc = Loc::Dir(dir.clone());
                 let current = self.loc == loc;
-                if view::place_row(
-                    ui,
-                    p,
-                    &mut self.icons,
-                    &place.label,
-                    place.icon,
-                    current,
-                    tip.as_deref(),
-                )
-                .clicked()
-                {
+                let r = view::place_row(ui, p, &mut self.icons, &place.label, place.icon, current, Some(&tip));
+                if r.clicked() {
                     go = Some(loc);
+                }
+                if drop_on(ui, &r) {
+                    target = Some(DropTarget::Folder(dir.clone()));
+                }
+                if place.bookmark {
+                    r.context_menu(|ui| {
+                        wt_ui::roomy_menu(ui);
+                        if ui.button("Remove from Sidebar").clicked() {
+                            remove = Some(dir.clone());
+                        }
+                    });
                 }
             }
             view::sidebar_divider(ui, p);
@@ -1095,6 +1199,9 @@ impl Manager {
             if r.clicked() {
                 go = Some(Loc::Trash);
             }
+            if drop_on(ui, &r) {
+                target = Some(DropTarget::Trash);
+            }
             r.context_menu(|ui| {
                 wt_ui::roomy_menu(ui);
                 if ui
@@ -1105,6 +1212,16 @@ impl Manager {
                 }
             });
         });
+        if target == Some(DropTarget::Sidebar) {
+            ui.painter()
+                .rect_stroke(panel.shrink(2.0), radius, Stroke::new(2.0, accent), egui::StrokeKind::Inside);
+        }
+        if target.is_some() {
+            self.drop_target = target;
+        }
+        if let Some(dir) = remove {
+            self.remove_from_sidebar(&dir);
+        }
         if let Some(loc) = go {
             self.open(loc, true);
         }
@@ -1216,6 +1333,14 @@ impl Manager {
                 if ui.button("Open Terminal Here").clicked() {
                     self.terminal_here(None);
                 }
+                let here = self.loc.dir().map(Path::to_path_buf);
+                let listed = self.places.iter().any(|p| p.path == here);
+                if ui
+                    .add_enabled(!listed, egui::Button::new("Add to Sidebar").shortcut_text("Ctrl+D"))
+                    .clicked()
+                {
+                    self.add_to_sidebar(here.into_iter().collect());
+                }
             }
             Loc::Trash => {
                 if ui
@@ -1285,6 +1410,15 @@ impl Manager {
         };
         if ui.add(egui::Button::new(open_label).shortcut_text("Enter")).clicked() {
             self.open_entries(sel.clone());
+        }
+        if all_dirs {
+            let new = sel.iter().any(|e| !self.places.iter().any(|p| p.path.as_ref() == Some(&e.path)));
+            if ui
+                .add_enabled(new, egui::Button::new("Add to Sidebar").shortcut_text("Ctrl+D"))
+                .clicked()
+            {
+                self.add_to_sidebar(sel.iter().map(|e| e.path.clone()).collect());
+            }
         }
         if !all_dirs {
             let apps: Vec<open::App> = self.apps.for_type(&mime).into_iter().cloned().collect();
@@ -1376,7 +1510,6 @@ impl Manager {
         let radius = ui.visuals().widgets.inactive.corner_radius;
         // Files dragged over a folder row go into that folder (not in the trash, whose folders
         // are trashed ones).
-        self.drop_folder = None;
         let drop_at = self
             .drop_hover
             .filter(|at| self.loc != Loc::Trash && ui.clip_rect().contains(*at));
@@ -1448,6 +1581,9 @@ impl Manager {
         let mut clicked = None;
         let mut activated = None;
         let mut menu_on = None;
+        let mut drag_out = None;
+        // Files can be dragged out of folders and search results, not the trash.
+        let can_drag = self.dnd.is_some() && self.loc != Loc::Trash;
         let mut rows: Vec<(usize, egui::Response)> = Vec::new();
         let mut rename_done = None;
         let mime = &self.mime;
@@ -1461,7 +1597,8 @@ impl Manager {
         let out = area.show_rows(ui, row_h, shown.len(), |ui, range| {
             for i in range {
                 let e = &shown[i];
-                let (rect, r) = ui.allocate_exact_size(vec2(width, row_h), Sense::click());
+                let sense = if can_drag { Sense::click_and_drag() } else { Sense::click() };
+                let (rect, r) = ui.allocate_exact_size(vec2(width, row_h), sense);
                 let is_sel = selected.contains(&e.path);
                 if is_sel {
                     ui.painter().rect_filled(rect, radius, color(p.selected));
@@ -1549,12 +1686,16 @@ impl Manager {
                     clicked = Some(i);
                 } else if r.secondary_clicked() {
                     menu_on = Some(i);
+                } else if r.drag_started_by(PointerButton::Primary) {
+                    drag_out = Some(i);
                 }
                 rows.push((i, r));
             }
         });
         self.list_view = (out.state.offset.y, out.inner_rect.height());
-        self.drop_folder = drop_folder;
+        if let Some(f) = drop_folder {
+            self.drop_target = Some(DropTarget::Folder(f));
+        }
         match rename_done {
             Some(true) => self.finish_rename(),
             Some(false) => self.renaming = None,
@@ -1579,6 +1720,31 @@ impl Manager {
         }
         for (_, r) in rows {
             r.context_menu(|ui| self.file_menu(ui));
+        }
+        if let Some(i) = drag_out {
+            self.drag_out(i, ui.ctx());
+        }
+    }
+
+    /// Start dragging files out: the selection if row `i` is in it, else just that row.
+    fn drag_out(&mut self, i: usize, ctx: &egui::Context) {
+        if self.renaming.is_some() {
+            self.finish_rename();
+        }
+        if !self.selected.contains(&self.shown[i].path) {
+            self.select_only(i);
+        }
+        let paths = self.selected_paths();
+        let Some(dnd) = &self.dnd else { return };
+        // The dragged row's icon under the pointer, at the window's scale (whole pixels).
+        let scale = ctx.pixels_per_point().ceil().max(1.0) as i32;
+        let icon = self
+            .icons
+            .file_pixels(&self.mime, &self.shown[i], DRAG_ICON * scale as u32);
+        if dnd.start_drag(&paths, icon.as_deref(), scale) {
+            self.release_pending = true;
+        } else {
+            tracing::warn!("couldn't start a drag: no button press to start it from");
         }
     }
 
@@ -1681,6 +1847,9 @@ impl Manager {
 }
 
 /// "1 item", "3 items".
+/// Size of the icon under the pointer while dragging files out, in window units.
+const DRAG_ICON: u32 = 32;
+
 /// The sidebar's places: the picker's, less Recent (the file manager only shows folders).
 fn places() -> Vec<Place> {
     fs::places().into_iter().filter(|p| p.path.is_some()).collect()

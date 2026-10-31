@@ -477,6 +477,11 @@ impl Icons {
         tex
     }
 
+    /// The pixels of an entry's icon, `px` big (for a drag icon, drawn outside egui).
+    pub fn file_pixels(&mut self, mime: &Mime, e: &Entry, px: u32) -> Option<std::rc::Rc<wt_icons::Icon>> {
+        mime.icons_for(e).iter().find_map(|name| self.icons.any(name, px, [255; 4]))
+    }
+
     /// A full-color icon by name or path, like an app's.
     pub fn named(&mut self, ctx: &egui::Context, name: &str, size: f32) -> Option<TextureHandle> {
         if let Some(t) = self.named.get(name) {

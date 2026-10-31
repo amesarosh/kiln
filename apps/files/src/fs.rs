@@ -145,6 +145,8 @@ pub struct Place {
     pub path: Option<PathBuf>,
     /// Symbolic icon name.
     pub icon: &'static str,
+    /// One of the GTK bookmarks (which can be removed from the sidebar).
+    pub bookmark: bool,
 }
 
 /// The sidebar: Recent, Home, the XDG user folders that exist, GTK bookmarks, mounted drives,
@@ -156,11 +158,13 @@ pub fn places() -> Vec<Place> {
             label: "Recent".into(),
             path: None,
             icon: "document-open-recent-symbolic",
+            bookmark: false,
         },
         Place {
             label: "Home".into(),
             path: Some(home.clone()),
             icon: "user-home-symbolic",
+            bookmark: false,
         },
     ];
     let dirs = user_dirs(&home);
@@ -178,11 +182,12 @@ pub fn places() -> Vec<Place> {
                 label: label.into(),
                 path: Some(path),
                 icon,
+                bookmark: false,
             });
         }
     }
     // Bookmarks, skipping ones that repeat a folder above.
-    let bookmarks = std::fs::read_to_string(home.join(".config/gtk-3.0/bookmarks")).unwrap_or_default();
+    let bookmarks = std::fs::read_to_string(bookmarks_file()).unwrap_or_default();
     for line in bookmarks.lines() {
         let (uri, label) = line.split_once(' ').unwrap_or((line, ""));
         let Some(path) = uri_to_path(uri) else { continue };
@@ -199,6 +204,7 @@ pub fn places() -> Vec<Place> {
             label,
             path: Some(path),
             icon: "folder-symbolic",
+            bookmark: true,
         });
     }
     // Drives mounted for this user.
@@ -214,6 +220,7 @@ pub fn places() -> Vec<Place> {
                 label: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
                 path: Some(path),
                 icon: "drive-removable-media-symbolic",
+                bookmark: false,
             });
         }
     }
@@ -221,6 +228,7 @@ pub fn places() -> Vec<Place> {
         label: "Computer".into(),
         path: Some(PathBuf::from("/")),
         icon: "drive-harddisk-symbolic",
+        bookmark: false,
     });
     out
 }
@@ -236,6 +244,53 @@ fn user_dirs(home: &Path) -> HashMap<String, PathBuf> {
             Some((key.to_string(), PathBuf::from(value)))
         })
         .collect()
+}
+
+/// GTK's bookmarks: one `file://` URI per line, optionally followed by a label. Shared with
+/// other file managers and file dialogs.
+fn bookmarks_file() -> PathBuf {
+    home().join(".config/gtk-3.0/bookmarks")
+}
+
+/// Change the bookmark lines, written back whole through a temporary file.
+fn edit_bookmarks(change: impl FnOnce(&mut Vec<String>)) -> std::io::Result<()> {
+    // Through a symlink (dotfiles kept elsewhere) to the real file, so the link stays.
+    let file = std::fs::canonicalize(bookmarks_file()).unwrap_or_else(|_| bookmarks_file());
+    let text = match std::fs::read_to_string(&file) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    change(&mut lines);
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = file.with_extension("wt-tmp");
+    let mut out = lines.join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    std::fs::write(&tmp, out)?;
+    std::fs::rename(&tmp, &file)
+}
+
+fn bookmark_path(line: &str) -> Option<PathBuf> {
+    uri_to_path(line.split_once(' ').map_or(line, |(uri, _)| uri))
+}
+
+/// Add `dir` to the bookmarks, at the end (nothing if it's there already).
+pub fn add_bookmark(dir: &Path) -> std::io::Result<()> {
+    edit_bookmarks(|lines| {
+        if !lines.iter().any(|l| bookmark_path(l).as_deref() == Some(dir)) {
+            lines.push(path_to_uri(dir));
+        }
+    })
+}
+
+/// Take `dir` out of the bookmarks.
+pub fn remove_bookmark(dir: &Path) -> std::io::Result<()> {
+    edit_bookmarks(|lines| lines.retain(|l| bookmark_path(l).as_deref() != Some(dir)))
 }
 
 /// A `file://` URI as a path, with %-escapes decoded.

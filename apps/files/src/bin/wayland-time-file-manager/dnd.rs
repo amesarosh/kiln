@@ -1,12 +1,15 @@
 //! Files dragged in from other apps. winit (under eframe) doesn't take Wayland drops, so a
 //! thread of our own listens for them on the window's Wayland connection, the way egui's
 //! clipboard does: it accepts drags that carry a `text/uri-list`, reports where the pointer
-//! is while one hovers over the window, and hands over the list when it's dropped.
+//! is while one hovers over the window, and hands over the list when it's dropped. It also
+//! starts drags of our own files out to other apps (and back into this window).
 
 use std::{
     ffi::c_void,
     io::Read,
+    io::Write,
     os::fd::{AsFd, FromRawFd, OwnedFd},
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -16,22 +19,32 @@ use std::{
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
-use wayland_backend::client::Backend;
+use wayland_backend::client::{Backend, ObjectId};
 use wayland_client::{
     Connection, Dispatch, Proxy, QueueHandle, WEnum, event_created_child,
     globals::{GlobalListContents, registry_queue_init},
     protocol::{
+        wl_buffer::{self, WlBuffer},
         wl_callback::{self, WlCallback},
+        wl_compositor::{self, WlCompositor},
         wl_data_device::{self, WlDataDevice},
         wl_data_device_manager::{DndAction, WlDataDeviceManager},
         wl_data_offer::{self, WlDataOffer},
+        wl_data_source::{self, WlDataSource},
+        wl_pointer::{self, WlPointer},
         wl_registry::{self, WlRegistry},
         wl_seat::{self, WlSeat},
+        wl_shm::{self, WlShm},
+        wl_shm_pool::{self, WlShmPool},
+        wl_surface::{self, WlSurface},
     },
 };
+use wayland_time_files::fs;
 use wt_ui::{eframe, egui};
 
 const URI_LIST: &str = "text/uri-list";
+/// Also offered when dragging out, for apps that only take text (the paths, one per line).
+const TEXT: &str = "text/plain;charset=utf-8";
 
 /// A finished drop.
 pub struct Dropped {
@@ -46,6 +59,27 @@ struct Shared {
     /// Where a drag carrying files is over the window, if one is.
     hover: Option<(f64, f64)>,
     drops: Vec<Dropped>,
+    /// The serial of the last button press on the window: a drag has to name it.
+    press_serial: Option<u32>,
+    /// A drag of ours under way: its source, and its icon (surface and buffer).
+    out: Option<(WlDataSource, Option<(WlSurface, WlBuffer)>)>,
+    /// Its `text/uri-list`, for when it's dropped on our own window: this thread would be both
+    /// ends of the pipe, waiting on itself.
+    out_uris: Option<String>,
+}
+
+impl Shared {
+    /// Our drag ended (dropped and done, or cancelled).
+    fn end_out(&mut self) {
+        self.out_uris = None;
+        if let Some((source, icon)) = self.out.take() {
+            source.destroy();
+            if let Some((surface, buffer)) = icon {
+                surface.destroy();
+                buffer.destroy();
+            }
+        }
+    }
 }
 
 pub struct Dnd {
@@ -56,6 +90,13 @@ pub struct Dnd {
     conn: Connection,
     wake: QueueHandle<State>,
     done: mpsc::Receiver<()>,
+    manager: WlDataDeviceManager,
+    device: WlDataDevice,
+    /// For drag icons.
+    compositor: Option<WlCompositor>,
+    shm: Option<WlShm>,
+    /// Our window's surface, where drags out start.
+    window: WlSurface,
 }
 
 impl Dnd {
@@ -80,6 +121,12 @@ impl Dnd {
             .inspect_err(|e| tracing::warn!("no drag and drop: {e}"))
             .ok()?;
         let device = manager.get_data_device(&seat, &qh, ());
+        // Version 4 at most: from 5 a buffer's offset can't be given when attaching it.
+        let compositor: Option<WlCompositor> = globals.bind(&qh, 1..=4, ()).ok();
+        let shm: Option<WlShm> = globals.bind(&qh, 1..=1, ()).ok();
+        // Safety: winit's surface, alive as long as the window (we stop first, see Drop).
+        let window_id = unsafe { ObjectId::from_ptr(WlSurface::interface(), window.surface.as_ptr().cast()) }.ok()?;
+        let window_surface = WlSurface::from_id(&conn, window_id).ok()?;
 
         let shared = Arc::new(Mutex::new(Shared::default()));
         let can_drop = Arc::new(AtomicBool::new(false));
@@ -92,13 +139,14 @@ impl Dnd {
             can_drop: can_drop.clone(),
             ctx: cc.egui_ctx.clone(),
             current: None,
+            pointer: None,
         };
         let (done_tx, done) = mpsc::channel();
         let thread_stop = stop.clone();
         std::thread::Builder::new()
             .name("drag and drop".into())
             .spawn(move || {
-                let _keep = (seat, manager, device);
+                let _keep = seat;
                 while !thread_stop.load(Ordering::Relaxed) {
                     if let Err(e) = queue.blocking_dispatch(&mut state) {
                         tracing::warn!("drag and drop stopped: {e}");
@@ -115,7 +163,75 @@ impl Dnd {
             conn,
             wake: qh,
             done,
+            manager,
+            device,
+            compositor,
+            shm,
+            window: window_surface,
         })
+    }
+
+    /// Start dragging `paths` out, from the button press under way, with `icon` (premultiplied
+    /// RGBA, `scale` pixels per window unit) under the pointer. False if no press to start from.
+    pub fn start_drag(&self, paths: &[PathBuf], icon: Option<&wt_icons::Icon>, scale: i32) -> bool {
+        let mut shared = self.shared.lock().unwrap();
+        let Some(serial) = shared.press_serial else {
+            return false;
+        };
+        shared.end_out();
+        let uris: String = paths.iter().map(|p| fs::path_to_uri(p) + "\r\n").collect();
+        shared.out_uris = Some(uris.clone());
+        let text: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let source = self.manager.create_data_source(
+            &self.wake,
+            Outgoing {
+                uris,
+                text: text.join("\n"),
+            },
+        );
+        source.offer(URI_LIST.into());
+        source.offer(TEXT.into());
+        if self.device.version() >= 3 {
+            source.set_actions(DndAction::Copy | DndAction::Move);
+        }
+        let icon = icon.and_then(|i| self.icon_surface(i, scale));
+        self.device
+            .start_drag(Some(&source), &self.window, icon.as_ref().map(|(s, _)| s), serial);
+        shared.out = Some((source, icon));
+        drop(shared);
+        let _ = self.conn.flush();
+        true
+    }
+
+    /// A surface showing `icon`, centered on the pointer.
+    fn icon_surface(&self, icon: &wt_icons::Icon, scale: i32) -> Option<(WlSurface, WlBuffer)> {
+        let (compositor, shm) = (self.compositor.as_ref()?, self.shm.as_ref()?);
+        let side = icon.size as i32;
+        let len = (side * side * 4) as usize;
+        // wl_shm's ARGB8888 is premultiplied B, G, R, A in memory.
+        let mut bgra = Vec::with_capacity(len);
+        for px in icon.rgba.chunks_exact(4) {
+            bgra.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+        }
+        let fd = unsafe { libc::memfd_create(c"drag-icon".as_ptr(), libc::MFD_CLOEXEC) };
+        if fd < 0 {
+            return None;
+        }
+        // Safety: memfd_create just made it.
+        let mut file = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
+        file.write_all(&bgra).ok()?;
+        let pool = shm.create_pool(file.as_fd(), len as i32, &self.wake, ());
+        let buffer = pool.create_buffer(0, side, side, side * 4, wl_shm::Format::Argb8888, &self.wake, ());
+        pool.destroy();
+        let surface = compositor.create_surface(&self.wake, ());
+        let scale = if compositor.version() >= 3 { scale.max(1) } else { 1 };
+        if scale > 1 {
+            surface.set_buffer_scale(scale);
+        }
+        let half = side / scale / 2;
+        surface.attach(Some(&buffer), -half, -half);
+        surface.commit();
+        Some((surface, buffer))
     }
 
     /// Say whether drops are taken where we are.
@@ -160,6 +276,13 @@ struct State {
     can_drop: Arc<AtomicBool>,
     ctx: egui::Context,
     current: Option<Current>,
+    pointer: Option<WlPointer>,
+}
+
+/// What a drag of ours carries.
+struct Outgoing {
+    uris: String,
+    text: String,
 }
 
 // Safety: `surface` is only compared, never used through.
@@ -184,7 +307,14 @@ impl State {
     /// The drag was dropped on us: fetch the list.
     fn dropped(&mut self) {
         let Some(c) = self.current.take() else { return };
-        let uris = if c.accepted { self.receive(&c.offer) } else { None };
+        let own = self.shared.lock().unwrap().out_uris.clone();
+        let uris = if !c.accepted {
+            None
+        } else if own.is_some() {
+            own
+        } else {
+            self.receive(&c.offer)
+        };
         if uris.is_some() && self.version >= 3 {
             c.offer.finish();
         }
@@ -271,8 +401,11 @@ impl Dispatch<WlDataDevice, ()> for State {
                 }
                 if state.version >= 3 {
                     // Copy unless the other app only allows a move: nothing goes missing from
-                    // where it was.
-                    offer.set_actions(DndAction::Copy | DndAction::Move, DndAction::Copy);
+                    // where it was. Our own files dragged within the window move, like
+                    // rearranging them.
+                    let ours = state.shared.lock().unwrap().out.is_some();
+                    let preferred = if ours { DndAction::Move } else { DndAction::Copy };
+                    offer.set_actions(DndAction::Copy | DndAction::Move, preferred);
                 }
                 state.current = Some(Current {
                     offer,
@@ -343,7 +476,59 @@ impl Dispatch<WlRegistry, GlobalListContents> for State {
 }
 
 impl Dispatch<WlSeat, ()> for State {
-    fn event(_: &mut Self, _: &WlSeat, _: wl_seat::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(state: &mut Self, seat: &WlSeat, event: wl_seat::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
+        // A pointer of our own, only for the serials of button presses (winit keeps its own).
+        if let wl_seat::Event::Capabilities {
+            capabilities: WEnum::Value(caps),
+        } = event
+            && caps.contains(wl_seat::Capability::Pointer)
+            && state.pointer.is_none()
+        {
+            state.pointer = Some(seat.get_pointer(qh, ()));
+        }
+    }
+}
+
+impl Dispatch<WlPointer, ()> for State {
+    fn event(state: &mut Self, _: &WlPointer, event: wl_pointer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let wl_pointer::Event::Button {
+            serial,
+            state: WEnum::Value(wl_pointer::ButtonState::Pressed),
+            ..
+        } = event
+        {
+            state.shared.lock().unwrap().press_serial = Some(serial);
+        }
+    }
+}
+
+impl Dispatch<WlDataSource, Outgoing> for State {
+    fn event(
+        state: &mut Self,
+        _: &WlDataSource,
+        event: wl_data_source::Event,
+        data: &Outgoing,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_data_source::Event::Send { mime_type, fd } => {
+                let bytes = if mime_type == URI_LIST { &data.uris } else { &data.text }
+                    .clone()
+                    .into_bytes();
+                // On a thread of its own, so an app slow to read can't hold up the others.
+                std::thread::spawn(move || {
+                    let _ = std::fs::File::from(fd).write_all(&bytes);
+                });
+            }
+            // Nothing to do on our side for a move: the app that took the files moves them.
+            wl_data_source::Event::DndFinished | wl_data_source::Event::Cancelled => {
+                state.shared.lock().unwrap().end_out();
+                state.ctx.request_repaint();
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Dispatch<WlDataDeviceManager, ()> for State {
@@ -360,4 +545,24 @@ impl Dispatch<WlDataDeviceManager, ()> for State {
 
 impl Dispatch<WlCallback, ()> for State {
     fn event(_: &mut Self, _: &WlCallback, _: wl_callback::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+impl Dispatch<WlCompositor, ()> for State {
+    fn event(_: &mut Self, _: &WlCompositor, _: wl_compositor::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+impl Dispatch<WlSurface, ()> for State {
+    fn event(_: &mut Self, _: &WlSurface, _: wl_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+impl Dispatch<WlShm, ()> for State {
+    fn event(_: &mut Self, _: &WlShm, _: wl_shm::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+impl Dispatch<WlShmPool, ()> for State {
+    fn event(_: &mut Self, _: &WlShmPool, _: wl_shm_pool::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+impl Dispatch<WlBuffer, ()> for State {
+    fn event(_: &mut Self, _: &WlBuffer, _: wl_buffer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
 }
