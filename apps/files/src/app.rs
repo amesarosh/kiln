@@ -6,30 +6,19 @@
 //! forward, Ctrl+L types a path, Ctrl+F (or just typing) searches, Ctrl+H shows hidden files,
 //! Escape cancels.
 
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver},
-};
+use std::path::{Path, PathBuf};
 
+use wayland_time_files::{
+    fs::{self, Entry, Mime, Place, SortBy},
+    view::{self, CrumbClick, ICON, Icons, Search, cell_text, clipped_text, paint_image},
+};
 use wt_config::theme::Palette;
 use wt_ui::{
     Look, color, eframe,
-    egui::{
-        self, Align, Align2, Color32, FontId, Key, Layout, Margin, Rect, RichText, Sense, Stroke, TextStyle,
-        TextureHandle, Ui, pos2, vec2,
-    },
+    egui::{self, Align, Color32, Key, Layout, Margin, Rect, RichText, Sense, TextStyle, Ui, pos2, vec2},
 };
 
-use crate::{
-    fs::{self, Entry, Mime, Place, SortBy},
-    request::{Answer, Mode, Request},
-};
-
-const ICON: f32 = 20.0;
-const SIDE_ICON: f32 = 16.0;
-/// Most search results kept.
-const SEARCH_LIMIT: usize = 1000;
+use crate::request::{Answer, Mode, Request};
 
 pub struct Picker {
     look: Look,
@@ -57,7 +46,7 @@ pub struct Picker {
     search: String,
     /// Results of searching below `dir`, while `search` isn't empty.
     found: Vec<Entry>,
-    searching: Option<Receiver<Vec<Entry>>>,
+    searching: Option<Search>,
     filter: Option<usize>,
     /// The value of each of the app's choices.
     choices: Vec<String>,
@@ -305,7 +294,7 @@ impl Picker {
             }
             Mode::Save => {
                 let Some(dir) = self.dir.clone() else { return };
-                let typed = fs_expand(self.name.trim());
+                let typed = fs::expand(self.name.trim());
                 let target = if typed.is_absolute() { typed } else { dir.join(typed) };
                 if target.is_dir() {
                     self.name.clear();
@@ -319,7 +308,7 @@ impl Picker {
             }
             Mode::SaveFiles => {
                 let Some(dir) = self.dir.clone() else { return };
-                let files = self.req.files.iter().map(|f| free_name(&dir, f)).collect();
+                let files = self.req.files.iter().map(|f| fs::free_name(&dir, f)).collect();
                 self.finish(files);
             }
         }
@@ -370,11 +359,7 @@ impl Picker {
             .cloned()
             .collect();
         let root = self.dir.clone().unwrap_or_else(fs::home);
-        let hidden = self.show_hidden;
-        let (tx, rx) = mpsc::channel();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || search(&root, &needle, hidden, &tx, &ctx));
-        self.searching = Some(rx);
+        self.searching = Some(Search::start(root, needle, self.show_hidden, ctx));
         self.refresh();
     }
 
@@ -484,7 +469,7 @@ impl Picker {
     }
 
     fn row_h(&self) -> f32 {
-        self.look.theme.font_size + 16.0
+        view::row_height(self.look.theme.font_size)
     }
 }
 
@@ -494,24 +479,10 @@ impl eframe::App for Picker {
         if self.icons.theme != self.look.theme.icon_theme {
             self.icons = Icons::new(&self.look.theme.icon_theme);
         }
-        if let Some(rx) = &self.searching {
-            let mut got = false;
-            loop {
-                match rx.try_recv() {
-                    Ok(batch) => {
-                        for e in batch {
-                            if self.found.len() < SEARCH_LIMIT && !self.found.iter().any(|f| f.path == e.path) {
-                                self.found.push(e);
-                            }
-                        }
-                        got = true;
-                    }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        self.searching = None;
-                        break;
-                    }
-                }
+        if let Some(search) = &self.searching {
+            let (got, going) = search.poll(&mut self.found);
+            if !going {
+                self.searching = None;
             }
             if got {
                 self.refresh();
@@ -575,51 +546,15 @@ impl Picker {
             for (i, place) in self.places.iter().enumerate() {
                 // A line before the drives and the computer.
                 if i > 0
-                    && place.icon != self.places[i - 1].icon
-                    && matches!(place.icon, "drive-harddisk-symbolic" | "drive-removable-media-symbolic")
+                    && place.icon.starts_with("drive")
                     && !self.places[i - 1].icon.starts_with("drive")
                 {
-                    ui.add_space(4.0);
-                    let r = ui.available_rect_before_wrap();
-                    ui.painter()
-                        .hline(r.x_range(), r.top(), Stroke::new(1.0, color(p.separator)));
-                    ui.add_space(6.0);
+                    view::sidebar_divider(ui, p);
                 }
+                let tip = place.path.as_ref().map(|d| d.display().to_string());
                 let current = self.dir == place.path;
-                let h = ui.spacing().interact_size.y + 6.0;
-                let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click());
-                let radius = ui.visuals().widgets.inactive.corner_radius;
-                if current {
-                    ui.painter().rect_filled(rect, radius, color(p.selected));
-                } else if r.hovered() {
-                    ui.painter().rect_filled(rect, radius, color(p.hover));
-                }
-                let icon_rect = Rect::from_center_size(
-                    pos2(rect.left() + 10.0 + SIDE_ICON / 2.0, rect.center().y),
-                    vec2(SIDE_ICON, SIDE_ICON),
-                );
-                let tint = if current { p.text } else { p.muted };
-                if let Some(t) = self.icons.symbolic(ui.ctx(), place.icon, SIDE_ICON, tint) {
-                    ui.painter().image(
-                        t.id(),
-                        icon_rect,
-                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                }
-                let text_rect = Rect::from_min_max(pos2(icon_rect.right() + 10.0, rect.top()), rect.right_bottom());
-                clipped_text(
-                    ui,
-                    text_rect,
-                    &place.label,
-                    color(if current { p.text } else { p.muted }),
-                    TextStyle::Body.resolve(ui.style()),
-                );
-                if r.clicked() {
+                if view::place_row(ui, p, &mut self.icons, &place.label, place.icon, current, tip.as_deref()).clicked() {
                     go = Some(place.path.clone());
-                }
-                if let Some(path) = &place.path {
-                    r.on_hover_text(path.display().to_string());
                 }
             }
         });
@@ -634,13 +569,16 @@ impl Picker {
             let can_back = !self.back.is_empty();
             let can_forward = !self.forward.is_empty();
             let can_up = self.dir.as_ref().is_some_and(|d| d.parent().is_some());
-            if self.icon_button(ui, p, "go-previous-symbolic", "Back (Alt+Left)", can_back) {
+            let icons = &mut self.icons;
+            if view::icon_button(ui, p, icons, "go-previous-symbolic", "Back (Alt+Left)", can_back).clicked() {
                 self.go_back();
             }
-            if self.icon_button(ui, p, "go-next-symbolic", "Forward (Alt+Right)", can_forward) {
+            if view::icon_button(ui, p, &mut self.icons, "go-next-symbolic", "Forward (Alt+Right)", can_forward)
+                .clicked()
+            {
                 self.go_forward();
             }
-            if self.icon_button(ui, p, "go-up-symbolic", "Up (Alt+Up)", can_up) {
+            if view::icon_button(ui, p, &mut self.icons, "go-up-symbolic", "Up (Alt+Up)", can_up).clicked() {
                 self.go_up();
             }
             ui.add_space(6.0);
@@ -648,43 +586,23 @@ impl Picker {
             let search_w = 220.0;
             let crumbs_w = (ui.available_width() - search_w - 12.0).max(80.0);
             if let Some(mut typed) = self.editing_path.take() {
-                let r = ui.add_sized(
-                    [crumbs_w, ui.spacing().interact_size.y],
-                    egui::TextEdit::singleline(&mut typed).hint_text("Type a folder or file path"),
-                );
-                if !r.has_focus() && !r.lost_focus() {
-                    r.request_focus();
-                }
-                if r.lost_focus() {
-                    if ui.input(|i| i.key_pressed(Key::Enter)) {
-                        self.go_to_typed(&typed);
-                    }
-                } else {
-                    self.editing_path = Some(typed);
+                match view::path_field(ui, crumbs_w, &mut typed) {
+                    None => self.editing_path = Some(typed),
+                    Some(true) => self.go_to_typed(&typed),
+                    Some(false) => {}
                 }
             } else {
                 ui.allocate_ui(vec2(crumbs_w, ui.spacing().interact_size.y), |ui| self.crumbs(ui, p));
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut self.search)
-                        .hint_text(if self.dir.is_some() {
-                            "Search in this folder"
-                        } else {
-                            "Search in Home"
-                        })
-                        .desired_width(search_w),
-                );
-                if std::mem::take(&mut self.focus_search) {
-                    r.request_focus();
-                    // Keep the typed letters, cursor at the end.
-                    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
-                        let end = egui::text::CCursor::new(self.search.chars().count());
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
-                        state.store(ui.ctx(), r.id);
-                    }
-                }
+                let hint = if self.dir.is_some() {
+                    "Search in this folder"
+                } else {
+                    "Search in Home"
+                };
+                let focus = std::mem::take(&mut self.focus_search);
+                let r = view::search_field(ui, &mut self.search, hint, search_w, focus);
                 if r.changed() {
                     let ctx = ui.ctx().clone();
                     self.start_search(&ctx);
@@ -704,59 +622,16 @@ impl Picker {
             ui.label(RichText::new("Recent files").color(color(p.text)));
             return;
         };
-        let home = fs::home();
-        let mut parts: Vec<(String, PathBuf)> = Vec::new();
-        let rest = match dir.strip_prefix(&home) {
-            Ok(rest) if home != Path::new("/") => {
-                parts.push(("Home".into(), home.clone()));
-                rest.to_path_buf()
-            }
-            _ => {
-                parts.push(("Computer".into(), PathBuf::from("/")));
-                dir.strip_prefix("/").unwrap_or(&dir).to_path_buf()
-            }
-        };
-        let mut at = parts[0].1.clone();
-        for c in rest.components() {
-            at = at.join(c);
-            parts.push((c.as_os_str().to_string_lossy().into_owned(), at.clone()));
-        }
-        let mut go = None;
-        egui::ScrollArea::horizontal()
-            .stick_to_right(true)
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    let last = parts.len() - 1;
-                    for (i, (label, path)) in parts.iter().enumerate() {
-                        if i > 0 {
-                            ui.label(RichText::new("/").color(color(p.subtext)));
-                        }
-                        let text = RichText::new(label).color(color(if i == last { p.text } else { p.muted }));
-                        let b = egui::Button::new(if i == last { text.strong() } else { text }).frame(false);
-                        if ui.add(b).clicked() && i != last {
-                            go = Some(path.clone());
-                        }
-                    }
-                    // A click past the end types a path instead.
-                    let (_, r) = ui.allocate_exact_size(
-                        vec2(ui.available_width().max(24.0), ui.spacing().interact_size.y),
-                        Sense::click(),
-                    );
-                    if r.on_hover_cursor(egui::CursorIcon::Text).clicked() {
-                        self.editing_path = Some(dir.to_string_lossy().into_owned());
-                    }
-                });
-            });
-        if let Some(d) = go {
-            self.open(Some(d), true);
+        match view::crumbs(ui, p, &dir) {
+            Some(CrumbClick::Go(d)) => self.open(Some(d), true),
+            Some(CrumbClick::Edit) => self.editing_path = Some(dir.to_string_lossy().into_owned()),
+            None => {}
         }
     }
 
     /// Go to a typed path: a folder opens; a file is picked (or named, when saving).
     fn go_to_typed(&mut self, typed: &str) {
-        let path = fs_expand(typed.trim());
+        let path = fs::expand(typed.trim());
         let path = match &self.dir {
             Some(d) if path.is_relative() => d.join(path),
             _ => path,
@@ -779,94 +654,27 @@ impl Picker {
         }
     }
 
-    fn icon_button(&mut self, ui: &mut Ui, p: &Palette, icon: &str, tip: &str, enabled: bool) -> bool {
-        let size = ui.spacing().interact_size.y;
-        let (rect, r) = ui.allocate_exact_size(vec2(size, size), if enabled { Sense::click() } else { Sense::hover() });
-        if enabled && r.hovered() {
-            ui.painter()
-                .rect_filled(rect, ui.visuals().widgets.inactive.corner_radius, color(p.hover));
-        }
-        let tint = if enabled { p.text } else { p.subtext };
-        if let Some(t) = self.icons.symbolic(ui.ctx(), icon, SIDE_ICON, tint) {
-            let ir = Rect::from_center_size(rect.center(), vec2(SIDE_ICON, SIDE_ICON));
-            ui.painter().image(
-                t.id(),
-                ir,
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
-        }
-        let clicked = enabled && r.clicked();
-        r.on_hover_text(tip);
-        clicked
-    }
-
     fn list(&mut self, ui: &mut Ui, p: &Palette) {
         let width = ui.available_width();
         let row_h = self.row_h();
         let small = TextStyle::Small.resolve(ui.style());
         let body = TextStyle::Body.resolve(ui.style());
+        // Folders stand out by their names in semi-bold.
+        let bold = wt_ui::semibold(body.size);
+        let name_font = |e: &Entry| if e.is_dir { bold.clone() } else { body.clone() };
         let size_w = 100.0;
         let date_w = 130.0;
         let name_w = (width - size_w - date_w).max(120.0);
         let radius = ui.visuals().widgets.inactive.corner_radius;
 
-        // The column header; a click sorts by that column, again to reverse.
-        let header_h = small.size + 16.0;
-        let (header, _) = ui.allocate_exact_size(vec2(width, header_h), Sense::hover());
-        let mut x = header.left();
-        for (col, title, w, right) in [
+        let columns = [
             (SortBy::Name, "Name", name_w, false),
             (SortBy::Size, "Size", size_w, true),
             (SortBy::Modified, "Modified", date_w, true),
-        ] {
-            let cell = Rect::from_min_size(pos2(x, header.top()), vec2(w, header_h));
-            x += w;
-            let r = ui.interact(cell, ui.id().with(("sort", title)), Sense::click());
-            if r.clicked() {
-                if self.sort == col {
-                    self.descending = !self.descending;
-                } else {
-                    self.sort = col;
-                    self.descending = col == SortBy::Modified;
-                }
-                self.refresh();
-            }
-            let sorted = self.sort == col && (self.dir.is_some() || col != SortBy::Name || self.descending);
-            let c = color(
-                if r.on_hover_cursor(egui::CursorIcon::PointingHand).hovered() || sorted {
-                    p.text
-                } else {
-                    p.subtext
-                },
-            );
-            // Right-aligned titles leave room for the arrow on their right.
-            let text_cell = if right && sorted {
-                cell.with_max_x(cell.right() - 14.0)
-            } else {
-                cell
-            };
-            let r = cell_text(ui, text_cell, title, right, c, small.clone());
-            if sorted {
-                // Drawn, not a glyph: not every font has arrows.
-                let m = pos2(if right { cell.right() - 14.0 } else { r.right() + 10.0 }, r.center().y);
-                let d = if self.descending { 1.0 } else { -1.0 };
-                ui.painter().add(egui::Shape::convex_polygon(
-                    vec![
-                        pos2(m.x - 3.5, m.y - 2.0 * d),
-                        pos2(m.x + 3.5, m.y - 2.0 * d),
-                        pos2(m.x, m.y + 2.5 * d),
-                    ],
-                    c,
-                    Stroke::NONE,
-                ));
-            }
+        ];
+        if view::sort_header(ui, p, &columns, &mut self.sort, &mut self.descending, self.dir.is_none()) {
+            self.refresh();
         }
-        ui.painter().line_segment(
-            [header.left_bottom(), header.right_bottom()],
-            Stroke::new(1.0, color(p.separator)),
-        );
-        ui.add_space(4.0);
 
         if self.shown.is_empty() {
             let msg = if let Some(e) = &self.error {
@@ -882,8 +690,7 @@ impl Picker {
             } else {
                 "This folder is empty".into()
             };
-            ui.add_space(40.0);
-            ui.vertical_centered(|ui| ui.label(RichText::new(msg).color(color(p.subtext))));
+            view::empty_message(ui, p, &msg);
             return;
         }
 
@@ -922,18 +729,13 @@ impl Picker {
                 let dim = !e.is_dir && (picking_dirs || save);
                 let icon_rect =
                     Rect::from_center_size(pos2(rect.left() + 10.0 + ICON / 2.0, rect.center().y), vec2(ICON, ICON));
-                if let Some(t) = icons.file(ui.ctx(), mime, e) {
+                if let Some(t) = icons.file(ui.ctx(), mime, e, p.icon_outline) {
                     let tint = if dim {
                         Color32::from_white_alpha(140)
                     } else {
                         Color32::WHITE
                     };
-                    ui.painter().image(
-                        t.id(),
-                        icon_rect,
-                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                        tint,
-                    );
+                    paint_image(ui, &t, view::file_icon_rect(ui.ctx(), &t, icon_rect.center()), tint);
                 }
                 let name_cell = Rect::from_min_max(
                     pos2(icon_rect.right() + 10.0, rect.top()),
@@ -942,14 +744,9 @@ impl Picker {
                 let text_c = color(if dim { p.subtext } else { p.text });
                 // Search results and recent files say where they are.
                 let elsewhere = e.path.parent().filter(|d| Some(*d) != dir);
-                let name_end = clipped_text(ui, name_cell, &e.name, text_c, body.clone());
+                let name_end = clipped_text(ui, name_cell, &e.name, text_c, name_font(e));
                 if let Some(folder) = elsewhere {
-                    let home = fs::home();
-                    let shown_dir = match folder.strip_prefix(&home) {
-                        Ok(r) if r.as_os_str().is_empty() => "~".to_string(),
-                        Ok(r) => format!("~/{}", r.display()),
-                        Err(_) => folder.display().to_string(),
-                    };
+                    let shown_dir = view::short_dir(folder);
                     let rest = Rect::from_min_max(pos2(name_end + 10.0, rect.top()), name_cell.right_bottom());
                     if rest.width() > 40.0 {
                         clipped_text(ui, rest, &shown_dir, color(p.subtext), small.clone());
@@ -988,28 +785,18 @@ impl Picker {
     }
 
     fn actions(&mut self, ui: &mut Ui, p: &Palette) {
-        let field_h = ui.spacing().interact_size.y;
+        let field_h = wt_ui::field_height(ui.style());
         if self.mode() == Mode::Save {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Name").color(color(p.muted)));
                 let r = ui.add_sized(
                     [ui.available_width(), field_h],
-                    egui::TextEdit::singleline(&mut self.name).hint_text("File name"),
+                    wt_ui::field(ui, egui::TextEdit::singleline(&mut self.name).hint_text("File name")),
                 );
                 if std::mem::take(&mut self.focus_name) {
                     r.request_focus();
                     // Select the name without its extension, ready to be typed over.
-                    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
-                        let stem = match self.name.rfind('.') {
-                            Some(dot) if dot > 0 => self.name[..dot].chars().count(),
-                            _ => self.name.chars().count(),
-                        };
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                            egui::text::CCursor::new(0),
-                            egui::text::CCursor::new(stem),
-                        )));
-                        state.store(ui.ctx(), r.id);
-                    }
+                    view::select_stem(ui.ctx(), r.id, &self.name);
                 }
                 if r.changed() {
                     self.confirm_replace = None;
@@ -1073,14 +860,14 @@ impl Picker {
                     .map_or("All files", |f| f.name.as_str())
                     .to_string();
                 let mut pick = self.filter;
-                egui::ComboBox::from_id_salt("filter")
+                wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt("filter")
                     .selected_text(current)
                     .width(180.0)
                     .show_ui(ui, |ui| {
                         for (i, f) in self.req.filters.iter().enumerate() {
                             ui.selectable_value(&mut pick, Some(i), f.name.as_str());
                         }
-                    });
+                    }));
                 if pick != self.filter {
                     self.filter = pick;
                     self.refresh();
@@ -1104,13 +891,13 @@ impl Picker {
                         .iter()
                         .find(|(id, _)| id == value)
                         .map_or(value.clone(), |(_, l)| l.clone());
-                    egui::ComboBox::from_id_salt(("choice", i))
+                    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt(("choice", i))
                         .selected_text(current)
                         .show_ui(ui, |ui| {
                             for (id, label) in &c.options {
                                 ui.selectable_value(value, id.clone(), label.as_str());
                             }
-                        });
+                        }));
                 }
             }
 
@@ -1142,146 +929,5 @@ impl Picker {
                 }
             });
         });
-    }
-}
-
-/// Text in a cell, cut off at its right edge. Returns where the text ends.
-fn clipped_text(ui: &Ui, cell: Rect, text: &str, c: Color32, font: FontId) -> f32 {
-    let painter = ui.painter().with_clip_rect(cell.intersect(ui.clip_rect()));
-    let r = painter.text(pos2(cell.left(), cell.center().y), Align2::LEFT_CENTER, text, font, c);
-    r.right().min(cell.right())
-}
-
-fn cell_text(ui: &Ui, cell: Rect, text: &str, right: bool, c: Color32, font: FontId) -> Rect {
-    let inner = cell.shrink2(vec2(10.0, 0.0));
-    let painter = ui.painter().with_clip_rect(inner.intersect(ui.clip_rect()));
-    let (x, align) = if right {
-        (inner.right(), Align2::RIGHT_CENTER)
-    } else {
-        (inner.left(), Align2::LEFT_CENTER)
-    };
-    painter.text(pos2(x, inner.center().y), align, text, font, c)
-}
-
-/// `~` and `~/x` in typed paths.
-fn fs_expand(s: &str) -> PathBuf {
-    PathBuf::from(wt_config::expand_home(s))
-}
-
-/// `dir/name`, or `dir/name (2).ext` and so on if that's taken.
-fn free_name(dir: &Path, name: &str) -> PathBuf {
-    let first = dir.join(name);
-    if !first.exists() {
-        return first;
-    }
-    let (stem, ext) = match name.rfind('.') {
-        Some(i) if i > 0 => (&name[..i], &name[i..]),
-        _ => (name, ""),
-    };
-    (2..)
-        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
-        .find(|p| !p.exists())
-        .unwrap_or(first)
-}
-
-/// Look below `root` for names containing `needle`, sending batches as they're found.
-fn search(root: &Path, needle: &str, hidden: bool, tx: &mpsc::Sender<Vec<Entry>>, ctx: &egui::Context) {
-    let mut queue = std::collections::VecDeque::from([(root.to_path_buf(), 0u32)]);
-    let mut batch = Vec::new();
-    let mut sent = 0;
-    let mut last = std::time::Instant::now();
-    while let Some((dir, depth)) = queue.pop_front() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if !hidden && name.starts_with('.') {
-                continue;
-            }
-            let Ok(kind) = e.file_type() else { continue };
-            if kind.is_dir() && depth < 8 && !matches!(e.path().to_str(), Some("/proc" | "/sys" | "/dev" | "/run")) {
-                queue.push_back((e.path(), depth + 1));
-            }
-            if name.to_lowercase().contains(needle)
-                && let Some(entry) = Entry::from_path(e.path())
-            {
-                batch.push(entry);
-            }
-        }
-        if !batch.is_empty() && last.elapsed().as_millis() > 80 {
-            sent += batch.len();
-            if tx.send(std::mem::take(&mut batch)).is_err() {
-                return; // a newer search took over
-            }
-            ctx.request_repaint();
-            last = std::time::Instant::now();
-        }
-        if sent >= SEARCH_LIMIT {
-            break;
-        }
-    }
-    let _ = tx.send(batch);
-    ctx.request_repaint();
-}
-
-/// File and place icons as textures, looked up once.
-struct Icons {
-    icons: wt_icons::Icons,
-    theme: String,
-    /// File icons by kind ("dir", or the extension).
-    files: HashMap<String, Option<TextureHandle>>,
-    symbolic: HashMap<(String, [u8; 4]), Option<TextureHandle>>,
-}
-
-impl Icons {
-    fn new(theme: &str) -> Self {
-        Self {
-            icons: wt_icons::Icons::new(theme),
-            theme: theme.to_string(),
-            files: HashMap::new(),
-            symbolic: HashMap::new(),
-        }
-    }
-
-    fn file(&mut self, ctx: &egui::Context, mime: &Mime, e: &Entry) -> Option<TextureHandle> {
-        let key = if e.is_dir {
-            "/dir".to_string()
-        } else {
-            mime.type_of(&e.name).unwrap_or("").to_string()
-        };
-        if let Some(t) = self.files.get(&key) {
-            return t.clone();
-        }
-        let px = (ICON * ctx.pixels_per_point()).round() as u32;
-        let tex = mime
-            .icons_for(e)
-            .iter()
-            .find_map(|name| self.icons.any(name, px, [255; 4]))
-            .map(|icon| {
-                let image = egui::ColorImage::from_rgba_premultiplied([icon.size as usize; 2], &icon.rgba);
-                ctx.load_texture(format!("file:{key}"), image, egui::TextureOptions::LINEAR)
-            });
-        self.files.insert(key, tex.clone());
-        tex
-    }
-
-    fn symbolic(
-        &mut self,
-        ctx: &egui::Context,
-        name: &str,
-        size: f32,
-        tint: wt_config::Color,
-    ) -> Option<TextureHandle> {
-        let c = color(tint).to_srgba_unmultiplied();
-        let key = (name.to_string(), c);
-        if let Some(t) = self.symbolic.get(&key) {
-            return t.clone();
-        }
-        let px = (size * ctx.pixels_per_point()).round() as u32;
-        let tex = self.icons.symbolic(name, px, c).map(|icon| {
-            let image = egui::ColorImage::from_rgba_premultiplied([icon.size as usize; 2], &icon.rgba);
-            ctx.load_texture(format!("sym:{name}"), image, egui::TextureOptions::LINEAR)
-        });
-        self.symbolic.insert(key, tex.clone());
-        tex
     }
 }

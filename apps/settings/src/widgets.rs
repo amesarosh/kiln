@@ -89,7 +89,7 @@ pub fn row_with(
     control: impl FnOnce(&mut Ui),
 ) -> bool {
     let mut clicked = false;
-    let control_h = ui.spacing().interact_size.y;
+    let control_h = wt_ui::field_height(ui.style());
     let gap = ui.spacing().item_spacing.x;
     let top_left = ui.cursor().min;
     let total = ui.available_width();
@@ -256,14 +256,14 @@ pub fn choice(
         .find(|(v, _)| *v == value.as_str())
         .map_or(value.clone(), |(_, l)| l.to_string());
     let before = value.clone();
-    egui::ComboBox::from_id_salt(id)
+    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt(id)
         .selected_text(current)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (v, label) in options {
                 ui.selectable_value(value, v.to_string(), *label);
             }
-        });
+        }));
     *value != before
 }
 
@@ -295,12 +295,7 @@ pub fn draft_text(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, value
 
 /// A text field as tall as the other controls, with its text clear of the rounded ends.
 pub fn padded<'t>(ui: &Ui, edit: egui::TextEdit<'t>) -> egui::TextEdit<'t> {
-    let h = ui.spacing().interact_size.y;
-    let radius = f32::from(ui.visuals().widgets.inactive.corner_radius.nw).min(h / 2.0);
-    let x = (radius * 0.6).max(8.0).round() as i8;
-    edit.margin(egui::Margin::symmetric(x, 2))
-        .min_size(vec2(0.0, h))
-        .vertical_align(Align::Center)
+    wt_ui::field(ui, edit)
 }
 
 /// A color chip that opens a color picker when clicked. `changed()` when a color was picked.

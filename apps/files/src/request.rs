@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use crate::fs::Filter;
+use wayland_time_files::fs::Filter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {

@@ -6,7 +6,6 @@
 //! reads the request on stdin and prints the answer on stdout.
 
 mod app;
-mod fs;
 mod portal;
 mod request;
 

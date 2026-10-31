@@ -4,6 +4,7 @@
 //!   "#rgb", "#rrggbb", "#rrggbbaa"   a literal color
 //!   "accent"                          another color in the palette
 //!   "mix(a, b, 0.25)"                 25% of the way from `a` to `b` (each side is an expression)
+//!   "alpha(a, 0.3)"                   `a` made see-through: 0 is invisible, 1 is solid
 //!
 //! Components (the bar, borders, ...) read fixed role names, listed in `Palette`. Any other names
 //! are free for the user, e.g. `pink = "#f5c2e7"` then `accent = "pink"`. A component can also
@@ -73,6 +74,12 @@ palette! {
     lock_failed,
     /// Laid over the screen behind a dialog that needs an answer, like a password prompt.
     scrim,
+    /// Inside of the box drawn while dragging on the empty desktop; usually see-through.
+    drag_box,
+    /// Edge of the box drawn while dragging on the empty desktop.
+    drag_box_border,
+    /// Outline around folder icons in file lists, so they stand out.
+    icon_outline,
 }
 
 /// The unresolved palette: names to expressions.
@@ -161,15 +168,19 @@ fn eval(
         let [a, b, t] = parts.as_slice() else {
             return Err("mix needs three parts: mix(color, color, amount)".into());
         };
-        let t: f32 = t
-            .trim()
-            .parse()
-            .ok()
-            .filter(|t| (0.0..=1.0).contains(t))
-            .ok_or_else(|| format!("mix amount \"{}\" should be a number from 0 to 1", t.trim()))?;
+        let t = amount(t)?;
         let a = eval(a, defs, done, stack)?;
         let b = eval(b, defs, done, stack)?;
         return Ok(mix(a, b, t));
+    }
+    if let Some(args) = expr.strip_prefix("alpha(").and_then(|r| r.strip_suffix(')')) {
+        let parts = split_args(args);
+        let [a, t] = parts.as_slice() else {
+            return Err("alpha needs two parts: alpha(color, amount)".into());
+        };
+        let t = amount(t)?;
+        let [r, g, b, _] = eval(a, defs, done, stack)?;
+        return Ok([r, g, b, t]);
     }
     if expr.is_empty() || !expr.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
         return Err(format!(
@@ -177,6 +188,15 @@ fn eval(
         ));
     }
     lookup(expr, defs, done, stack)
+}
+
+/// The last part of mix(...) or alpha(...): a number from 0 to 1.
+fn amount(t: &str) -> Result<f32, String> {
+    t.trim()
+        .parse()
+        .ok()
+        .filter(|t| (0.0..=1.0).contains(t))
+        .ok_or_else(|| format!("amount \"{}\" should be a number from 0 to 1", t.trim()))
 }
 
 /// Split on commas that aren't inside parentheses.
@@ -257,6 +277,14 @@ mod tests {
         assert_eq!(parse_hex("#fff").unwrap(), [1.0, 1.0, 1.0, 1.0]);
         assert_eq!(parse_hex("#00000080").unwrap()[3], 128.0 / 255.0);
         assert!(parse_hex("ff0000").is_err());
+    }
+
+    #[test]
+    fn alpha() {
+        let p = resolve(&full(), &defs(&[("accent", "alpha(text, 0.25)")]), "theme").unwrap();
+        assert_eq!(p.accent, [1.0, 1.0, 1.0, 0.25]);
+        assert!(resolve(&full(), &defs(&[("accent", "alpha(text)")]), "theme").is_err());
+        assert!(resolve(&full(), &defs(&[("accent", "alpha(text, 2)")]), "theme").is_err());
     }
 
     #[test]

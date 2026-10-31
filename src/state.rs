@@ -240,6 +240,8 @@ pub struct State {
     pub needs_redraw: bool,
     /// Tiles sliding into place, and the one being dragged.
     pub anims: crate::anim::Anims,
+    /// The box being dragged out on the empty desktop.
+    pub drag_box: Option<crate::drag_box::DragBox>,
 }
 
 impl State {
@@ -368,6 +370,7 @@ impl State {
             lock_surfaces: Vec::new(),
             idle_inhibitors: Vec::new(),
             lock_fill_ids: [Id::new(), Id::new()],
+            drag_box: None,
             powered_off: Vec::new(),
             last_activity: Instant::now(),
             idle_power_timer: None,

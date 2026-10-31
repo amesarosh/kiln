@@ -300,7 +300,7 @@ impl eframe::App for Launcher {
                 let edit = egui::TextEdit::singleline(&mut self.query)
                     .hint_text("Search apps, or type a command")
                     .desired_width(f32::INFINITY)
-                    .margin(egui::Margin::symmetric(10, 8))
+                    .margin(egui::Margin::symmetric(wt_ui::side_padding(ui.style()) as i8, 12))
                     .lock_focus(true);
                 let r = ui.add(edit);
                 r.request_focus();

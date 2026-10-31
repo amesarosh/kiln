@@ -407,7 +407,7 @@ impl TasksApp {
             ui.add_space(14.0);
             let current = self.interval.load(Ordering::Relaxed);
             let label = SPEEDS.iter().find(|s| s.0 == current).map_or("", |s| s.1);
-            egui::ComboBox::from_id_salt("speed")
+            wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt("speed")
                 .selected_text(label)
                 .width(ui.available_width())
                 .show_ui(ui, |ui| {
@@ -416,7 +416,7 @@ impl TasksApp {
                             self.interval.store(*ms, Ordering::Relaxed);
                         }
                     }
-                });
+                }));
             ui.add_space(2.0);
             section_label(ui, p, "Update speed");
         });
@@ -437,7 +437,7 @@ impl TasksApp {
                         egui::TextEdit::singleline(&mut self.search)
                             .id(id)
                             .hint_text("Search  (Ctrl+F)")
-                            .margin(Margin { left: 30, right: 10, top: 6, bottom: 6 })
+                            .margin(Margin { left: 30, right: wt_ui::side_padding(ui.style()) as i8, top: 10, bottom: 10 })
                             .desired_width(240.0),
                     );
                     if r.has_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {

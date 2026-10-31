@@ -202,7 +202,7 @@ fn action_editor(ui: &mut Ui, id: &str, action: &mut String) -> bool {
     let mut new_name = name.clone();
     let mut new_arg = arg.clone();
     let known = ACTIONS.iter().find(|(n, _, _)| *n == name);
-    egui::ComboBox::from_id_salt(("action", id))
+    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt(("action", id))
         .selected_text(if name.is_empty() {
             "Pick an action"
         } else {
@@ -215,7 +215,7 @@ fn action_editor(ui: &mut Ui, id: &str, action: &mut String) -> bool {
                 ui.selectable_value(&mut new_name, n.to_string(), *n)
                     .on_hover_text(*help);
             }
-        });
+        }));
     let hint = known.map_or("", |(_, a, _)| *a);
     if !hint.is_empty() || !arg.is_empty() {
         ui.add(widgets::padded(

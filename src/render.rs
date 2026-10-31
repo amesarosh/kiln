@@ -331,6 +331,10 @@ where
         }
     }
 
+    // On the desktop, under the windows.
+    if !in_overview {
+        crate::drag_box::push_elements(state, output, scale, &mut out);
+    }
     push_layers(&mut out, renderer, Layer::Bottom);
     push_layers(&mut out, renderer, Layer::Background);
     push_wallpaper(state, renderer, output, output_geo.size, &mut out);

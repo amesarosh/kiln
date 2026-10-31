@@ -6,6 +6,7 @@ mod color;
 mod config;
 mod cursor;
 mod dbus;
+mod drag_box;
 mod focus;
 mod grabs;
 mod handlers;

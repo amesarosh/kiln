@@ -655,12 +655,12 @@ fn font_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool {
     let before = value.clone();
     let id = ui.id().with("font-filter");
     let mut filter: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
-    egui::ComboBox::from_id_salt("font")
+    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt("font")
         .selected_text(value.as_str())
         .width(ui.available_width())
         .height(320.0)
         .show_ui(ui, |ui| {
-            ui.add(egui::TextEdit::singleline(&mut filter).hint_text("Search fonts"))
+            ui.add(wt_ui::field(ui, egui::TextEdit::singleline(&mut filter).hint_text("Search fonts")))
                 .request_focus();
             let q = filter.to_lowercase();
             for family in ["sans", "serif", "monospace"]
@@ -672,7 +672,7 @@ fn font_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool {
                     ui.selectable_value(value, family.clone(), family.as_str());
                 }
             }
-        });
+        }));
     ui.data_mut(|d| d.insert_temp(id, filter));
     *value != before
 }
@@ -690,12 +690,12 @@ fn wallpaper_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool 
             .file_name()
             .map_or(value.clone(), |n| n.to_string_lossy().into_owned())
     };
-    egui::ComboBox::from_id_salt("wallpaper")
+    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt("wallpaper")
         .selected_text(shown)
         .width(ui.available_width())
         .height(360.0)
         .show_ui(ui, |ui| {
-            ui.add(egui::TextEdit::singleline(&mut filter).hint_text("Search, or type a file's path"))
+            ui.add(wt_ui::field(ui, egui::TextEdit::singleline(&mut filter).hint_text("Search, or type a file's path")))
                 .request_focus();
             let typed = filter.trim();
             if (typed.starts_with('/') || typed.starts_with('~'))
@@ -711,7 +711,7 @@ fn wallpaper_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool 
                         .on_hover_text(path.as_str());
                 }
             }
-        });
+        }));
     ui.data_mut(|d| d.insert_temp(id, filter));
     *value != before
 }

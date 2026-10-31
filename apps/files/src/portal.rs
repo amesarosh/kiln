@@ -20,10 +20,9 @@ use zbus::{
     zvariant::{OwnedObjectPath, OwnedValue, Structure, StructureBuilder, Value},
 };
 
-use crate::{
-    fs::{self, Filter},
-    request::{Answer, Choice, Mode, Request},
-};
+use wayland_time_files::fs::{self, Filter};
+
+use crate::request::{Answer, Choice, Mode, Request};
 
 pub const BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.wayland-time";
 const PATH: &str = "/org/freedesktop/portal/desktop";

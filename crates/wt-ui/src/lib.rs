@@ -129,7 +129,59 @@ fn modified(path: Option<&Path>) -> Option<SystemTime> {
     std::fs::metadata(path?).ok()?.modified().ok()
 }
 
-/// egui's fonts with the theme font (and the system monospace font) put first.
+/// Room between a control's ends and its text: more the rounder its corners, so text in a
+/// pill-shaped field or drop-down doesn't crowd the curve.
+pub fn side_padding(style: &egui::Style) -> f32 {
+    let h = style.spacing.interact_size.y;
+    let radius = f32::from(style.visuals.widgets.inactive.corner_radius.nw).min(h / 2.0);
+    (10.0 + radius * 0.4).round()
+}
+
+/// Height of text fields and drop-downs: a little taller than buttons, for room above and
+/// below the text.
+pub fn field_height(style: &egui::Style) -> f32 {
+    style.spacing.interact_size.y + 8.0
+}
+
+/// A one-line text field [`field_height`] tall, its text clear of the rounded ends.
+pub fn field<'t>(ui: &egui::Ui, edit: egui::TextEdit<'t>) -> egui::TextEdit<'t> {
+    let pad = side_padding(ui.style()) as i8;
+    edit.margin(egui::Margin::symmetric(pad, 4))
+        .min_size(egui::vec2(0.0, field_height(ui.style())))
+        .vertical_align(egui::Align::Center)
+}
+
+/// Runs `add` (which shows an `egui::ComboBox`) so the drop-down's button is
+/// [`field_height`] tall, matching the text fields. Its menu keeps the normal sizes.
+pub fn select<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.scope(|ui| {
+        let h = field_height(ui.style());
+        let s = ui.spacing_mut();
+        s.interact_size.y = h;
+        s.button_padding.y = s.button_padding.y.max(4.0);
+        add(ui)
+    })
+    .inner
+}
+
+/// Roomier items for a menu: call first thing in the menu's contents. egui's menus squeeze
+/// their buttons to almost no padding, which feels cramped for a list of actions.
+pub fn roomy_menu(ui: &mut egui::Ui) {
+    let s = ui.spacing_mut();
+    s.button_padding = egui::vec2(12.0, 6.0);
+    s.item_spacing.y = 2.0;
+    ui.set_min_width(200.0);
+}
+
+/// The semi-bold face of the theme font, for text that should stand out (like folder names).
+pub fn semibold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(BOLD.into()))
+}
+
+const BOLD: &str = "semibold";
+
+/// egui's fonts with the theme font (and the system monospace font) put first, plus a
+/// [`semibold`] family.
 fn fonts(name: &str) -> FontDefinitions {
     let mut defs = FontDefinitions::default();
     for (family, font, key) in [
@@ -143,6 +195,22 @@ fn fonts(name: &str) -> FontDefinitions {
         defs.font_data.insert(key.into(), Arc::new(FontData::from_owned(data)));
         defs.families.entry(family).or_default().insert(0, key.into());
     }
+    // A font given as a file has no bold face to ask fontconfig for; it's used as it is.
+    let bold_file = (!name.contains('/'))
+        .then(|| wt_config::fonts::resolve(&format!("{name}:semibold")))
+        .flatten()
+        .and_then(|p| std::fs::read(p).ok());
+    let mut bold_family = defs.families[&FontFamily::Proportional].clone();
+    if let Some(data) = bold_file {
+        let mut font = FontData::from_owned(data);
+        // A variable font is the same file for every weight; pick semi-bold on its weight axis.
+        if let Some(axis) = font.variation_axes().into_iter().find(|a| a.tag.to_be_bytes() == *b"wght") {
+            font.tweak.coords = egui::epaint::text::VariationCoords::new([(*b"wght", axis.range.clamp(600.0))]);
+        }
+        defs.font_data.insert("theme-bold".into(), Arc::new(font));
+        bold_family.insert(0, "theme-bold".into());
+    }
+    defs.families.insert(FontFamily::Name(BOLD.into()), bold_family);
     defs
 }
 
@@ -208,5 +276,7 @@ fn apply_style(ctx: &egui::Context, theme: &Theme) {
             state.expansion = 0.0;
         }
         w.noninteractive.fg_stroke = Stroke::new(1.0, c(p.text));
+        // Buttons and drop-downs keep their text clear of rounded ends (needs the radius above).
+        style.spacing.button_padding.x = side_padding(style);
     });
 }

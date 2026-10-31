@@ -24,6 +24,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **Sessions come back**: apps open when you quit, log out or shut down are started again at the next login, with each window on the same monitor and workspace, in the same tiling order, size and floating position
 - **Wallpaper** built in (`[theme] wallpaper`, or one per monitor): fill, fit, stretch, center or tile, picked in the settings app
 - **File picker** (`wayland-time-files`) in the theme's look, given to apps through the desktop portal (Vivaldi, Firefox, Chrome, Flatpaks...): places, path bar, search, filters, open/save/folders. Dialogs always float, centered over the window that opened them, sized to fit the screen
+- **File manager** (`wayland-time-file-manager`, "Files" in the launcher) in the theme's look, built on the file picker: open files in their default app or pick one, copy, cut and paste (in the background, with progress), rename, new folders, a trash that works with other file managers', search, and live updates when files change
 - **Password prompt for admin rights** (`wayland-time-polkit`, a polkit agent in the theme's look), started at login, so installing software, mounting disks and `pkexec` can ask for your password
 - **Screen locking** with its own lock screen (`wayland-time-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 - **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
@@ -201,8 +202,9 @@ monitor's mode remakes them. Wallpaper tools like swaybg still work and draw on 
 
 Everything the compositor draws (the bar, window borders, the lock screen) takes its font and
 colors from `[theme]`. Colors are named once in `[theme.colors]` and referred to by name, and
-shades like `hover = "mix(surface, text, 0.1)"` are built from them, so changing `surface` or
-`accent` updates every part that uses it. A section can override colors for itself alone with
+shades like `hover = "mix(surface, text, 0.1)"` or `drag_box = "alpha(accent, 0.18)"` (a
+see-through accent) are built from them, so changing `surface` or `accent` updates every part
+that uses it. A section can override colors for itself alone with
 its own table, e.g. `[bar.colors]`.
 
 Themes can be saved and switched. A saved theme is a file in `~/.config/wayland-time/themes/`
@@ -359,6 +361,22 @@ X11 dialogs, and anything a portal opens, including when the app couldn't link t
 its window (then it goes over the window that was focused). Portal dialogs from Wayland apps are
 linked through xdg-foreign. A dialog bigger than the screen is asked to fit.
 
+### File manager
+
+`wayland-time-file-manager [FOLDER]` ("Files" in the launcher) shows the same places, path bar,
+sortable list and search as the file picker, plus a Trash place. Double-click or Enter opens a
+folder in place and a file in its default app (from `mimeapps.list`); right-click a file for
+Open With, Cut, Copy, Rename, Move to Trash and Delete Permanently, or the empty space for New
+Folder, Paste, Open Terminal Here and Show Hidden Files. Copies and moves run in the background
+with progress in the status line, and never overwrite: a name that's taken gets " (2)". The
+trash follows the freedesktop layout, so it's shared with other file managers; files on other
+drives go to that drive's own trash folder. Copying also puts the paths on the clipboard as
+text, and pasting accepts paths copied elsewhere. Keys: Enter, F2 rename, Delete trash,
+Shift+Delete delete for good, Ctrl+C/X/V, Ctrl+Shift+N new folder, Ctrl+A, F5 reload, and the
+picker's navigation keys; the mouse's side buttons go back and forward. It doesn't take over
+opening folders from other apps unless you make it the default for `inode/directory`
+(`xdg-mime default wayland-time-file-manager.desktop inode/directory`).
+
 ### Password prompts for admin rights
 
 When an app needs admin rights (installing software, mounting a disk, `pkexec`), polkit asks
@@ -383,7 +401,7 @@ The repository is a Cargo workspace:
 | `crates/wt-icons/` | icons from the icon themes: app icons via .desktop files, symbolic icons tinted one color, PNG/SVG loading |
 | `apps/settings/` | the settings app (`wayland-time-settings`) |
 | `apps/launcher/` | the app launcher (`wayland-time-launcher`) |
-| `apps/files/` | the file picker (`wayland-time-files`): desktop portal FileChooser backend on the session bus, and the egui picker window it runs per request |
+| `apps/files/` | the file picker (`wayland-time-files`): desktop portal FileChooser backend on the session bus, and the egui picker window it runs per request; and the file manager (`wayland-time-file-manager`, in `src/bin/`), sharing its listing, places, icons and drawing (`src/lib.rs`) |
 | `apps/polkit/` | the password prompt (`wayland-time-polkit`): polkit agent on the system bus, talks to `polkit-agent-helper-1`, drawn with `wt-draw` on a layer surface |
 | `apps/lock/` | the lock screen (`wayland-time-lock`): session lock protocol, PAM, drawn with `wt-draw` since egui can't make lock surfaces |
 

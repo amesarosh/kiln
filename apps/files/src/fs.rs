@@ -1,6 +1,6 @@
-//! Everything the picker knows about files: folder listings, the places in the sidebar,
-//! recently used files, file types (from the shared MIME database) and their icons, filters,
-//! and how sizes and dates are written.
+//! Everything the picker and the file manager know about files: folder listings, the places in
+//! the sidebar, recently used files, file types (from the shared MIME database) and their icons,
+//! filters, and how sizes and dates are written.
 
 use std::{
     collections::HashMap,
@@ -101,6 +101,27 @@ pub fn natural(a: &str, b: &str) -> std::cmp::Ordering {
             }
         }
     }
+}
+
+/// `~` and `~/x` in typed paths.
+pub fn expand(s: &str) -> PathBuf {
+    PathBuf::from(wt_config::expand_home(s))
+}
+
+/// `dir/name`, or `dir/name (2).ext` and so on if that's taken.
+pub fn free_name(dir: &Path, name: &str) -> PathBuf {
+    let first = dir.join(name);
+    if !first.exists() && first.symlink_metadata().is_err() {
+        return first;
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|p| p.symlink_metadata().is_err())
+        .unwrap_or(first)
 }
 
 pub fn home() -> PathBuf {

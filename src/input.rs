@@ -360,6 +360,20 @@ impl State {
             pointer.frame(self);
             return;
         }
+        // Dragging a box on the desktop: nothing else sees the pointer until it's let go.
+        if self.drag_box_motion(pos) {
+            pointer.motion(
+                self,
+                None,
+                &MotionEvent {
+                    location: pos,
+                    serial,
+                    time,
+                },
+            );
+            pointer.frame(self);
+            return;
+        }
         self.bar_drag_motion(pos);
         self.bar_hover(pos);
         self.notification_motion(pos);
@@ -445,6 +459,10 @@ impl State {
         // Mod+click (move/resize) shouldn't count as a Mod tap.
         if button_state == ButtonState::Pressed {
             self.mod_tap = None;
+        }
+        // Letting go ends a desktop drag box; the press never reached a client, nor does this.
+        if button_state == ButtonState::Released && button == BTN_LEFT && self.drag_box_end() {
+            return;
         }
 
         if self.is_locked() {
@@ -567,6 +585,12 @@ impl State {
                     self.focus_window(&w);
                 }
                 (None, Some(layer)) => self.focus_layer(&layer),
+                // Left-drag on the empty desktop draws a box.
+                (None, None) if button == BTN_LEFT && self.surface_under(pos).is_none() => {
+                    self.drag_box_start(pos);
+                    self.cursor_status = CursorImageStatus::default_named();
+                    return;
+                }
                 (None, None) => {}
             }
         }

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Build wayland-time, its settings app, task manager, launcher, lock screen, password prompt and file picker from
-# this checkout, then install them
-# system-wide.
+# Build wayland-time, its settings app, task manager, launcher, lock screen, password prompt, file picker and
+# file manager from this checkout, then install them system-wide.
 #
 #   ./install.sh            build and install
 #   PREFIX=/usr ./install.sh  install binaries under /usr/bin instead of /usr/local/bin
@@ -34,6 +33,7 @@ sudo install -Dm755 target/$PROFILE/wayland-time-launcher "$BIN_DIR/wayland-time
 sudo install -Dm755 target/$PROFILE/wayland-time-lock "$BIN_DIR/wayland-time-lock"
 sudo install -Dm755 target/$PROFILE/wayland-time-polkit "$BIN_DIR/wayland-time-polkit"
 sudo install -Dm755 target/$PROFILE/wayland-time-files "$BIN_DIR/wayland-time-files"
+sudo install -Dm755 target/$PROFILE/wayland-time-file-manager "$BIN_DIR/wayland-time-file-manager"
 # The file picker is a desktop portal backend: the portal finds it through these files, and
 # D-Bus starts it when an app first asks for a file.
 sudo install -Dm644 resources/portal/wayland-time.portal "$PORTALS_DIR/portals/wayland-time.portal"
@@ -53,6 +53,7 @@ sudo install -Dm644 resources/pam.d/wayland-time-lock /etc/pam.d/wayland-time-lo
 sudo install -Dm644 resources/wayland-time.desktop "$SESSIONS_DIR/wayland-time.desktop"
 sudo install -Dm644 resources/wayland-time-settings.desktop "$APPS_DIR/wayland-time-settings.desktop"
 sudo install -Dm644 resources/wayland-time-tasks.desktop "$APPS_DIR/wayland-time-tasks.desktop"
+sudo install -Dm644 resources/wayland-time-file-manager.desktop "$APPS_DIR/wayland-time-file-manager.desktop"
 
 commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 dirty="$(git status --porcelain 2>/dev/null | head -1)"
@@ -64,6 +65,7 @@ echo "    $BIN_DIR/wayland-time-launcher"
 echo "    $BIN_DIR/wayland-time-lock"
 echo "    $BIN_DIR/wayland-time-polkit"
 echo "    $BIN_DIR/wayland-time-files"
+echo "    $BIN_DIR/wayland-time-file-manager"
 echo "    $PORTALS_DIR/portals/wayland-time.portal"
 echo "    $PORTALS_DIR/wayland-time-portals.conf"
 echo "    $DBUS_DIR/org.freedesktop.impl.portal.desktop.wayland-time.service"
@@ -71,6 +73,7 @@ echo "    /etc/pam.d/wayland-time-lock"
 echo "    $SESSIONS_DIR/wayland-time.desktop"
 echo "    $APPS_DIR/wayland-time-settings.desktop"
 echo "    $APPS_DIR/wayland-time-tasks.desktop"
+echo "    $APPS_DIR/wayland-time-file-manager.desktop"
 if pgrep -x wayland-time >/dev/null; then
     echo "==> wayland-time is running: log out and back in to use the new version."
 fi
