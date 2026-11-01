@@ -145,6 +145,9 @@ impl State {
         if self.config.bar.has(Widget::Bluetooth) {
             self.start_bluetooth();
         }
+        if self.config.bar.has(Widget::Sound) {
+            self.start_sound();
+        }
         let bar = &self.config.bar;
         let status = Status {
             battery: bar.has(Widget::Battery).then(battery).flatten(),

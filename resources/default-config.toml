@@ -133,11 +133,12 @@ height = 28              # top/bottom bar height; also the row height of a side 
 width = 180              # left/right bar width
 # Status widgets, in this order, next to the clock (on every bar if no connected
 # monitor has the clock on): "tray" (app icons), "media" (what's playing; click to
-# pause, scroll to skip), "network", "bluetooth" (click for the Bluetooth app,
+# pause, scroll to skip), "sound" (the volume: click for the Sound app, right-click
+# to mute, scroll to change it), "network", "bluetooth" (click for the Bluetooth app,
 # right-click to turn it on or off), "battery", "brightness" (scroll to change)
 # and "notifications" (a bell: click for the list, right-click for do not
 # disturb). Bluetooth, battery and brightness only show on machines that have them.
-widgets = ["tray", "media", "network", "bluetooth", "battery", "brightness", "notifications"]
+widgets = ["tray", "media", "sound", "network", "bluetooth", "battery", "brightness", "notifications"]
 # font = "sans"          # defaults to [theme] font and font_size
 # font_size = 14
 

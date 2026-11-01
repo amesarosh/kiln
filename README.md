@@ -26,6 +26,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **File picker** (`wayland-time-files`) in the theme's look, given to apps through the desktop portal (Vivaldi, Firefox, Chrome, Flatpaks...): places, path bar, search, filters, open/save/folders. Dialogs always float, centered over the window that opened them, sized to fit the screen
 - **File manager** (`wayland-time-file-manager`, "Files" in the launcher) in the theme's look, built on the file picker: open files in their default app or pick one, copy, cut and paste (in the background, with progress), rename, new folders, a trash that works with other file managers', search, drag and drop with other apps, folders added to the sidebar, and live updates when files change
 - **Bluetooth** (`wayland-time-bluetooth`, and a bar widget: click to open it, right-click to turn Bluetooth on or off): pair (with passkey and PIN prompts), connect, disconnect and forget devices, with battery levels
+- **Sound** (`wayland-time-sound`, and a bar widget showing the volume: click to open it, right-click to mute, scroll to change it): pick the output and microphone, set their volumes, set or mute each app's volume, send an app to another output, and choose sound card profiles
 - **Password prompt for admin rights** (`wayland-time-polkit`, a polkit agent in the theme's look), started at login, so installing software, mounting disks and `pkexec` can ask for your password
 - **Screen locking** with its own lock screen (`wayland-time-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 - **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
@@ -94,6 +95,9 @@ sudo install -m644 resources/pam.d/wayland-time-lock /etc/pam.d/
 # The Bluetooth app, and its launcher entry:
 sudo install -m755 target/release/wayland-time-bluetooth /usr/local/bin/
 sudo install -m644 resources/wayland-time-bluetooth.desktop /usr/share/applications/
+# The Sound app, and its launcher entry:
+sudo install -m755 target/release/wayland-time-sound /usr/local/bin/
+sudo install -m644 resources/wayland-time-sound.desktop /usr/share/applications/
 ```
 
 ## Default keys
@@ -398,6 +402,17 @@ PIN when the device needs it (the app is BlueZ's pairing agent while it's open),
 devices are trusted so they reconnect by themselves. Right-click the bar widget to turn
 Bluetooth on or off without opening the app. It talks to BlueZ (`bluetoothd`) on the system bus.
 
+### Sound
+
+`wayland-time-sound` ("Sound" in the launcher, or click the bar's `sound` widget) picks the
+output (speakers, headphones, HDMI) and input (microphone) and sets their volumes, lists the
+apps playing or recording with a volume and mute button for each, and sends an app to a
+different output from its ⋯ menu ("Default" makes it follow the default again). Sound cards
+can be switched between profiles (for example stereo or surround, or a Bluetooth headset's
+music and call modes). On the bar widget, right-click mutes and scrolling changes the volume,
+with the same pop-up as the volume keys. It needs PipeWire with WirePlumber: it reads the
+state from `pw-dump` and makes changes with `wpctl` and `pw-metadata`.
+
 ### Password prompts for admin rights
 
 When an app needs admin rights (installing software, mounting a disk, `pkexec`), polkit asks
@@ -424,6 +439,8 @@ The repository is a Cargo workspace:
 | `apps/launcher/` | the app launcher (`wayland-time-launcher`) |
 | `apps/files/` | the file picker (`wayland-time-files`): desktop portal FileChooser backend on the session bus, and the egui picker window it runs per request; and the file manager (`wayland-time-file-manager`, in `src/bin/`), sharing its listing, places, icons and drawing (`src/lib.rs`) |
 | `apps/bluetooth/` | the Bluetooth app (`wayland-time-bluetooth`): BlueZ on the system bus, and its pairing agent |
+| `apps/sound/` | the Sound app (`wayland-time-sound`) |
+| `crates/wt-pipewire/` | sound devices, app streams and volumes from PipeWire (`pw-dump --monitor`), and changing them (`wpctl`, `pw-metadata`): the Sound app and the bar's sound widget |
 | `apps/polkit/` | the password prompt (`wayland-time-polkit`): polkit agent on the system bus, talks to `polkit-agent-helper-1`, drawn with `wt-draw` on a layer surface |
 | `apps/lock/` | the lock screen (`wayland-time-lock`): session lock protocol, PAM, drawn with `wt-draw` since egui can't make lock surfaces |
 

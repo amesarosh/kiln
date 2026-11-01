@@ -14,6 +14,7 @@ default-members = [".", "apps/*"]
 wt-config = { path = "crates/wt-config" }
 wt-icons = { path = "crates/wt-icons" }
 wt-draw = { path = "crates/wt-draw" }
+wt-pipewire = { path = "crates/wt-pipewire" }
 bitflags = "2"
 inotify = { version = "0.11", default-features = false }
 smithay-drm-extras = { version = "0.1", default-features = false }

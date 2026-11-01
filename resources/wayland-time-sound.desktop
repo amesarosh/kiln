@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Sound
+Comment=Choose speakers, headphones and microphone, and set volumes for each app
+Exec=wayland-time-sound
+Icon=multimedia-volume-control
+Categories=Settings;HardwareSettings;AudioVideo;Audio;Mixer;
+Keywords=sound;audio;volume;mixer;speaker;headphones;microphone;output;input;mute;
+OnlyShowIn=wayland-time;
+StartupWMClass=wayland-time-sound

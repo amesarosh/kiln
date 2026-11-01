@@ -582,6 +582,8 @@ pub enum Widget {
     Tray,
     /// What's playing, with play/pause.
     Media,
+    /// The volume (click opens the Sound app, right-click mutes, scroll changes it).
+    Sound,
     /// Wired or wireless connection.
     Network,
     /// Bluetooth on, off or connected (click opens the Bluetooth app, right-click turns it on

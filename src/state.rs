@@ -177,6 +177,9 @@ pub struct State {
     pub bluetooth: crate::bluetooth::Bluetooth,
     pub bluetooth_watch: Option<crate::bluetooth::Watcher>,
     pub bluetooth_started: bool,
+    /// For the bar's sound widget, followed once the widget is on.
+    pub sound: crate::sound::Sound,
+    pub sound_started: bool,
     /// A tray menu asked for, and where to show it once it arrives: (item, pointer, monitor).
     pub tray_menu_request: Option<(String, Point<f64, Logical>, usize)>,
     /// The Alt+Tab switcher, while open.
@@ -390,6 +393,8 @@ impl State {
             bluetooth: Default::default(),
             bluetooth_watch: None,
             bluetooth_started: false,
+            sound: Default::default(),
+            sound_started: false,
             tray_menu_request: None,
             swipe: None,
             pointer_gestures_state,
@@ -1799,9 +1804,14 @@ impl State {
         let mut out = WindowRule::default();
         // Small utility apps of our own float at a comfortable size by default. User rules
         // below still override any of this.
-        if app_id == Some("wayland-time-bluetooth") {
+        let size = match app_id {
+            Some("wayland-time-bluetooth") => Some([480, 600]),
+            Some("wayland-time-sound") => Some([520, 640]),
+            _ => None,
+        };
+        if size.is_some() {
             out.floating = Some(true);
-            out.size = Some([480, 600]);
+            out.size = size;
             out.position = Some(RulePosition::Named(NamedPosition::Center));
         }
         for r in self.config.rules.iter().filter(|r| r.matches(app_id, title)) {

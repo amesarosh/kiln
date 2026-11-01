@@ -69,6 +69,8 @@ pub enum Part {
     Tray(usize),
     /// What's playing.
     Media,
+    /// Click opens the Sound app, right-click mutes, scroll changes the volume.
+    Sound,
     Network,
     /// Click opens the Bluetooth app, right-click turns it on or off.
     Bluetooth,
@@ -132,6 +134,7 @@ fn end_buttons(m: &Model) -> Vec<Part> {
 /// What the settings button runs, and the app id its window has.
 const SETTINGS_APP: &str = "wayland-time-settings";
 const BLUETOOTH_APP: &str = "wayland-time-bluetooth";
+const SOUND_APP: &str = "wayland-time-sound";
 
 /// One workspace button.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -657,6 +660,7 @@ impl Bar {
                 }
                 Part::Tray(_)
                 | Part::Media
+                | Part::Sound
                 | Part::Network
                 | Part::Bluetooth
                 | Part::Battery
@@ -1137,6 +1141,21 @@ impl State {
                         });
                     }
                 }
+                Widget::Sound => {
+                    if self.sound.present {
+                        let v = self.sound.volume;
+                        let name = match (self.sound.muted || v <= 0.001, v) {
+                            (true, _) => "audio-volume-muted-symbolic",
+                            (false, ..0.34) => "audio-volume-low-symbolic",
+                            (false, ..0.67) => "audio-volume-medium-symbolic",
+                            (false, _) => "audio-volume-high-symbolic",
+                        };
+                        out.push(StatusItem {
+                            part: Part::Sound,
+                            ..labelled(name.into(), format!("{}%", (v * 100.0).round() as i32))
+                        });
+                    }
+                }
                 Widget::Network => {
                     let name = match self.status.network {
                         Network::Offline => "network-offline-symbolic",
@@ -1336,6 +1355,8 @@ impl State {
             (Part::Bell, BTN_MIDDLE) => self.clear_notifications(),
             (Part::Layout, BTN_LEFT | BTN_RIGHT) => self.run_action(Action::Layout(LayoutChoice::Next)),
             (Part::Settings, BTN_LEFT) => self.open_settings(),
+            (Part::Sound, BTN_LEFT) => self.open_app(SOUND_APP),
+            (Part::Sound, BTN_RIGHT) => self.change_volume(crate::config::VolumeChange::ToggleMute),
             (Part::Bluetooth, BTN_LEFT) => self.open_app(BLUETOOTH_APP),
             (Part::Bluetooth, BTN_RIGHT) => self.toggle_bluetooth(),
             (Part::Power, BTN_LEFT | BTN_RIGHT) => {
@@ -1450,10 +1471,16 @@ impl State {
         }
         let Some(mon) = self.monitor_at(pos) else { return false };
         let steps = self.bar.scroll_steps(source, amount, v120);
-        // Widgets that take scrolling: brightness, media (skip tracks), tray icons.
+        // Widgets that take scrolling: volume, brightness, media (skip tracks), tray icons.
         if let Some((_, part)) = self.bar_part_at(pos) {
             use crate::dbus::{Command, mpris::MediaCommand};
             match part {
+                Part::Sound => {
+                    if steps != 0 {
+                        self.change_volume(crate::config::VolumeChange::Step(-steps * 5));
+                    }
+                    return true;
+                }
                 Part::Brightness => {
                     if steps != 0 {
                         self.change_brightness(-steps);

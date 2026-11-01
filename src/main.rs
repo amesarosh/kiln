@@ -23,6 +23,7 @@ mod polkit;
 mod power;
 mod render;
 mod session;
+mod sound;
 mod state;
 mod status;
 mod switcher;

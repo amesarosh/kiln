@@ -1,0 +1,11 @@
+[package]
+name = "wt-pipewire"
+version = "0.1.0"
+edition = "2024"
+description = "Sound devices, app streams and volumes from PipeWire, for wayland-time and its apps"
+license = "MIT"
+
+[dependencies]
+# pw-dump's output.
+serde_json = "1"
+tracing = "0.1"

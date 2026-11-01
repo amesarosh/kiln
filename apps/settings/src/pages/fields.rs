@@ -325,6 +325,7 @@ pub const BAR: &[Section] = &[Section {
             Kind::Flags(&[
                 ("tray", "Tray icons from apps"),
                 ("media", "What's playing"),
+                ("sound", "Volume"),
                 ("network", "Network"),
                 ("bluetooth", "Bluetooth"),
                 ("battery", "Battery"),
