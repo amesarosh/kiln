@@ -321,11 +321,12 @@ pub const BAR: &[Section] = &[Section {
         f(
             &["bar", "widgets"],
             "Status widgets",
-            "Shown next to the clock (on every bar when no monitor has the clock). Battery and brightness only show on machines that have them.",
+            "Shown next to the clock (on every bar when no monitor has the clock). Bluetooth, battery and brightness only show on machines that have them.",
             Kind::Flags(&[
                 ("tray", "Tray icons from apps"),
                 ("media", "What's playing"),
                 ("network", "Network"),
+                ("bluetooth", "Bluetooth"),
                 ("battery", "Battery"),
                 ("brightness", "Screen brightness"),
                 ("notifications", "Notifications bell"),

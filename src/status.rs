@@ -141,8 +141,11 @@ impl State {
     }
 
     pub fn refresh_status(&mut self) {
-        let bar = &self.config.bar;
         use crate::config::Widget;
+        if self.config.bar.has(Widget::Bluetooth) {
+            self.start_bluetooth();
+        }
+        let bar = &self.config.bar;
         let status = Status {
             battery: bar.has(Widget::Battery).then(battery).flatten(),
             network: if bar.has(Widget::Network) { network() } else { Network::Offline },

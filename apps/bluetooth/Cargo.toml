@@ -1,0 +1,18 @@
+[package]
+name = "wayland-time-bluetooth"
+version = "0.1.0"
+edition = "2024"
+description = "Bluetooth for the wayland-time compositor: turn it on and off, pair, connect and forget devices"
+license = "MIT"
+
+[dependencies]
+wt-config = { path = "../../crates/wt-config" }
+wt-ui = { path = "../../crates/wt-ui" }
+wt-icons = { path = "../../crates/wt-icons" }
+# BlueZ, on the system bus.
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+# Hands the pairing agent the user's answer.
+async-channel = "2"
+serde = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

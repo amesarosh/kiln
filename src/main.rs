@@ -1,6 +1,7 @@
 mod anim;
 mod backend;
 mod bar;
+mod bluetooth;
 mod clipboard;
 mod color;
 mod config;

@@ -24,7 +24,8 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **Sessions come back**: apps open when you quit, log out or shut down are started again at the next login, with each window on the same monitor and workspace, in the same tiling order, size and floating position
 - **Wallpaper** built in (`[theme] wallpaper`, or one per monitor): fill, fit, stretch, center or tile, picked in the settings app
 - **File picker** (`wayland-time-files`) in the theme's look, given to apps through the desktop portal (Vivaldi, Firefox, Chrome, Flatpaks...): places, path bar, search, filters, open/save/folders. Dialogs always float, centered over the window that opened them, sized to fit the screen
-- **File manager** (`wayland-time-file-manager`, "Files" in the launcher) in the theme's look, built on the file picker: open files in their default app or pick one, copy, cut and paste (in the background, with progress), rename, new folders, a trash that works with other file managers', search, and live updates when files change
+- **File manager** (`wayland-time-file-manager`, "Files" in the launcher) in the theme's look, built on the file picker: open files in their default app or pick one, copy, cut and paste (in the background, with progress), rename, new folders, a trash that works with other file managers', search, drag and drop with other apps, folders added to the sidebar, and live updates when files change
+- **Bluetooth** (`wayland-time-bluetooth`, and a bar widget: click to open it, right-click to turn Bluetooth on or off): pair (with passkey and PIN prompts), connect, disconnect and forget devices, with battery levels
 - **Password prompt for admin rights** (`wayland-time-polkit`, a polkit agent in the theme's look), started at login, so installing software, mounting disks and `pkexec` can ask for your password
 - **Screen locking** with its own lock screen (`wayland-time-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 - **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
@@ -90,6 +91,9 @@ sudo install -m755 target/release/wayland-time-lock /usr/local/bin/
 # The password prompt for apps that need admin rights:
 sudo install -m755 target/release/wayland-time-polkit /usr/local/bin/
 sudo install -m644 resources/pam.d/wayland-time-lock /etc/pam.d/
+# The Bluetooth app, and its launcher entry:
+sudo install -m755 target/release/wayland-time-bluetooth /usr/local/bin/
+sudo install -m644 resources/wayland-time-bluetooth.desktop /usr/share/applications/
 ```
 
 ## Default keys
@@ -377,6 +381,23 @@ picker's navigation keys; the mouse's side buttons go back and forward. It doesn
 opening folders from other apps unless you make it the default for `inode/directory`
 (`xdg-mime default wayland-time-file-manager.desktop inode/directory`).
 
+Files can be dragged in from other apps and out to them. Dropped on the list they're copied
+into the folder shown; on a folder row or a sidebar place they go into that folder (dragged
+within the window they're moved), and on Trash they're trashed. Folders can be added to the
+sidebar (right-click › Add to Sidebar, Ctrl+D, or dropped on the sidebar's empty space) and
+removed with a right-click; they're GTK bookmarks (`~/.config/gtk-3.0/bookmarks`), so other file
+managers and file dialogs show them too.
+
+### Bluetooth
+
+`wayland-time-bluetooth` ("Bluetooth" in the launcher, or click the bar's `bluetooth` widget)
+turns Bluetooth on and off, lists your devices (connect, disconnect, forget, battery level when
+the device reports it), and searches for new ones to pair; a search stops by itself after two
+minutes, as searching slows other Bluetooth traffic. Pairing asks to confirm a code or type a
+PIN when the device needs it (the app is BlueZ's pairing agent while it's open), and paired
+devices are trusted so they reconnect by themselves. Right-click the bar widget to turn
+Bluetooth on or off without opening the app. It talks to BlueZ (`bluetoothd`) on the system bus.
+
 ### Password prompts for admin rights
 
 When an app needs admin rights (installing software, mounting a disk, `pkexec`), polkit asks
@@ -402,6 +423,7 @@ The repository is a Cargo workspace:
 | `apps/settings/` | the settings app (`wayland-time-settings`) |
 | `apps/launcher/` | the app launcher (`wayland-time-launcher`) |
 | `apps/files/` | the file picker (`wayland-time-files`): desktop portal FileChooser backend on the session bus, and the egui picker window it runs per request; and the file manager (`wayland-time-file-manager`, in `src/bin/`), sharing its listing, places, icons and drawing (`src/lib.rs`) |
+| `apps/bluetooth/` | the Bluetooth app (`wayland-time-bluetooth`): BlueZ on the system bus, and its pairing agent |
 | `apps/polkit/` | the password prompt (`wayland-time-polkit`): polkit agent on the system bus, talks to `polkit-agent-helper-1`, drawn with `wt-draw` on a layer surface |
 | `apps/lock/` | the lock screen (`wayland-time-lock`): session lock protocol, PAM, drawn with `wt-draw` since egui can't make lock surfaces |
 

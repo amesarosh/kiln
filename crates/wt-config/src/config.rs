@@ -584,6 +584,9 @@ pub enum Widget {
     Media,
     /// Wired or wireless connection.
     Network,
+    /// Bluetooth on, off or connected (click opens the Bluetooth app, right-click turns it on
+    /// or off), if there's an adapter.
+    Bluetooth,
     /// Laptop battery, if there is one.
     Battery,
     /// Screen brightness, if it can be changed.

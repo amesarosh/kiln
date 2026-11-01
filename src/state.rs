@@ -173,6 +173,10 @@ pub struct State {
     pub notifications: crate::notifications::Notifications,
     /// Battery, network and brightness for the bar.
     pub status: crate::status::Status,
+    /// For the bar's Bluetooth widget, followed once the widget is on.
+    pub bluetooth: crate::bluetooth::Bluetooth,
+    pub bluetooth_watch: Option<crate::bluetooth::Watcher>,
+    pub bluetooth_started: bool,
     /// A tray menu asked for, and where to show it once it arrives: (item, pointer, monitor).
     pub tray_menu_request: Option<(String, Point<f64, Logical>, usize)>,
     /// The Alt+Tab switcher, while open.
@@ -383,6 +387,9 @@ impl State {
             bus: Default::default(),
             notifications: Default::default(),
             status: Default::default(),
+            bluetooth: Default::default(),
+            bluetooth_watch: None,
+            bluetooth_started: false,
             tray_menu_request: None,
             swipe: None,
             pointer_gestures_state,
@@ -1788,7 +1795,15 @@ impl State {
 impl State {
     /// Every rule matching a window, merged in order: later rules win where they set something.
     fn rules_for(&self, app_id: Option<&str>, title: Option<&str>) -> crate::config::WindowRule {
-        let mut out = crate::config::WindowRule::default();
+        use crate::config::{NamedPosition, RulePosition, WindowRule};
+        let mut out = WindowRule::default();
+        // Small utility apps of our own float at a comfortable size by default. User rules
+        // below still override any of this.
+        if app_id == Some("wayland-time-bluetooth") {
+            out.floating = Some(true);
+            out.size = Some([480, 600]);
+            out.position = Some(RulePosition::Named(NamedPosition::Center));
+        }
         for r in self.config.rules.iter().filter(|r| r.matches(app_id, title)) {
             macro_rules! take {
                 ($($f:ident),*) => { $( if r.$f.is_some() { out.$f = r.$f.clone(); } )* };

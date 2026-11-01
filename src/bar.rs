@@ -70,6 +70,8 @@ pub enum Part {
     /// What's playing.
     Media,
     Network,
+    /// Click opens the Bluetooth app, right-click turns it on or off.
+    Bluetooth,
     Battery,
     Brightness,
     /// Unread notifications and do not disturb.
@@ -129,6 +131,7 @@ fn end_buttons(m: &Model) -> Vec<Part> {
 
 /// What the settings button runs, and the app id its window has.
 const SETTINGS_APP: &str = "wayland-time-settings";
+const BLUETOOTH_APP: &str = "wayland-time-bluetooth";
 
 /// One workspace button.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -652,7 +655,13 @@ impl Bar {
                     }
                     centered(&mut canvas, time, r, px, p.text);
                 }
-                Part::Tray(_) | Part::Media | Part::Network | Part::Battery | Part::Brightness | Part::Bell => {
+                Part::Tray(_)
+                | Part::Media
+                | Part::Network
+                | Part::Bluetooth
+                | Part::Battery
+                | Part::Brightness
+                | Part::Bell => {
                     if let Some(item) = m.status.iter().find(|i| i.part == part) {
                         self.paint_status(&mut canvas, text, item, r, hovered, s, m);
                     }
@@ -920,16 +929,22 @@ impl State {
 
     /// Opens the settings app, or brings it forward if it's already open.
     fn open_settings(&mut self) {
+        self.open_app(SETTINGS_APP);
+    }
+
+    /// Opens one of our apps, or brings it forward if it's already open (`app` is both its
+    /// command and its app id).
+    fn open_app(&mut self, app: &str) {
         let open = self
             .monitors
             .iter()
             .flat_map(|m| &m.workspaces)
             .flat_map(|ws| &ws.entries)
-            .find(|e| toplevel_ids(&e.window).0.as_deref() == Some(SETTINGS_APP))
+            .find(|e| toplevel_ids(&e.window).0.as_deref() == Some(app))
             .map(|e| e.window.clone());
         match open {
             Some(w) => self.activate_window(&w),
-            None => self.spawn(SETTINGS_APP),
+            None => self.spawn(app),
         }
     }
 
@@ -1143,6 +1158,23 @@ impl State {
                         },
                     });
                 }
+                Widget::Bluetooth => {
+                    if self.bluetooth.present {
+                        let name = match (self.bluetooth.powered, self.bluetooth.connected) {
+                            (false, _) => "bluetooth-disabled-symbolic",
+                            (true, 0) => "bluetooth-symbolic",
+                            (true, _) => "bluetooth-active-symbolic",
+                        };
+                        out.push(StatusItem {
+                            part: Part::Bluetooth,
+                            w: h,
+                            look: Look::Icon {
+                                name: name.into(),
+                                label: None,
+                            },
+                        });
+                    }
+                }
                 Widget::Battery => {
                     if let Some(b) = self.status.battery {
                         let level = (b.percent as u32 + 5) / 10 * 10;
@@ -1304,6 +1336,8 @@ impl State {
             (Part::Bell, BTN_MIDDLE) => self.clear_notifications(),
             (Part::Layout, BTN_LEFT | BTN_RIGHT) => self.run_action(Action::Layout(LayoutChoice::Next)),
             (Part::Settings, BTN_LEFT) => self.open_settings(),
+            (Part::Bluetooth, BTN_LEFT) => self.open_app(BLUETOOTH_APP),
+            (Part::Bluetooth, BTN_RIGHT) => self.toggle_bluetooth(),
             (Part::Power, BTN_LEFT | BTN_RIGHT) => {
                 let pos = self.seat.get_pointer().unwrap().current_location();
                 self.open_power_menu(mon, pos);
