@@ -108,6 +108,15 @@ pub fn expand(s: &str) -> PathBuf {
     PathBuf::from(wt_config::expand_home(s))
 }
 
+/// Delete a file, or a folder and everything in it.
+pub fn remove(path: &Path) -> std::io::Result<()> {
+    if path.symlink_metadata()?.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
 /// `dir/name`, or `dir/name (2).ext` and so on if that's taken.
 pub fn free_name(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name);

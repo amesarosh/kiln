@@ -15,6 +15,7 @@ use std::{
 
 use wayland_time_files::{
     fs::{self, Entry, Mime, Place, SortBy},
+    trash,
     view::{self, CrumbClick, ICON, Icons, Search, cell_text, clipped_text, paint_image},
 };
 use wt_config::theme::Palette;
@@ -31,7 +32,6 @@ use crate::{
     drives::{self, Drive, Drives},
     open::{self, Apps},
     ops::{self, Job, Kind},
-    trash,
 };
 
 /// What the window shows.

@@ -27,6 +27,7 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **File manager** (`wayland-time-file-manager`, "Files" in the launcher) in the theme's look, built on the file picker: open files in their default app or pick one, copy, cut and paste (in the background, with progress), rename, new folders, a trash that works with other file managers', search, drag and drop with other apps, folders added to the sidebar, and live updates when files change
 - **Bluetooth** (`wayland-time-bluetooth`, and a bar widget: click to open it, right-click to turn Bluetooth on or off): pair (with passkey and PIN prompts), connect, disconnect and forget devices, with battery levels
 - **Sound** (`wayland-time-sound`, and a bar widget showing the volume: click to open it, right-click to mute, scroll to change it): pick the output and microphone, set their volumes, set or mute each app's volume, send an app to another output, and choose sound card profiles
+- **Image viewer** (`wayland-time-image-viewer`, "Image Viewer" in the launcher and the file manager's Open With): flip through a folder's pictures, zoom around the pointer and drag, turn, full screen, and move to the trash with Undo; PNG, JPEG (turned the way the camera says), WebP, GIF and animated GIF/WebP/APNG, BMP, TIFF, ICO, TGA, QOI, PNM and SVG
 - **Password prompt for admin rights** (`wayland-time-polkit`, a polkit agent in the theme's look), started at login, so installing software, mounting disks and `pkexec` can ask for your password
 - **Screen locking** with its own lock screen (`wayland-time-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 - **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
@@ -98,6 +99,9 @@ sudo install -m644 resources/wayland-time-bluetooth.desktop /usr/share/applicati
 # The Sound app, and its launcher entry:
 sudo install -m755 target/release/wayland-time-sound /usr/local/bin/
 sudo install -m644 resources/wayland-time-sound.desktop /usr/share/applications/
+# The image viewer, and its launcher entry (which also offers it for images in Open With):
+sudo install -m755 target/release/wayland-time-image-viewer /usr/local/bin/
+sudo install -m644 resources/wayland-time-image-viewer.desktop /usr/share/applications/
 ```
 
 ## Default keys
@@ -413,6 +417,18 @@ music and call modes). On the bar widget, right-click mutes and scrolling change
 with the same pop-up as the volume keys. It needs PipeWire with WirePlumber: it reads the
 state from `pw-dump` and makes changes with `wpctl` and `pw-metadata`.
 
+### Image viewer
+
+`wayland-time-image-viewer <file>` (or open an image from Files: it's offered under Open With,
+and can be made the default there) shows the picture fitted to the window, never blown up past
+its own size, and the others in its folder in name order. Left/Right (or Space, or the mouse's
+back and forward buttons) flip through them, wrapping round at the ends; scroll or pinch zooms
+around the pointer, `+`/`-` zoom, `0` fits and `1` (or a double-click) shows actual size, and a
+zoomed picture is dragged around. `R`/`Shift+R` turn it (just the view; the file isn't changed),
+`F` or F11 goes full screen, and Delete moves it to the trash, with Undo. The next and previous
+pictures are decoded ahead, so flipping is instant. Animated GIF, WebP and PNG play, see-through
+pictures sit on a checkerboard, and huge ones are scaled to what the graphics card can show.
+
 ### Password prompts for admin rights
 
 When an app needs admin rights (installing software, mounting a disk, `pkexec`), polkit asks
@@ -439,6 +455,7 @@ The repository is a Cargo workspace:
 | `apps/launcher/` | the app launcher (`wayland-time-launcher`) |
 | `apps/files/` | the file picker (`wayland-time-files`): desktop portal FileChooser backend on the session bus, and the egui picker window it runs per request; and the file manager (`wayland-time-file-manager`, in `src/bin/`), sharing its listing, places, icons and drawing (`src/lib.rs`) |
 | `apps/bluetooth/` | the Bluetooth app (`wayland-time-bluetooth`): BlueZ on the system bus, and its pairing agent |
+| `apps/images/` | the image viewer (`wayland-time-image-viewer`): decodes on a worker thread (`image`, `resvg`), uses the file manager's library for the trash |
 | `apps/sound/` | the Sound app (`wayland-time-sound`) |
 | `crates/wt-pipewire/` | sound devices, app streams and volumes from PipeWire (`pw-dump --monitor`), and changing them (`wpctl`, `pw-metadata`): the Sound app and the bar's sound widget |
 | `apps/polkit/` | the password prompt (`wayland-time-polkit`): polkit agent on the system bus, talks to `polkit-agent-helper-1`, drawn with `wt-draw` on a layer surface |

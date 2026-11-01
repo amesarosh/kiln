@@ -141,7 +141,7 @@ fn run(kind: Kind, paths: &[PathBuf], dest: Option<&Path>, ctx: &Ctx) -> Outcome
         let result = match (kind, dest) {
             (Kind::Copy, Some(dest)) => copy_into(path, dest, ctx).map(|p| out.made.push(p)),
             (Kind::Move, Some(dest)) => move_into(path, dest, ctx).map(|p| out.made.extend(p)),
-            (Kind::Trash, _) => crate::trash::trash(path),
+            (Kind::Trash, _) => wayland_time_files::trash::trash(path).map(|_| ()),
             (Kind::Delete, _) => remove(path).map_err(|e| e.to_string()),
             _ => Ok(()),
         };
@@ -261,11 +261,7 @@ fn move_into(src: &Path, dest: &Path, ctx: &Ctx) -> Result<Option<PathBuf>, Stri
 
 /// Delete a file or a whole folder, for good.
 pub fn remove(path: &Path) -> std::io::Result<()> {
-    if path.symlink_metadata()?.is_dir() {
-        std::fs::remove_dir_all(path)
-    } else {
-        std::fs::remove_file(path)
-    }
+    fs::remove(path)
 }
 
 /// Make a new empty folder in `dir`, named "New Folder" (or "New Folder (2)"...).

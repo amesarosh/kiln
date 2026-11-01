@@ -6,7 +6,6 @@ mod dnd;
 mod drives;
 mod open;
 mod ops;
-mod trash;
 
 use std::path::PathBuf;
 

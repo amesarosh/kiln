@@ -12,7 +12,7 @@ use std::{
     time::SystemTime,
 };
 
-use wayland_time_files::fs::{self, Entry};
+use crate::fs::{self, Entry};
 
 /// The home trash folder.
 pub fn home_trash() -> PathBuf {
@@ -22,8 +22,8 @@ pub fn home_trash() -> PathBuf {
         .join("Trash")
 }
 
-/// Move `path` to the trash.
-pub fn trash(path: &Path) -> Result<(), String> {
+/// Move `path` to the trash. Returns where it went (for [`restore_from`]).
+pub fn trash(path: &Path) -> Result<PathBuf, String> {
     let meta = path.symlink_metadata().map_err(|e| e.to_string())?;
     let home = home_trash();
     // The drive the home trash is on (or would be, before it's made).
@@ -84,7 +84,7 @@ pub fn trash(path: &Path) -> Result<(), String> {
             let _ = std::fs::remove_file(&info);
             return Err(e.to_string());
         }
-        return Ok(());
+        return Ok(target);
     }
     unreachable!()
 }
@@ -178,9 +178,19 @@ pub fn restore(item: &Item) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+/// Put back a file just trashed, from where [`trash`] put it (in any drive's trash).
+pub fn restore_from(trashed: &Path, original: &Path) -> Result<PathBuf, String> {
+    let entry = Entry::from_path(trashed.to_path_buf()).ok_or("it's no longer in the trash")?;
+    restore(&Item {
+        entry,
+        original: original.to_path_buf(),
+        deleted: None,
+    })
+}
+
 /// Delete an item for good.
 pub fn delete(item: &Item) -> Result<(), String> {
-    crate::ops::remove(&item.entry.path).map_err(|e| e.to_string())?;
+    fs::remove(&item.entry.path).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(item.info_file());
     Ok(())
 }
