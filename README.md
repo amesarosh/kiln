@@ -102,6 +102,8 @@ sudo install -m644 resources/wayland-time-sound.desktop /usr/share/applications/
 # The image viewer, and its launcher entry (which also offers it for images in Open With):
 sudo install -m755 target/release/wayland-time-image-viewer /usr/local/bin/
 sudo install -m644 resources/wayland-time-image-viewer.desktop /usr/share/applications/
+# Make it the default for images inside a wayland-time session (your own choices still win):
+sudo install -m644 resources/wayland-time-mimeapps.list /usr/share/applications/
 ```
 
 ## Default keys
@@ -129,7 +131,7 @@ sudo install -m644 resources/wayland-time-image-viewer.desktop /usr/share/applic
 | `Mod+Shift+r` | reload config |
 | `Mod+Escape` | lock the screen |
 | `Pause` / `XF86AudioPlay` / `XF86AudioNext` / `XF86AudioPrev` | play/pause / next / previous track in the media player (Spotify, browsers, mpv) |
-| `Print` / `Shift+Print` | screenshot a region to the clipboard / all monitors to a file (grim, slurp, wl-copy) |
+| `Print` / `Shift+Print` | screenshot a region (also copied to the clipboard) / all monitors, saved to `~/Pictures/Screenshots` (grim, slurp, wl-copy) |
 | `Alt+Tab` / `Alt+Shift+Tab` | window switcher: all windows, most recent first; let go of Alt to switch (Escape cancels) |
 | `Mod+v` | pick from clipboard history (cliphist and fuzzel; start `wl-paste --watch cliphist store` in autostart) |
 | `Mod+Shift+e` | quit |
@@ -419,8 +421,12 @@ state from `pw-dump` and makes changes with `wpctl` and `pw-metadata`.
 
 ### Image viewer
 
-`wayland-time-image-viewer <file>` (or open an image from Files: it's offered under Open With,
-and can be made the default there) shows the picture fitted to the window, never blown up past
+It's the default app for images in a wayland-time session (`resources/wayland-time-mimeapps.list`,
+installed to `/usr/share/applications/`). A default you set yourself, in
+`~/.config/mimeapps.list` or with Files' Open With, takes precedence; to pick our viewer over one
+of those just inside wayland-time, copy the list to `~/.config/wayland-time-mimeapps.list`.
+
+`wayland-time-image-viewer <file>` (or open an image from Files) shows the picture fitted to the window, never blown up past
 its own size, and the others in its folder in name order. Left/Right (or Space, or the mouse's
 back and forward buttons) flip through them, wrapping round at the ends; scroll or pinch zooms
 around the pointer, `+`/`-` zoom, `0` fits and `1` (or a double-click) shows actual size, and a

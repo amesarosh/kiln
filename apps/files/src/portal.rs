@@ -11,12 +11,14 @@ use std::{
     process::{Command, Stdio},
     sync::{
         Arc,
-        atomic::{AtomicI32, Ordering},
+        atomic::{AtomicI32, AtomicUsize, Ordering},
     },
 };
 
 use zbus::{
-    ObjectServer, interface,
+    ObjectServer,
+    fdo::{RequestNameFlags, RequestNameReply},
+    interface,
     zvariant::{OwnedObjectPath, OwnedValue, Structure, StructureBuilder, Value},
 };
 
@@ -35,15 +37,49 @@ const FAILED: u32 = 2;
 type Options = HashMap<String, OwnedValue>;
 type Results = HashMap<String, OwnedValue>;
 
-/// Serve the portal until the bus connection goes away.
+/// Pickers open right now. The portal only retires (see `retire_when_replaced`) when it's 0.
+static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+/// Serve the portal until the bus connection goes away, or until a newer version is installed.
 pub fn serve() -> Result<(), Box<dyn std::error::Error>> {
-    let _conn = zbus::blocking::connection::Builder::session()?
-        .name(BUS_NAME)?
+    let conn = zbus::blocking::connection::Builder::session()?
         .serve_at(PATH, FileChooser)?
         .build()?;
+    // Don't wait in line behind a portal that's already running: a second copy would only
+    // pile up.
+    match conn.request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into()) {
+        Ok(RequestNameReply::PrimaryOwner | RequestNameReply::AlreadyOwner) => {}
+        Ok(_) | Err(zbus::Error::NameTaken) => {
+            tracing::info!("{BUS_NAME} is already served, exiting");
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    }
     tracing::info!("serving {BUS_NAME}");
+    retire_when_replaced(&conn);
+    Ok(())
+}
+
+/// D-Bus starts the portal once and it keeps running, so after a reinstall it's still the old
+/// version. Once its program file has been replaced, step aside when no picker is open, so the
+/// next request starts the new one.
+fn retire_when_replaced(conn: &zbus::blocking::Connection) {
+    let replaced = || {
+        std::fs::read_link("/proc/self/exe").is_ok_and(|p| p.to_string_lossy().ends_with(" (deleted)"))
+    };
     loop {
-        std::thread::park();
+        std::thread::sleep(std::time::Duration::from_secs(10));
+        if !replaced() || ACTIVE.load(Ordering::SeqCst) > 0 {
+            continue;
+        }
+        tracing::info!("a newer version was installed, handing over");
+        let _ = conn.release_name(BUS_NAME);
+        // A request may have arrived just before the name went; let it finish.
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        while ACTIVE.load(Ordering::SeqCst) > 0 {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        return;
     }
 }
 
@@ -207,6 +243,7 @@ fn bytes(v: &Value) -> Option<Vec<u8>> {
 
 /// Show the picker for `r` and turn what was picked into the portal's results.
 async fn run(server: &ObjectServer, handle: OwnedObjectPath, r: Request, open: bool) -> (u32, Results) {
+    ACTIVE.fetch_add(1, Ordering::SeqCst);
     let pid = Arc::new(AtomicI32::new(0));
     let registered = server.at(&handle, RequestHandle { pid: pid.clone() }).await.is_ok();
     let (tx, rx) = async_channel::bounded(1);
@@ -216,6 +253,7 @@ async fn run(server: &ObjectServer, handle: OwnedObjectPath, r: Request, open: b
         let _ = tx.send_blocking(pick(&request, &pid_for_thread));
     });
     let outcome = rx.recv().await.unwrap_or(Err("the picker thread died".into()));
+    ACTIVE.fetch_sub(1, Ordering::SeqCst);
     if registered {
         let _ = server.remove::<RequestHandle, _>(&handle).await;
     }
@@ -231,8 +269,10 @@ async fn run(server: &ObjectServer, handle: OwnedObjectPath, r: Request, open: b
 
 /// Run the picker window and wait for it. None if the user cancelled.
 fn pick(r: &Request, pid: &AtomicI32) -> Result<Option<Answer>, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let mut child = Command::new(exe)
+    // This very program, even if it has since been replaced by a reinstall (then the path
+    // `current_exe` gives no longer exists). It's also the picker that speaks our version of
+    // the request format.
+    let mut child = Command::new("/proc/self/exe")
         .arg("--pick")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -89,6 +89,16 @@ struct StatusItem {
     look: Look,
 }
 
+impl StatusItem {
+    /// Shows text as well as an icon, so it gets a full-width row on a side bar.
+    fn has_label(&self) -> bool {
+        matches!(self.look, Look::Media { .. } | Look::Icon { label: Some(_), .. })
+    }
+}
+
+/// How far a side bar's status rows sit in from its edges, like the window rows.
+const SIDE_INSET: i32 = 4;
+
 #[derive(Debug, Clone, PartialEq)]
 enum Look {
     Tray {
@@ -116,9 +126,8 @@ pub struct BarDrag {
     pub moved: bool,
 }
 
-/// The buttons at the end of the bar, in order: left to right on a top or bottom bar, along the
-/// bottom row of a side bar. New buttons go here. `Layout` must stay first: it's the wide one,
-/// and on a side bar it takes whatever room the others leave in their row.
+/// The buttons at the end of the bar, in order: left to right on a top or bottom bar, spread
+/// over the bottom row of a side bar. New buttons go here.
 const END_BUTTONS: [Part; 3] = [Part::Layout, Part::Settings, Part::Power];
 
 /// The end buttons for this bar: the notifications bell, when shown, goes right after the
@@ -384,8 +393,10 @@ impl Bar {
         parts
     }
 
-    /// Top to bottom: workspaces, one row per window, the end buttons in the bottom row
-    /// (wrapping onto more rows above it if they don't fit), and the clock under everything.
+    /// Top to bottom: workspaces, one row per window, then the status block at the bottom: a
+    /// row of small icons (tray, network, Bluetooth; wrapping if there are many), one full-width
+    /// row per widget with a label (media, sound, battery, brightness), the buttons spread over
+    /// one row, and the clock under everything.
     fn layout_vertical(m: &Model) -> Vec<(Rect, Part)> {
         let (w, height) = m.size;
         let row = m.config.height;
@@ -399,50 +410,50 @@ impl Bar {
         }
         y += 4;
 
-        // Status widgets, then the layout, settings and power buttons, packed into rows from
-        // the bottom up. The bottom row takes as many from the end as fit, so a row is only
-        // added above it when there are too many tray icons (or wide widgets) for one.
         let mut bottom = height - row;
         if m.clock.is_some() {
             parts.push((Rect::new(0, bottom, w, row), Part::Clock));
             bottom -= row;
         }
-        let buttons = end_buttons(m);
-        let mut items: Vec<(i32, Part)> = m
+
+        // The status block's rows, top to bottom, as (x, width, part). Inset like the window
+        // rows, so their hover highlights line up.
+        let (x0, inner) = (SIDE_INSET, w - 2 * SIDE_INSET);
+        let mut rows: Vec<Vec<(i32, i32, Part)>> = Vec::new();
+        let icons: Vec<Part> = m
             .status
             .iter()
-            .filter(|i| i.part != Part::Bell)
-            .map(|i| (i.w.min(w), i.part))
+            .filter(|i| i.part != Part::Bell && !i.has_label())
+            .map(|i| i.part)
             .collect();
-        items.extend(buttons.iter().map(|&p| (row, p)));
-        let mut end = items.len();
-        while end > 0 {
-            // Room for this row, but always room for the bottom one with the buttons.
-            if end < items.len() && bottom < y + row {
+        let per_row = (inner / row).max(1) as usize;
+        for chunk in icons.chunks(per_row) {
+            rows.push(chunk.iter().zip(0..).map(|(&p, i)| (x0 + i * row, row, p)).collect());
+        }
+        for item in m.status.iter().filter(|i| i.has_label()) {
+            rows.push(vec![(x0, inner, item.part)]);
+        }
+        let buttons = end_buttons(m);
+        let n = buttons.len() as i32;
+        rows.push(
+            buttons
+                .iter()
+                .zip(0..)
+                .map(|(&p, i)| {
+                    let (a, b) = (x0 + inner * i / n, x0 + inner * (i + 1) / n);
+                    (a, b - a, p)
+                })
+                .collect(),
+        );
+        // From the bottom up: the buttons always, the rest while there's room under the
+        // workspaces.
+        for (k, r) in rows.iter().rev().enumerate() {
+            if k > 0 && bottom < y + row {
                 break;
             }
-            let mut start = end;
-            let mut used = 0;
-            while start > 0 && used + items[start - 1].0 <= w {
-                start -= 1;
-                used += items[start].0;
+            for &(x, iw, part) in r {
+                parts.push((Rect::new(x, bottom, iw, row), part));
             }
-            // Widgets from the left, buttons against the right edge.
-            let mut x = 0;
-            let mut right = w;
-            for &(iw, part) in items[start..end].iter().rev() {
-                if buttons.contains(&part) {
-                    right -= iw;
-                    parts.push((Rect::new(right, bottom, iw, row), part));
-                }
-            }
-            for &(iw, part) in &items[start..end] {
-                if !buttons.contains(&part) {
-                    parts.push((Rect::new(x, bottom, iw, row), part));
-                    x += iw;
-                }
-            }
-            end = start;
             bottom -= row;
         }
         // `bottom` is now the row above the top one used.
@@ -503,6 +514,18 @@ impl Bar {
             } else {
                 let x = (r.x + r.w + 4) * s;
                 canvas.fill_rect(x, bh / 4, s, bh / 2, p.separator);
+            }
+        }
+
+        // And one above a side bar's status block.
+        if vertical {
+            let top = parts
+                .iter()
+                .filter(|(_, p)| !matches!(p, Part::Workspace(_) | Part::Tab(_) | Part::Clock))
+                .map(|(r, _)| r.y)
+                .min();
+            if let Some(y) = top {
+                canvas.fill_rect(8 * s, (y - 4) * s, bw - 16 * s, s, p.separator);
             }
         }
 
@@ -792,7 +815,7 @@ impl Bar {
                 if let Some(icon) = self.symbolic(name, icon_px as u32, tint) {
                     canvas.draw_image(x, iy, icon.size, &icon.rgba);
                 }
-                x += icon_px + 6 * s;
+                x += icon_px + 4 * s;
                 label(canvas, t, x);
             }
             Look::Bell { unread, dnd } => {
@@ -1130,7 +1153,7 @@ impl State {
                             (true, false) => m.title.clone(),
                             _ => m.player.trim_start_matches(crate::dbus::mpris::PREFIX).to_string(),
                         };
-                        let w = (7 + icon + 6 + text_w(&text) + 8).min(MEDIA_MAX_W);
+                        let w = (7 + icon + 4 + text_w(&text) + 8).min(MEDIA_MAX_W);
                         out.push(StatusItem {
                             part: Part::Media,
                             w,
@@ -1644,53 +1667,79 @@ mod tests {
     }
 
     #[test]
-    fn side_bar_packs_widgets_and_buttons_into_one_row() {
+    fn side_bar_groups_icons_labelled_widgets_and_buttons() {
         let bar = Bar::new(&Config::default().bar);
-        let tray = |n: usize| -> Vec<StatusItem> {
-            let mut items: Vec<StatusItem> = (0..n)
-                .map(|i| StatusItem {
-                    part: Part::Tray(i),
-                    w: 28,
-                    look: Look::Bell { unread: false, dnd: false },
-                })
-                .collect();
-            items.push(StatusItem {
+        let icon = |part: Part| StatusItem {
+            part,
+            w: 28,
+            look: Look::Icon {
+                name: "x".into(),
+                label: None,
+            },
+        };
+        let labelled = |part: Part| StatusItem {
+            part,
+            w: 64,
+            look: Look::Icon {
+                name: "x".into(),
+                label: Some("65%".into()),
+            },
+        };
+        let mut m = model((180, 1400), BarPosition::Left, &[], None);
+        m.clock = Some("7:48 AM".into());
+        // Config order mixes them up: tray, media, sound, bluetooth, brightness, bell.
+        m.status = vec![
+            icon(Part::Tray(0)),
+            StatusItem {
+                part: Part::Media,
+                w: 240,
+                look: Look::Media {
+                    text: "Master Boot Record".into(),
+                    playing: true,
+                },
+            },
+            labelled(Part::Sound),
+            icon(Part::Bluetooth),
+            labelled(Part::Brightness),
+            StatusItem {
                 part: Part::Bell,
                 w: 28,
                 look: Look::Bell { unread: false, dnd: false },
-            });
-            items
-        };
-        let rows = |parts: &[(Rect, Part)]| {
-            let mut ys: Vec<i32> = parts
-                .iter()
-                .filter(|(_, p)| matches!(p, Part::Tray(_) | Part::Bell) || END_BUTTONS.contains(p))
-                .map(|(r, _)| r.y)
-                .collect();
-            ys.sort();
-            ys.dedup();
-            ys.len()
-        };
-        // Two tray icons and four buttons (with the bell): 6 x 28 fits in 180.
-        let mut m = model((180, 1400), BarPosition::Left, &[], None);
-        m.status = tray(2);
+            },
+        ];
         let parts = bar.layout(&m);
-        assert_eq!(rows(&parts), 1);
-        // The buttons sit against the right edge.
-        let power = parts.iter().find(|(_, p)| *p == Part::Power).unwrap().0;
-        assert_eq!(power.x + power.w, 180);
-        // One more tray icon needs a second row; the buttons stay on the bottom one.
-        m.status = tray(3);
-        let parts = bar.layout(&m);
-        assert_eq!(rows(&parts), 2);
-        let bottom = parts.iter().map(|(r, _)| r.y).max().unwrap();
-        for b in end_buttons(&m) {
-            assert_eq!(parts.iter().find(|(_, p)| *p == b).unwrap().0.y, bottom);
+        let at = |part: Part| parts.iter().find(|(_, p)| *p == part).unwrap().0;
+        let row = m.config.height;
+        // Clock at the very bottom, the buttons right above it, spread over the whole row.
+        assert_eq!(at(Part::Clock).y, 1400 - row);
+        let buttons = end_buttons(&m);
+        assert_eq!(buttons, [Part::Layout, Part::Bell, Part::Settings, Part::Power]);
+        for b in &buttons {
+            assert_eq!(at(*b).y, 1400 - 2 * row, "{b:?}");
         }
-        // The bell sits right after the layout button.
-        let x = |part: Part| parts.iter().find(|(_, p)| *p == part).unwrap().0.x;
-        assert_eq!(x(Part::Bell), x(Part::Layout) + 28);
-        assert_eq!(x(Part::Settings), x(Part::Bell) + 28);
+        assert_eq!(at(Part::Layout).x, SIDE_INSET);
+        assert_eq!(at(Part::Power).x + at(Part::Power).w, 180 - SIDE_INSET);
+        // Labelled widgets get a full-width row each, in config order, above the buttons.
+        for (k, part) in [Part::Media, Part::Sound, Part::Brightness].into_iter().enumerate() {
+            let r = at(part);
+            assert_eq!((r.x, r.w), (SIDE_INSET, 180 - 2 * SIDE_INSET), "{part:?}");
+            assert_eq!(r.y, 1400 - (5 - k as i32) * row, "{part:?}");
+        }
+        // The icons share the top row, from the left.
+        let (tray, bt) = (at(Part::Tray(0)), at(Part::Bluetooth));
+        assert_eq!((tray.y, bt.y), (1400 - 6 * row, 1400 - 6 * row));
+        assert_eq!((tray.x, bt.x), (SIDE_INSET, SIDE_INSET + row));
+
+        // More icons than fit in a row wrap onto a second one.
+        m.status = (0..8).map(|i| icon(Part::Tray(i))).collect();
+        let parts = bar.layout(&m);
+        let mut ys: Vec<i32> = parts
+            .iter()
+            .filter(|(_, p)| matches!(p, Part::Tray(_)))
+            .map(|(r, _)| r.y)
+            .collect();
+        ys.dedup();
+        assert_eq!(ys.len(), 2);
     }
 
     #[test]
@@ -1759,7 +1808,41 @@ mod tests {
         );
         let mut m = m;
         m.clock = Some(clock_text());
+        let row = size.1.min(m.config.height);
         m.status = vec![
+            StatusItem {
+                part: Part::Tray(0),
+                w: row,
+                look: Look::Tray {
+                    icon_name: "org.qbittorrent.qBittorrent".into(),
+                    theme_path: String::new(),
+                    pixmap: None,
+                },
+            },
+            StatusItem {
+                part: Part::Media,
+                w: 200,
+                look: Look::Media {
+                    text: "Master Boot Record – Internet Protocol".into(),
+                    playing: true,
+                },
+            },
+            StatusItem {
+                part: Part::Sound,
+                w: 64,
+                look: Look::Icon {
+                    name: "audio-volume-medium-symbolic".into(),
+                    label: Some("65%".into()),
+                },
+            },
+            StatusItem {
+                part: Part::Bluetooth,
+                w: row,
+                look: Look::Icon {
+                    name: "bluetooth-active-symbolic".into(),
+                    label: None,
+                },
+            },
             StatusItem {
                 part: Part::Battery,
                 w: 64,
@@ -1770,7 +1853,7 @@ mod tests {
             },
             StatusItem {
                 part: Part::Bell,
-                w: size.1.min(m.config.height),
+                w: row,
                 look: Look::Bell { unread: true, dnd: false },
             },
         ];

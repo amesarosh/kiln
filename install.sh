@@ -60,6 +60,8 @@ sudo install -Dm644 resources/wayland-time-file-manager.desktop "$APPS_DIR/wayla
 sudo install -Dm644 resources/wayland-time-bluetooth.desktop "$APPS_DIR/wayland-time-bluetooth.desktop"
 sudo install -Dm644 resources/wayland-time-sound.desktop "$APPS_DIR/wayland-time-sound.desktop"
 sudo install -Dm644 resources/wayland-time-image-viewer.desktop "$APPS_DIR/wayland-time-image-viewer.desktop"
+# Default apps for a wayland-time session (images open in our viewer).
+sudo install -Dm644 resources/wayland-time-mimeapps.list "$APPS_DIR/wayland-time-mimeapps.list"
 
 commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 dirty="$(git status --porcelain 2>/dev/null | head -1)"
@@ -86,6 +88,7 @@ echo "    $APPS_DIR/wayland-time-file-manager.desktop"
 echo "    $APPS_DIR/wayland-time-bluetooth.desktop"
 echo "    $APPS_DIR/wayland-time-sound.desktop"
 echo "    $APPS_DIR/wayland-time-image-viewer.desktop"
+echo "    $APPS_DIR/wayland-time-mimeapps.list"
 if pgrep -x wayland-time >/dev/null; then
     echo "==> wayland-time is running: log out and back in to use the new version."
 fi

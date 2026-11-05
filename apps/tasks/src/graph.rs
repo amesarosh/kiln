@@ -12,7 +12,7 @@ use wt_ui::{
 pub const HISTORY: usize = 60;
 
 /// A fixed-length series of samples, oldest first.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Series(VecDeque<f32>);
 
 impl Series {

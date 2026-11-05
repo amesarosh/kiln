@@ -5,8 +5,8 @@ use std::{
     collections::HashMap,
     sync::{
         Arc,
+        Mutex,
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver},
     },
     time::{Duration, Instant},
 };
@@ -117,7 +117,7 @@ impl Column {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct History {
     cpu: Series,
     cores: Vec<Series>,
@@ -143,6 +143,16 @@ impl History {
         self.net_rx.push(s.net_rx as f32);
         self.net_tx.push(s.net_tx as f32);
     }
+}
+
+/// What the sampling thread hands to the window. It holds one snapshot, not a queue: while the
+/// window isn't drawn (on another workspace, say) nothing reads it, and a queue would grow
+/// forever. The graph history is kept here so it has no gaps when the window comes back.
+#[derive(Default)]
+struct Latest {
+    /// The newest snapshot, if the window hasn't taken it yet.
+    snap: Option<Snapshot>,
+    history: History,
 }
 
 /// A process the user asked to end that needs a second look first.
@@ -220,7 +230,7 @@ fn icon_names(proc: &Process) -> Vec<String> {
 pub struct TasksApp {
     look: Look,
     page: Page,
-    rx: Receiver<Snapshot>,
+    latest: Arc<Mutex<Latest>>,
     interval: Arc<AtomicU64>,
     snap: Snapshot,
     history: History,
@@ -243,7 +253,8 @@ impl TasksApp {
     pub fn new(cc: &eframe::CreationContext<'_>, page: Page) -> Self {
         let look = Look::new(&cc.egui_ctx, wt_config::Config::default_path());
         let interval = Arc::new(AtomicU64::new(1000));
-        let (tx, rx) = mpsc::channel();
+        let latest = Arc::new(Mutex::new(Latest::default()));
+        let shared = latest.clone();
         let ctx = cc.egui_ctx.clone();
         let every = interval.clone();
         // Reading /proc for every process takes a few milliseconds; keep it off the UI thread.
@@ -257,8 +268,14 @@ impl TasksApp {
                         std::thread::sleep(Duration::from_millis(200));
                         continue;
                     }
-                    if tx.send(sampler.sample()).is_err() {
+                    if Arc::strong_count(&shared) == 1 {
                         return; // the window closed
+                    }
+                    let snap = sampler.sample();
+                    {
+                        let mut l = shared.lock().unwrap_or_else(|e| e.into_inner());
+                        l.history.push(&snap);
+                        l.snap = Some(snap);
                     }
                     ctx.request_repaint();
                     std::thread::sleep(Duration::from_millis(ms));
@@ -269,7 +286,7 @@ impl TasksApp {
         Self {
             look,
             page,
-            rx,
+            latest,
             interval,
             snap: Snapshot::default(),
             history: History::default(),
@@ -865,10 +882,12 @@ impl eframe::App for TasksApp {
         if self.icons.theme != self.look.theme.icon_theme {
             self.icons = ProcessIcons::new(&self.look.theme.icon_theme);
         }
-        // Only the newest sample matters if several arrived since the last frame.
-        while let Ok(snap) = self.rx.try_recv() {
-            self.history.push(&snap);
-            self.snap = snap;
+        {
+            let mut l = self.latest.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(snap) = l.snap.take() {
+                self.snap = snap;
+                self.history = l.history.clone();
+            }
         }
         if self.selected.is_some_and(|pid| self.find(pid).is_none()) {
             self.selected = None;

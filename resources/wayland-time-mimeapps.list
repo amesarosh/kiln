@@ -1,0 +1,20 @@
+# Default apps inside a wayland-time session (XDG_CURRENT_DESKTOP=wayland-time).
+# Your own ~/.config/mimeapps.list, or "Open With" in Files, still overrides these.
+[Default Applications]
+image/png=wayland-time-image-viewer.desktop
+image/apng=wayland-time-image-viewer.desktop
+image/jpeg=wayland-time-image-viewer.desktop
+image/webp=wayland-time-image-viewer.desktop
+image/gif=wayland-time-image-viewer.desktop
+image/bmp=wayland-time-image-viewer.desktop
+image/x-bmp=wayland-time-image-viewer.desktop
+image/tiff=wayland-time-image-viewer.desktop
+image/x-icon=wayland-time-image-viewer.desktop
+image/vnd.microsoft.icon=wayland-time-image-viewer.desktop
+image/x-tga=wayland-time-image-viewer.desktop
+image/x-portable-anymap=wayland-time-image-viewer.desktop
+image/x-portable-bitmap=wayland-time-image-viewer.desktop
+image/x-portable-graymap=wayland-time-image-viewer.desktop
+image/x-portable-pixmap=wayland-time-image-viewer.desktop
+image/qoi=wayland-time-image-viewer.desktop
+image/svg+xml=wayland-time-image-viewer.desktop

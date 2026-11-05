@@ -239,10 +239,10 @@ duration = 220        # milliseconds
 "Ctrl+Shift+Escape" = "spawn wayland-time-tasks"
 # Take your binds back from an app holding every key (a VM, a remote desktop).
 "Mod+Ctrl+Escape" = "toggle-shortcuts-inhibit"
-# Screenshots: pick a region and copy it, or save every monitor to a file
-# (in your Pictures folder). Needs grim, slurp and wl-clipboard.
-"Print" = 'spawn grim -g "$(slurp)" - | wl-copy'
-"Shift+Print" = "spawn grim"
+# Screenshots, saved to ~/Pictures/Screenshots: pick a region (also copied to the
+# clipboard), or take every monitor. Needs grim, slurp and wl-clipboard.
+"Print" = 'spawn d=~/Pictures/Screenshots; mkdir -p "$d" && g=$(slurp) && f="$d/$(date +%Y-%m-%d_%H-%M-%S).png" && grim -g "$g" "$f" && wl-copy < "$f"'
+"Shift+Print" = 'spawn d=~/Pictures/Screenshots; mkdir -p "$d" && grim "$d/$(date +%Y-%m-%d_%H-%M-%S).png"'
 # Clipboard history: pick an old entry and copy it again (see autostart above).
 "Mod+v" = "spawn cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
 # Hold Alt, press Tab to move through your windows, let go to switch.
