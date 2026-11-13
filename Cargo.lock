@@ -1690,7 +1690,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kiln"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bitflags 2.13.2",
  "half",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-bluetooth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-channel",
  "kiln-config",
@@ -1731,7 +1731,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "toml",
@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-draw"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ab_glyph",
  "ab_glyph_rasterizer",
@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-files"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-channel",
  "kiln-config",
@@ -1770,7 +1770,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-icons"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "png 0.18.1",
  "resvg",
@@ -1779,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-image-viewer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "image",
  "kiln-config",
@@ -1792,7 +1792,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-launcher"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kiln-config",
  "kiln-icons",
@@ -1803,7 +1803,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-lock"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kiln-config",
  "kiln-draw",
@@ -1816,7 +1816,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-pipewire"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "tracing",
@@ -1824,7 +1824,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-polkit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-channel",
  "kiln-config",
@@ -1839,7 +1839,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-settings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kiln-config",
  "kiln-ui",
@@ -1851,7 +1851,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-sound"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kiln-config",
  "kiln-icons",
@@ -1863,7 +1863,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-tasks"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "kiln-config",
  "kiln-icons",
@@ -1875,7 +1875,7 @@ dependencies = [
 
 [[package]]
 name = "kiln-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "kiln-config",
