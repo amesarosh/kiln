@@ -303,13 +303,9 @@ impl App {
             .as_ref()
             .map(|f| f.get_fractional_scale(&wl_surface, &self.qh, ()));
         // No output given: the compositor puts it on the monitor in use.
-        let surface = self.layer_shell.create_layer_surface(
-            &self.qh,
-            wl_surface,
-            Layer::Overlay,
-            Some("kiln-polkit"),
-            None,
-        );
+        let surface =
+            self.layer_shell
+                .create_layer_surface(&self.qh, wl_surface, Layer::Overlay, Some("kiln-polkit"), None);
         surface.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
         surface.set_exclusive_zone(-1);
         surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);

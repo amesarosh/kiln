@@ -619,10 +619,7 @@ fn write(path: &Path, snap: &Snapshot) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("toml.tmp");
-    std::fs::write(
-        &tmp,
-        format!("# Written by kiln; restored at the next start.\n{text}"),
-    )?;
+    std::fs::write(&tmp, format!("# Written by kiln; restored at the next start.\n{text}"))?;
     std::fs::rename(tmp, path)
 }
 

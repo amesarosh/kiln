@@ -138,7 +138,10 @@ impl Server {
                 0 => Timeout::Never,
                 t => Timeout::Millis(t as u32),
             },
-            transient: hints.get("transient").and_then(|v| bool::try_from(v.clone()).ok()).unwrap_or(false),
+            transient: hints
+                .get("transient")
+                .and_then(|v| bool::try_from(v.clone()).ok())
+                .unwrap_or(false),
         };
         let _ = self.events.lock().unwrap().send(Event::Notify(n));
         id

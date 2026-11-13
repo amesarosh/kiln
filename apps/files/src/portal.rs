@@ -64,9 +64,7 @@ pub fn serve() -> Result<(), Box<dyn std::error::Error>> {
 /// version. Once its program file has been replaced, step aside when no picker is open, so the
 /// next request starts the new one.
 fn retire_when_replaced(conn: &zbus::blocking::Connection) {
-    let replaced = || {
-        std::fs::read_link("/proc/self/exe").is_ok_and(|p| p.to_string_lossy().ends_with(" (deleted)"))
-    };
+    let replaced = || std::fs::read_link("/proc/self/exe").is_ok_and(|p| p.to_string_lossy().ends_with(" (deleted)"));
     loop {
         std::thread::sleep(std::time::Duration::from_secs(10));
         if !replaced() || ACTIVE.load(Ordering::SeqCst) > 0 {

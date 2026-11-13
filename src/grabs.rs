@@ -332,7 +332,11 @@ impl TileMoveGrab {
         // Rows run across in the vertical layout, so its drop zones are the left and right edges.
         let fx = (location.x - r.x as f64) / r.w.max(1) as f64;
         let fy = (location.y - r.y as f64) / r.h.max(1) as f64;
-        let (f, across) = if ws.layout == LayoutKind::Vertical { (fx, fy) } else { (fy, fx) };
+        let (f, across) = if ws.layout == LayoutKind::Vertical {
+            (fx, fy)
+        } else {
+            (fy, fx)
+        };
         let zone = |f: f64| {
             if f < EDGE_ZONE {
                 Some(false)

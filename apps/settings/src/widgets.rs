@@ -256,14 +256,16 @@ pub fn choice(
         .find(|(v, _)| *v == value.as_str())
         .map_or(value.clone(), |(_, l)| l.to_string());
     let before = value.clone();
-    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt(id)
-        .selected_text(current)
-        .width(ui.available_width())
-        .show_ui(ui, |ui| {
-            for (v, label) in options {
-                ui.selectable_value(value, v.to_string(), *label);
-            }
-        }));
+    kiln_ui::select(ui, |ui| {
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(current)
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                for (v, label) in options {
+                    ui.selectable_value(value, v.to_string(), *label);
+                }
+            })
+    });
     *value != before
 }
 

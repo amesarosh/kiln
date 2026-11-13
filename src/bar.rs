@@ -107,9 +107,18 @@ enum Look {
         pixmap: Option<(i32, i32, Vec<u8>)>,
     },
     /// A symbolic icon, with a short label after it (like "80%").
-    Icon { name: String, label: Option<String> },
-    Media { text: String, playing: bool },
-    Bell { unread: bool, dnd: bool },
+    Icon {
+        name: String,
+        label: Option<String>,
+    },
+    Media {
+        text: String,
+        playing: bool,
+    },
+    Bell {
+        unread: bool,
+        dnd: bool,
+    },
 }
 
 /// Widest the media widget gets, in logical pixels.
@@ -589,7 +598,14 @@ impl Bar {
                             let size = px * 0.9;
                             let baseline = text.centered_baseline(r.y as f32, r.h as f32, size);
                             let right = label_rect.x + label_rect.w;
-                            text.draw(&mut canvas, &ws.name, size, (x as f32, baseline), label_color, (x, right));
+                            text.draw(
+                                &mut canvas,
+                                &ws.name,
+                                size,
+                                (x as f32, baseline),
+                                label_color,
+                                (x, right),
+                            );
                         }
                     } else {
                         centered(&mut canvas, &(i + 1).to_string(), label_rect, px * 0.9, label_color);
@@ -744,7 +760,16 @@ impl Bar {
 
     /// One status widget in its rectangle (already scaled).
     #[allow(clippy::too_many_arguments)]
-    fn paint_status(&self, canvas: &mut Canvas, text: &Text, item: &StatusItem, r: Rect, hovered: bool, s: i32, m: &Model) {
+    fn paint_status(
+        &self,
+        canvas: &mut Canvas,
+        text: &Text,
+        item: &StatusItem,
+        r: Rect,
+        hovered: bool,
+        s: i32,
+        m: &Model,
+    ) {
         let p = &m.config.palette;
         let radius = m.config.radius * s as f32;
         let pill = Rect::new(r.x + 2 * s, r.y + 3 * s, r.w - 4 * s, r.h - 6 * s);
@@ -784,17 +809,29 @@ impl Bar {
                     .flatten();
                 let icon = from_path
                     .and_then(|f| self.icons.borrow_mut().get(&f, size as u32))
-                    .or_else(|| (!icon_name.is_empty()).then(|| self.any_icon(icon_name, size as u32, tint)).flatten())
+                    .or_else(|| {
+                        (!icon_name.is_empty())
+                            .then(|| self.any_icon(icon_name, size as u32, tint))
+                            .flatten()
+                    })
                     .or_else(|| {
                         let (w, h, argb) = pixmap.as_ref()?;
-                        Some(std::rc::Rc::new(kiln_icons::scaled(&argb_to_rgba(argb), *w as u32, *h as u32, size as u32)))
+                        Some(std::rc::Rc::new(kiln_icons::scaled(
+                            &argb_to_rgba(argb),
+                            *w as u32,
+                            *h as u32,
+                            size as u32,
+                        )))
                     });
                 match icon {
                     Some(icon) => canvas.draw_image(x, y, icon.size, &icon.rgba),
                     None => canvas.fill_rounded_rect(x, y, size, size, radius.min(size as f32 / 3.0), p.hover),
                 }
             }
-            Look::Icon { name, label: text_label } => {
+            Look::Icon {
+                name,
+                label: text_label,
+            } => {
                 let icon = self.symbolic(name, icon_px as u32, tint);
                 match (text_label, icon) {
                     (None, Some(icon)) => canvas.draw_image(r.x + (r.w - icon_px) / 2, iy, icon.size, &icon.rgba),
@@ -810,7 +847,11 @@ impl Bar {
                 }
             }
             Look::Media { text: t, playing } => {
-                let name = if *playing { "media-playback-pause-symbolic" } else { "media-playback-start-symbolic" };
+                let name = if *playing {
+                    "media-playback-pause-symbolic"
+                } else {
+                    "media-playback-start-symbolic"
+                };
                 let mut x = r.x + 7 * s;
                 if let Some(icon) = self.symbolic(name, icon_px as u32, tint) {
                     canvas.draw_image(x, iy, icon.size, &icon.rgba);
@@ -819,7 +860,11 @@ impl Bar {
                 label(canvas, t, x);
             }
             Look::Bell { unread, dnd } => {
-                let name = if *dnd { "notifications-disabled-symbolic" } else { "preferences-system-notifications-symbolic" };
+                let name = if *dnd {
+                    "notifications-disabled-symbolic"
+                } else {
+                    "preferences-system-notifications-symbolic"
+                };
                 let (x, y) = (r.x + (r.w - icon_px) / 2, iy);
                 if let Some(icon) = self.symbolic(name, icon_px as u32, tint) {
                     canvas.draw_image(x, y, icon.size, &icon.rgba);
@@ -1065,11 +1110,9 @@ impl State {
                         app_id.filter(|a| !a.is_empty()).or(title).unwrap_or_default()
                     })
                     .collect(),
-                name_w: self
-                    .bar
-                    .text
-                    .as_ref()
-                    .map_or(0, |t| t.width(&w.label.name, self.config.bar.font_size * 0.9).ceil() as i32),
+                name_w: self.bar.text.as_ref().map_or(0, |t| {
+                    t.width(&w.label.name, self.config.bar.font_size * 0.9).ceil() as i32
+                }),
                 name: w.label.name.clone(),
                 icon: w.label.icon.clone(),
             })
@@ -1276,7 +1319,9 @@ impl State {
     /// The focused monitor's bar parts as "Part x y w h" in global coordinates, for tests.
     pub fn bar_parts_debug(&self) -> Vec<String> {
         let mon = self.active_mon;
-        let Some(rect) = self.bar_rect(mon) else { return Vec::new() };
+        let Some(rect) = self.bar_rect(mon) else {
+            return Vec::new();
+        };
         let model = self.bar_model(mon, (rect.size.w, rect.size.h), 1);
         self.bar
             .layout(&model)
@@ -1353,7 +1398,9 @@ impl State {
                 }
             }
             (Part::Tray(i), _) => {
-                let Some(item) = self.bus.tray.get(i).cloned() else { return };
+                let Some(item) = self.bus.tray.get(i).cloned() else {
+                    return;
+                };
                 let pos = self.seat.get_pointer().unwrap().current_location();
                 let (x, y) = (pos.x as i32, pos.y as i32);
                 let menu = item.has_menu && (button == BTN_RIGHT || (button == BTN_LEFT && item.item_is_menu));
@@ -1366,7 +1413,9 @@ impl State {
                     self.bus_command(crate::dbus::Command::TraySecondary { item: item.id, x, y });
                 }
             }
-            (Part::Media, BTN_LEFT) => self.bus_command(crate::dbus::Command::Media(crate::dbus::mpris::MediaCommand::PlayPause)),
+            (Part::Media, BTN_LEFT) => {
+                self.bus_command(crate::dbus::Command::Media(crate::dbus::mpris::MediaCommand::PlayPause))
+            }
             (Part::Media, BTN_MIDDLE | BTN_RIGHT) => {
                 self.bus_command(crate::dbus::Command::Media(crate::dbus::mpris::MediaCommand::Next))
             }
@@ -1523,7 +1572,10 @@ impl State {
                         && let Some(item) = self.bus.tray.get(i)
                     {
                         let item = item.id.clone();
-                        self.bus_command(Command::TrayScroll { item, delta: steps * 120 });
+                        self.bus_command(Command::TrayScroll {
+                            item,
+                            delta: steps * 120,
+                        });
                     }
                     return true;
                 }
@@ -1704,7 +1756,10 @@ mod tests {
             StatusItem {
                 part: Part::Bell,
                 w: 28,
-                look: Look::Bell { unread: false, dnd: false },
+                look: Look::Bell {
+                    unread: false,
+                    dnd: false,
+                },
             },
         ];
         let parts = bar.layout(&m);
@@ -1749,7 +1804,10 @@ mod tests {
         m.status = vec![StatusItem {
             part: Part::Bell,
             w: 28,
-            look: Look::Bell { unread: false, dnd: false },
+            look: Look::Bell {
+                unread: false,
+                dnd: false,
+            },
         }];
         let parts = bar.layout(&m);
         let x = |part: Part| parts.iter().find(|(_, p)| *p == part).unwrap().0;
@@ -1854,7 +1912,10 @@ mod tests {
             StatusItem {
                 part: Part::Bell,
                 w: row,
-                look: Look::Bell { unread: true, dnd: false },
+                look: Look::Bell {
+                    unread: true,
+                    dnd: false,
+                },
             },
         ];
         // Two named workspaces, one with an icon too.

@@ -188,7 +188,12 @@ pub const APPEARANCE: &[Section] = &[
         title: "Wallpaper",
         note: "A monitor can have its own: wallpaper under [[outputs]] in the config file.",
         fields: &[
-            f(&["theme", "wallpaper"], "Wallpaper", "PNG, JPEG or WebP.", Kind::Wallpaper),
+            f(
+                &["theme", "wallpaper"],
+                "Wallpaper",
+                "PNG, JPEG or WebP.",
+                Kind::Wallpaper,
+            ),
             f(
                 &["theme", "wallpaper_fit"],
                 "Fit",
@@ -227,11 +232,7 @@ pub const APPEARANCE: &[Section] = &[
                 &["animations", "workspace"],
                 "Switching workspace",
                 "",
-                Kind::Choice(&[
-                    ("slide", "Slide"),
-                    ("fade", "Fade"),
-                    ("none", "No animation"),
-                ]),
+                Kind::Choice(&[("slide", "Slide"), ("fade", "Fade"), ("none", "No animation")]),
             ),
             f(
                 &["animations", "direction"],
@@ -239,7 +240,12 @@ pub const APPEARANCE: &[Section] = &[
                 "A higher-numbered workspace comes in from below, or from the right.",
                 Kind::Choice(&[("vertical", "Vertical"), ("horizontal", "Horizontal")]),
             ),
-            f(&["animations", "duration"], "Speed", "How long an animation takes.", Kind::Int(50, 1000, "ms")),
+            f(
+                &["animations", "duration"],
+                "Speed",
+                "How long an animation takes.",
+                Kind::Int(50, 1000, "ms"),
+            ),
         ],
     },
 ];
@@ -363,7 +369,12 @@ pub const NOTIFICATIONS: &[Section] = &[Section {
             "When the app doesn't say. Urgent ones stay until dismissed.",
             Kind::Int(1, 60, "s"),
         ),
-        f(&["notifications", "max_visible"], "Most at once", "", Kind::Int(1, 10, "")),
+        f(
+            &["notifications", "max_visible"],
+            "Most at once",
+            "",
+            Kind::Int(1, 10, ""),
+        ),
     ],
 }];
 
@@ -465,9 +476,18 @@ pub const SESSION: &[Section] = &[Section {
 
 /// Every section, for searching.
 pub fn all() -> impl Iterator<Item = &'static Section> {
-    [GENERAL, APPEARANCE, LAYOUT, BAR, NOTIFICATIONS, KEYBOARD, INPUT, SESSION]
-        .into_iter()
-        .flatten()
+    [
+        GENERAL,
+        APPEARANCE,
+        LAYOUT,
+        BAR,
+        NOTIFICATIONS,
+        KEYBOARD,
+        INPUT,
+        SESSION,
+    ]
+    .into_iter()
+    .flatten()
 }
 
 pub fn matches(field: &Field, query: &str) -> bool {
@@ -657,24 +677,29 @@ fn font_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool {
     let before = value.clone();
     let id = ui.id().with("font-filter");
     let mut filter: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
-    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt("font")
-        .selected_text(value.as_str())
-        .width(ui.available_width())
-        .height(320.0)
-        .show_ui(ui, |ui| {
-            ui.add(kiln_ui::field(ui, egui::TextEdit::singleline(&mut filter).hint_text("Search fonts")))
+    kiln_ui::select(ui, |ui| {
+        egui::ComboBox::from_id_salt("font")
+            .selected_text(value.as_str())
+            .width(ui.available_width())
+            .height(320.0)
+            .show_ui(ui, |ui| {
+                ui.add(kiln_ui::field(
+                    ui,
+                    egui::TextEdit::singleline(&mut filter).hint_text("Search fonts"),
+                ))
                 .request_focus();
-            let q = filter.to_lowercase();
-            for family in ["sans", "serif", "monospace"]
-                .iter()
-                .map(|s| s.to_string())
-                .chain(cache.fonts().iter().cloned())
-            {
-                if q.is_empty() || family.to_lowercase().contains(&q) {
-                    ui.selectable_value(value, family.clone(), family.as_str());
+                let q = filter.to_lowercase();
+                for family in ["sans", "serif", "monospace"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .chain(cache.fonts().iter().cloned())
+                {
+                    if q.is_empty() || family.to_lowercase().contains(&q) {
+                        ui.selectable_value(value, family.clone(), family.as_str());
+                    }
                 }
-            }
-        }));
+            })
+    });
     ui.data_mut(|d| d.insert_temp(id, filter));
     *value != before
 }
@@ -692,34 +717,41 @@ fn wallpaper_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool 
             .file_name()
             .map_or(value.clone(), |n| n.to_string_lossy().into_owned())
     };
-    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt("wallpaper")
-        .selected_text(shown)
-        .width(ui.available_width())
-        .height(360.0)
-        .show_ui(ui, |ui| {
-            ui.add(kiln_ui::field(ui, egui::TextEdit::singleline(&mut filter).hint_text("Search, or type a file's path")))
+    kiln_ui::select(ui, |ui| {
+        egui::ComboBox::from_id_salt("wallpaper")
+            .selected_text(shown)
+            .width(ui.available_width())
+            .height(360.0)
+            .show_ui(ui, |ui| {
+                ui.add(kiln_ui::field(
+                    ui,
+                    egui::TextEdit::singleline(&mut filter).hint_text("Search, or type a file's path"),
+                ))
                 .request_focus();
-            let typed = filter.trim();
-            if (typed.starts_with('/') || typed.starts_with('~'))
-                && std::path::Path::new(&kiln_config::expand_home(typed)).is_file()
-            {
-                ui.selectable_value(value, typed.to_string(), format!("Use {typed}"));
-            }
-            ui.selectable_value(value, String::new(), "None");
-            let q = typed.to_lowercase();
-            for (path, label) in cache.wallpapers() {
-                if q.is_empty() || label.to_lowercase().contains(&q) {
-                    ui.selectable_value(value, path.clone(), label.as_str())
-                        .on_hover_text(path.as_str());
+                let typed = filter.trim();
+                if (typed.starts_with('/') || typed.starts_with('~'))
+                    && std::path::Path::new(&kiln_config::expand_home(typed)).is_file()
+                {
+                    ui.selectable_value(value, typed.to_string(), format!("Use {typed}"));
                 }
-            }
-        }));
+                ui.selectable_value(value, String::new(), "None");
+                let q = typed.to_lowercase();
+                for (path, label) in cache.wallpapers() {
+                    if q.is_empty() || label.to_lowercase().contains(&q) {
+                        ui.selectable_value(value, path.clone(), label.as_str())
+                            .on_hover_text(path.as_str());
+                    }
+                }
+            })
+    });
     ui.data_mut(|d| d.insert_temp(id, filter));
     *value != before
 }
 
 /// The times offered for `Kind::Seconds` settings, 0 being "Never".
-const SECONDS_CHOICES: &[i64] = &[60, 120, 180, 300, 600, 900, 1200, 1800, 2700, 3600, 5400, 7200, 10800, 14400, 18000, 21600, 0];
+const SECONDS_CHOICES: &[i64] = &[
+    60, 120, 180, 300, 600, 900, 1200, 1800, 2700, 3600, 5400, 7200, 10800, 14400, 18000, 21600, 0,
+];
 
 /// "10 min", "1 h 30 min", "45 s".
 fn duration(s: i64) -> String {

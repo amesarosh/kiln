@@ -8,11 +8,11 @@
 
 use std::path::{Path, PathBuf};
 
+use kiln_config::theme::Palette;
 use kiln_files::{
     fs::{self, Entry, Mime, Place, SortBy},
     view::{self, CrumbClick, ICON, Icons, Search, cell_text, clipped_text, paint_image},
 };
-use kiln_config::theme::Palette;
 use kiln_ui::{
     Look, color, eframe,
     egui::{self, Align, Color32, Key, Layout, Margin, Rect, RichText, Sense, TextStyle, Ui, pos2, vec2},
@@ -545,15 +545,22 @@ impl Picker {
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             for (i, place) in self.places.iter().enumerate() {
                 // A line before the drives and the computer.
-                if i > 0
-                    && place.icon.starts_with("drive")
-                    && !self.places[i - 1].icon.starts_with("drive")
-                {
+                if i > 0 && place.icon.starts_with("drive") && !self.places[i - 1].icon.starts_with("drive") {
                     view::sidebar_divider(ui, p);
                 }
                 let tip = place.path.as_ref().map(|d| d.display().to_string());
                 let current = self.dir == place.path;
-                if view::place_row(ui, p, &mut self.icons, &place.label, place.icon, current, tip.as_deref()).clicked() {
+                if view::place_row(
+                    ui,
+                    p,
+                    &mut self.icons,
+                    &place.label,
+                    place.icon,
+                    current,
+                    tip.as_deref(),
+                )
+                .clicked()
+                {
                     go = Some(place.path.clone());
                 }
             }
@@ -573,8 +580,15 @@ impl Picker {
             if view::icon_button(ui, p, icons, "go-previous-symbolic", "Back (Alt+Left)", can_back).clicked() {
                 self.go_back();
             }
-            if view::icon_button(ui, p, &mut self.icons, "go-next-symbolic", "Forward (Alt+Right)", can_forward)
-                .clicked()
+            if view::icon_button(
+                ui,
+                p,
+                &mut self.icons,
+                "go-next-symbolic",
+                "Forward (Alt+Right)",
+                can_forward,
+            )
+            .clicked()
             {
                 self.go_forward();
             }
@@ -672,7 +686,14 @@ impl Picker {
             (SortBy::Size, "Size", size_w, true),
             (SortBy::Modified, "Modified", date_w, true),
         ];
-        if view::sort_header(ui, p, &columns, &mut self.sort, &mut self.descending, self.dir.is_none()) {
+        if view::sort_header(
+            ui,
+            p,
+            &columns,
+            &mut self.sort,
+            &mut self.descending,
+            self.dir.is_none(),
+        ) {
             self.refresh();
         }
 
@@ -860,14 +881,16 @@ impl Picker {
                     .map_or("All files", |f| f.name.as_str())
                     .to_string();
                 let mut pick = self.filter;
-                kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt("filter")
-                    .selected_text(current)
-                    .width(180.0)
-                    .show_ui(ui, |ui| {
-                        for (i, f) in self.req.filters.iter().enumerate() {
-                            ui.selectable_value(&mut pick, Some(i), f.name.as_str());
-                        }
-                    }));
+                kiln_ui::select(ui, |ui| {
+                    egui::ComboBox::from_id_salt("filter")
+                        .selected_text(current)
+                        .width(180.0)
+                        .show_ui(ui, |ui| {
+                            for (i, f) in self.req.filters.iter().enumerate() {
+                                ui.selectable_value(&mut pick, Some(i), f.name.as_str());
+                            }
+                        })
+                });
                 if pick != self.filter {
                     self.filter = pick;
                     self.refresh();
@@ -891,13 +914,15 @@ impl Picker {
                         .iter()
                         .find(|(id, _)| id == value)
                         .map_or(value.clone(), |(_, l)| l.clone());
-                    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt(("choice", i))
-                        .selected_text(current)
-                        .show_ui(ui, |ui| {
-                            for (id, label) in &c.options {
-                                ui.selectable_value(value, id.clone(), label.as_str());
-                            }
-                        }));
+                    kiln_ui::select(ui, |ui| {
+                        egui::ComboBox::from_id_salt(("choice", i))
+                            .selected_text(current)
+                            .show_ui(ui, |ui| {
+                                for (id, label) in &c.options {
+                                    ui.selectable_value(value, id.clone(), label.as_str());
+                                }
+                            })
+                    });
                 }
             }
 

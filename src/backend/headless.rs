@@ -8,10 +8,7 @@ use std::time::Duration;
 
 use smithay::{
     backend::{
-        allocator::{
-            Fourcc,
-            gbm::GbmDevice,
-        },
+        allocator::{Fourcc, gbm::GbmDevice},
         egl::{EGLContext, EGLDisplay},
         renderer::{
             Bind, ImportDma, Offscreen,
@@ -110,7 +107,9 @@ fn open_renderer() -> Result<(GlesRenderer, Option<u64>), Box<dyn std::error::Er
 
 pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<(), Box<dyn std::error::Error>> {
     let (mut renderer, dev_id) = open_renderer()?;
-    state.shm_state.update_formats(smithay::backend::renderer::ImportMemWl::shm_formats(&renderer));
+    state
+        .shm_state
+        .update_formats(smithay::backend::renderer::ImportMemWl::shm_formats(&renderer));
     if let Some(dev) = dev_id
         && let Ok(feedback) = DmabufFeedbackBuilder::new(dev, renderer.dmabuf_formats()).build()
     {

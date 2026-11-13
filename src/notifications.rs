@@ -141,7 +141,11 @@ fn wrap(text: &Text, s: &str, px: f32, max: f32) -> Vec<String> {
     for para in s.lines() {
         let mut line = String::new();
         for word in para.split_whitespace() {
-            let candidate = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+            let candidate = if line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{line} {word}")
+            };
             if text.width(&candidate, px) <= max {
                 line = candidate;
                 continue;
@@ -259,7 +263,10 @@ impl State {
                 .map(|e| e.window.clone())
                 .find(|w| {
                     let app = toplevel_ids(w).0.unwrap_or_default().to_lowercase();
-                    !app.is_empty() && names.iter().any(|n| !n.is_empty() && (app == *n || app.ends_with(&format!(".{n}"))))
+                    !app.is_empty()
+                        && names
+                            .iter()
+                            .any(|n| !n.is_empty() && (app == *n || app.ends_with(&format!(".{n}"))))
                 });
             if let Some(w) = window {
                 self.activate_window(&w);
@@ -367,7 +374,9 @@ impl State {
         if self.is_locked() {
             return Vec::new();
         }
-        let Some((_, text)) = &self.ui_text else { return Vec::new() };
+        let Some((_, text)) = &self.ui_text else {
+            return Vec::new();
+        };
         let Some(area) = self.work_area(self.active_mon) else {
             return Vec::new();
         };
@@ -379,7 +388,11 @@ impl State {
         } else {
             area.loc.x + MARGIN
         };
-        let mut y = if top { area.loc.y + MARGIN } else { area.loc.y + area.size.h - MARGIN };
+        let mut y = if top {
+            area.loc.y + MARGIN
+        } else {
+            area.loc.y + area.size.h - MARGIN
+        };
         let mut out = Vec::new();
         let showing = self.notifications.items.iter().filter(|i| i.popup.is_some());
         for item in showing.take(self.config.notifications.max_visible) {
@@ -446,7 +459,9 @@ impl State {
         if self.output().as_ref() != Some(output) {
             return Vec::new();
         }
-        let Some((_, text)) = &self.ui_text else { return Vec::new() };
+        let Some((_, text)) = &self.ui_text else {
+            return Vec::new();
+        };
         let scale = scale.max(1);
         let mut out = Vec::new();
         for (id, rect) in self.popup_rects() {
@@ -485,9 +500,17 @@ impl State {
         let (w, h) = (l.size.0 * s, l.size.1 * s);
         let radius = theme.radius * s as f32;
         let mut canvas = Canvas::new(w, h, [0.0; 4]);
-        let edge = if n.urgency == Urgency::Critical { p.urgent } else { p.separator };
+        let edge = if n.urgency == Urgency::Critical {
+            p.urgent
+        } else {
+            p.separator
+        };
         canvas.fill_rounded_rect(0, 0, w, h, radius + s as f32, edge);
-        let body = if hover == Some(Hover::Body) { p.raised } else { p.surface };
+        let body = if hover == Some(Hover::Body) {
+            p.raised
+        } else {
+            p.surface
+        };
         canvas.fill_rounded_rect(s, s, w - 2 * s, h - 2 * s, radius, body);
 
         // The picture: the notification's own, else the app's icon.
@@ -524,13 +547,24 @@ impl State {
 
         for (r, i) in &l.buttons {
             let r = Rect::new(r.x * s, r.y * s, r.w * s, r.h * s);
-            let fill = if hover == Some(Hover::Action(*i)) { p.hover } else { p.raised };
+            let fill = if hover == Some(Hover::Action(*i)) {
+                p.hover
+            } else {
+                p.raised
+            };
             canvas.fill_rounded_rect(r.x, r.y, r.w, r.h, (radius - 2.0 * s as f32).max(2.0), fill);
             let label = text.fit(&n.actions[*i].1, l.sizes.2 * s as f32, (r.w - 8 * s) as f32);
             let tw = text.width(&label, l.sizes.2 * s as f32);
             let tx = r.x as f32 + (r.w as f32 - tw) / 2.0;
             let baseline = text.centered_baseline(r.y as f32, r.h as f32, l.sizes.2 * s as f32);
-            text.draw(&mut canvas, &label, l.sizes.2 * s as f32, (tx, baseline), p.text, (r.x, r.x + r.w));
+            text.draw(
+                &mut canvas,
+                &label,
+                l.sizes.2 * s as f32,
+                (tx, baseline),
+                p.text,
+                (r.x, r.x + r.w),
+            );
         }
         canvas
     }
@@ -563,7 +597,11 @@ mod tests {
         let Some(text) = Text::load("sans") else { return };
         let theme = crate::config::Config::default().theme;
         let short = layout(&text, &theme, &note("Hi", "", &[]));
-        let long = layout(&text, &theme, &note("Hi", &"word ".repeat(80), &[("reply", "Reply"), ("default", "")]));
+        let long = layout(
+            &text,
+            &theme,
+            &note("Hi", &"word ".repeat(80), &[("reply", "Reply"), ("default", "")]),
+        );
         assert!(long.size.1 > short.size.1);
         assert_eq!(long.body.len(), MAX_BODY_LINES);
         // Only the non-default action gets a button.

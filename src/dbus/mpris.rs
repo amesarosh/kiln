@@ -42,7 +42,12 @@ impl Players {
     pub fn refresh(&mut self, conn: &Connection) -> Option<Option<Media>> {
         let names: Vec<String> = zbus::blocking::fdo::DBusProxy::new(conn)
             .and_then(|p| p.list_names().map_err(zbus::Error::from))
-            .map(|n| n.into_iter().map(|n| n.to_string()).filter(|n| n.starts_with(PREFIX)).collect())
+            .map(|n| {
+                n.into_iter()
+                    .map(|n| n.to_string())
+                    .filter(|n| n.starts_with(PREFIX))
+                    .collect()
+            })
             .unwrap_or_default();
         let mut found: Vec<Media> = names.iter().filter_map(|n| read(conn, n)).collect();
         // Browsers register one player per tab; ones with nothing loaded have no title.
@@ -99,7 +104,12 @@ fn read(conn: &Connection, name: &str) -> Option<Media> {
     if status == "Stopped" {
         return None;
     }
-    let flag = |k: &str| props.get(k).and_then(|v| bool::try_from(v.clone()).ok()).unwrap_or(false);
+    let flag = |k: &str| {
+        props
+            .get(k)
+            .and_then(|v| bool::try_from(v.clone()).ok())
+            .unwrap_or(false)
+    };
     let meta: HashMap<String, OwnedValue> = props
         .get("Metadata")
         .and_then(|v| HashMap::<String, OwnedValue>::try_from(v.clone()).ok())

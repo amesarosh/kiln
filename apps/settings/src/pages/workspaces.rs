@@ -1,8 +1,8 @@
 //! Names and icons for workspaces, shown on the bar instead of their numbers.
 
-use toml_edit::{Item, Value};
 use kiln_config::theme::Palette;
 use kiln_ui::egui::{self, Ui};
+use toml_edit::{Item, Value};
 
 use crate::{doc::ConfigDoc, widgets};
 
@@ -58,7 +58,9 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc) {
 
 /// Set or clear one field of a workspace's label, dropping tables that end up empty.
 fn set_label(doc: &mut ConfigDoc, key: &str, field: &str, value: &str) {
-    let Some(table) = doc.table_mut(&["workspaces"]) else { return };
+    let Some(table) = doc.table_mut(&["workspaces"]) else {
+        return;
+    };
     let entry = table
         .entry(key)
         .or_insert_with(|| Item::Value(Value::InlineTable(Default::default())));

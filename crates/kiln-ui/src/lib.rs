@@ -204,7 +204,11 @@ fn fonts(name: &str) -> FontDefinitions {
     if let Some(data) = bold_file {
         let mut font = FontData::from_owned(data);
         // A variable font is the same file for every weight; pick semi-bold on its weight axis.
-        if let Some(axis) = font.variation_axes().into_iter().find(|a| a.tag.to_be_bytes() == *b"wght") {
+        if let Some(axis) = font
+            .variation_axes()
+            .into_iter()
+            .find(|a| a.tag.to_be_bytes() == *b"wght")
+        {
             font.tweak.coords = egui::epaint::text::VariationCoords::new([(*b"wght", axis.range.clamp(600.0))]);
         }
         defs.font_data.insert("theme-bold".into(), Arc::new(font));

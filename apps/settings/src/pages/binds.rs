@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 
-use toml_edit::{Item, Key, Table};
 use kiln_config::{ACTIONS, check_bind, parse_combo, theme::Palette};
 use kiln_ui::{
     color,
     egui::{self, Align, Layout, RichText, Ui},
 };
+use toml_edit::{Item, Key, Table};
 
 use crate::{doc::ConfigDoc, widgets};
 
@@ -202,20 +202,22 @@ fn action_editor(ui: &mut Ui, id: &str, action: &mut String) -> bool {
     let mut new_name = name.clone();
     let mut new_arg = arg.clone();
     let known = ACTIONS.iter().find(|(n, _, _)| *n == name);
-    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt(("action", id))
-        .selected_text(if name.is_empty() {
-            "Pick an action"
-        } else {
-            name.as_str()
-        })
-        .width(170.0)
-        .height(400.0)
-        .show_ui(ui, |ui| {
-            for (n, _, help) in ACTIONS {
-                ui.selectable_value(&mut new_name, n.to_string(), *n)
-                    .on_hover_text(*help);
-            }
-        }));
+    kiln_ui::select(ui, |ui| {
+        egui::ComboBox::from_id_salt(("action", id))
+            .selected_text(if name.is_empty() {
+                "Pick an action"
+            } else {
+                name.as_str()
+            })
+            .width(170.0)
+            .height(400.0)
+            .show_ui(ui, |ui| {
+                for (n, _, help) in ACTIONS {
+                    ui.selectable_value(&mut new_name, n.to_string(), *n)
+                        .on_hover_text(*help);
+                }
+            })
+    });
     let hint = known.map_or("", |(_, a, _)| *a);
     if !hint.is_empty() || !arg.is_empty() {
         ui.add(widgets::padded(

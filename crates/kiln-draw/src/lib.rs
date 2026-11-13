@@ -476,7 +476,12 @@ impl Canvas {
                 }
                 let c = self.px[(row * self.w + col) as usize];
                 let at = dy as usize * stride + dx as usize * 4;
-                dst[at..at + 4].copy_from_slice(&[to_u8(c[2] * c[3]), to_u8(c[1] * c[3]), to_u8(c[0] * c[3]), to_u8(c[3])]);
+                dst[at..at + 4].copy_from_slice(&[
+                    to_u8(c[2] * c[3]),
+                    to_u8(c[1] * c[3]),
+                    to_u8(c[0] * c[3]),
+                    to_u8(c[3]),
+                ]);
             }
         }
     }

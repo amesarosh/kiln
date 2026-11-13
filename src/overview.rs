@@ -160,7 +160,10 @@ impl State {
     pub fn toggle_overview(&mut self) {
         match &self.overview {
             Some(o) if o.closing.is_none() => {
-                let target = (self.active_mon, self.monitors.get(self.active_mon).map_or(0, |m| m.active_ws));
+                let target = (
+                    self.active_mon,
+                    self.monitors.get(self.active_mon).map_or(0, |m| m.active_ws),
+                );
                 self.close_overview(target);
             }
             Some(_) => {}
@@ -189,7 +192,8 @@ impl State {
             hover_ids: [Id::new(), Id::new(), Id::new(), Id::new()],
         });
         // Apps don't get keys while it's open; it takes them.
-        self.keyboard().set_focus(self, None, smithay::utils::SERIAL_COUNTER.next_serial());
+        self.keyboard()
+            .set_focus(self, None, smithay::utils::SERIAL_COUNTER.next_serial());
         self.cursor_status = smithay::input::pointer::CursorImageStatus::default_named();
         self.keep_animating(duration);
         let pos = self.seat.get_pointer().unwrap().current_location();
@@ -224,7 +228,11 @@ impl State {
 
     /// Called every frame while it animates: forget it once it has closed.
     pub fn overview_tick(&mut self) {
-        if self.overview.as_ref().is_some_and(|o| o.finished_closing(Instant::now())) {
+        if self
+            .overview
+            .as_ref()
+            .is_some_and(|o| o.finished_closing(Instant::now()))
+        {
             self.overview = None;
             self.refocus();
             self.refresh_pointer_focus();
@@ -244,11 +252,15 @@ impl State {
 
     /// The cards of monitor `mon`, as they sit when the overview is fully open.
     pub fn overview_cards(&self, mon: usize) -> Vec<Card> {
-        let Some(m) = self.monitors.get(mon) else { return Vec::new() };
+        let Some(m) = self.monitors.get(mon) else {
+            return Vec::new();
+        };
         let Some(geo) = self.space.output_geometry(&m.output) else {
             return Vec::new();
         };
-        let Some(area) = self.work_area(mon) else { return Vec::new() };
+        let Some(area) = self.work_area(mon) else {
+            return Vec::new();
+        };
         let n = m.workspaces.len().max(1);
         let cols = (n as f64).sqrt().ceil() as usize;
         let rows = n.div_ceil(cols);
@@ -304,7 +316,9 @@ impl State {
         if let Some(fs) = &ws.fullscreen {
             return vec![(fs.clone(), geo.to_f64())];
         }
-        let Some(area) = self.work_area(mon) else { return Vec::new() };
+        let Some(area) = self.work_area(mon) else {
+            return Vec::new();
+        };
         let border = self.config.decoration.border_width;
         let mut params = crate::layout::params(&self.config);
         params.master_ratio = ws.master_ratio;
@@ -323,11 +337,17 @@ impl State {
                 continue;
             }
             let r = r.inset(border);
-            out.push(((*w).clone(), Rectangle::new((r.x as f64, r.y as f64).into(), (r.w as f64, r.h as f64).into())));
+            out.push((
+                (*w).clone(),
+                Rectangle::new((r.x as f64, r.y as f64).into(), (r.w as f64, r.h as f64).into()),
+            ));
         }
         for (w, r) in ws.floating() {
             if r.w > 0 {
-                out.push((w.clone(), Rectangle::new((r.x as f64, r.y as f64).into(), (r.w as f64, r.h as f64).into())));
+                out.push((
+                    w.clone(),
+                    Rectangle::new((r.x as f64, r.y as f64).into(), (r.w as f64, r.h as f64).into()),
+                ));
             }
         }
         // The focused floating window is on top.
@@ -350,7 +370,11 @@ impl State {
             .rev()
             .find(|(_, r)| card.map(*r).contains(pos))
             .map(|(w, _)| w.clone());
-        Some(Hover { mon, ws: card.ws, window })
+        Some(Hover {
+            mon,
+            ws: card.ws,
+            window,
+        })
     }
 
     // ---------- input ----------
@@ -399,7 +423,10 @@ impl State {
                     .find(|c| c.ws == ws)
                     .and_then(|c| {
                         let r = c.map(c.windows.iter().find(|(x, _)| *x == w)?.1);
-                        Some(((pos.x - r.loc.x) / r.size.w.max(1.0), (pos.y - r.loc.y) / r.size.h.max(1.0)))
+                        Some((
+                            (pos.x - r.loc.x) / r.size.w.max(1.0),
+                            (pos.y - r.loc.y) / r.size.h.max(1.0),
+                        ))
                     })
                     .unwrap_or((0.5, 0.5));
                 if let Some(o) = &mut self.overview {
@@ -425,7 +452,10 @@ impl State {
         if !drag.moved {
             // A click: go to the window.
             if let Some(mon) = self.monitor_of(&drag.window)
-                && let Some(ws) = self.monitors[mon].workspaces.iter().position(|w| w.contains(&drag.window))
+                && let Some(ws) = self.monitors[mon]
+                    .workspaces
+                    .iter()
+                    .position(|w| w.contains(&drag.window))
             {
                 self.monitors[mon].workspaces[ws].focus = Some(drag.window.clone());
                 self.close_overview((mon, ws));
@@ -447,9 +477,14 @@ impl State {
         if (from, from_ws) == (mon, ws) || ws >= self.monitors.get(mon).map_or(0, |m| m.workspaces.len()) {
             return;
         }
-        let floating = self.monitors[from].workspaces[from_ws].entry(w).and_then(|e| e.floating);
+        let floating = self.monitors[from].workspaces[from_ws]
+            .entry(w)
+            .and_then(|e| e.floating);
         self.monitors[from].workspaces[from_ws].remove(w);
-        let (a, b) = (self.monitors[from].output.current_location(), self.monitors[mon].output.current_location());
+        let (a, b) = (
+            self.monitors[from].output.current_location(),
+            self.monitors[mon].output.current_location(),
+        );
         let floating = floating.map(|mut r| {
             if r.w > 0 {
                 r.x += b.x - a.x;
@@ -563,11 +598,20 @@ fn paint_card(key: &CardKey, text: &Text, theme: &crate::theme::Theme, state: &S
     }
     // The label: icon and name if set, else the number.
     let px = theme.font_size * s as f32;
-    let name = if key.label.is_empty() { (ws + 1).to_string() } else { key.label.clone() };
+    let name = if key.label.is_empty() {
+        (ws + 1).to_string()
+    } else {
+        key.label.clone()
+    };
     let color = if key.active || key.selected { p.text } else { p.muted };
     let icon_px = (px * 1.2) as i32;
     let tw = text.width(&name, px);
-    let total = tw + if key.icon.is_empty() { 0.0 } else { (icon_px + 6 * s) as f32 };
+    let total = tw
+        + if key.icon.is_empty() {
+            0.0
+        } else {
+            (icon_px + 6 * s) as f32
+        };
     let mut x = (w as f32 - total) / 2.0;
     if !key.icon.is_empty()
         && let Some(icon) = state.bar.icon(&key.icon, icon_px as u32)
@@ -592,7 +636,9 @@ where
     R::TextureId: Clone + Texture + Send + 'static,
 {
     let Some(o) = &state.overview else { return false };
-    let Some(mon) = state.monitor_index(output) else { return false };
+    let Some(mon) = state.monitor_index(output) else {
+        return false;
+    };
     let Some(output_geo) = state.space.output_geometry(output) else {
         return false;
     };
@@ -601,7 +647,8 @@ where
     let out_scale = output.current_scale().fractional_scale();
     let int_scale = output.current_scale().integer_scale().max(1);
     let origin = output_geo.loc.to_f64();
-    let to_phys = |pt: Point<f64, Logical>| -> Point<i32, Physical> { (pt - origin).to_physical(out_scale).to_i32_round() };
+    let to_phys =
+        |pt: Point<f64, Logical>| -> Point<i32, Physical> { (pt - origin).to_physical(out_scale).to_i32_round() };
     let cards = state.overview_cards(mon);
     let m = &state.monitors[mon];
     // The card that zooms: where it's closing to, or the workspace shown when it opened.
@@ -615,10 +662,12 @@ where
     if let Some(d) = o.drag.as_ref().filter(|d| d.moved && d.window.alive())
         && output_geo.to_f64().contains(d.pos)
         && let Some((scale, r)) = (0..state.monitors.len()).find_map(|mi| {
-            state
-                .overview_cards(mi)
-                .into_iter()
-                .find_map(|c| c.windows.iter().find(|(w, _)| *w == d.window).map(|(_, r)| (c.scale, *r)))
+            state.overview_cards(mi).into_iter().find_map(|c| {
+                c.windows
+                    .iter()
+                    .find(|(w, _)| *w == d.window)
+                    .map(|(_, r)| (c.scale, *r))
+            })
         })
     {
         let size = (r.size.w * scale, r.size.h * scale);
@@ -627,7 +676,10 @@ where
     }
 
     // Hover ring around the window under the pointer.
-    let hover = o.hover.as_ref().filter(|h| h.mon == mon && o.closing.is_none() && o.drag.as_ref().is_none_or(|d| !d.moved));
+    let hover = o
+        .hover
+        .as_ref()
+        .filter(|h| h.mon == mon && o.closing.is_none() && o.drag.as_ref().is_none_or(|d| !d.moved));
     if let Some(h) = hover
         && let Some(w) = &h.window
         && let Some(card) = cards.iter().find(|c| c.ws == h.ws)

@@ -97,7 +97,11 @@ impl Icons {
         let dirs = self.symbolic_dirs.get_or_insert_with(|| symbolic_dirs(&wanted));
         let found = ["svg", "png"]
             .iter()
-            .find_map(|ext| dirs.iter().map(|d| d.join(format!("{name}.{ext}"))).find(|p| p.is_file()))
+            .find_map(|ext| {
+                dirs.iter()
+                    .map(|d| d.join(format!("{name}.{ext}")))
+                    .find(|p| p.is_file())
+            })
             .and_then(|path| load(&path, px))
             .map(|icon| Rc::new(tint(icon, color)));
         if found.is_none() {
@@ -352,7 +356,11 @@ fn symbolic_dirs(wanted: &str) -> Vec<PathBuf> {
         roots.push(PathBuf::from(&home).join(".icons"));
     }
     roots.extend(data_dirs().into_iter().map(|d| d.join("icons")));
-    let first = if wanted == "auto" { auto_theme(&roots) } else { wanted.to_string() };
+    let first = if wanted == "auto" {
+        auto_theme(&roots)
+    } else {
+        wanted.to_string()
+    };
     let mut names = vec![first];
     let mut i = 0;
     while i < names.len() {
@@ -378,7 +386,9 @@ fn symbolic_dirs(wanted: &str) -> Vec<PathBuf> {
     for name in &names {
         let mut theme_dirs: Vec<PathBuf> = Vec::new();
         for root in &roots {
-            let Ok(top) = std::fs::read_dir(root.join(name)) else { continue };
+            let Ok(top) = std::fs::read_dir(root.join(name)) else {
+                continue;
+            };
             for a in top.flatten().filter(|e| e.path().is_dir()) {
                 let Ok(sub) = std::fs::read_dir(a.path()) else { continue };
                 theme_dirs.extend(sub.flatten().map(|e| e.path()).filter(|p| p.is_dir()));
@@ -430,7 +440,11 @@ pub fn xdg_data_dirs() -> String {
     let mut dirs: Vec<String> = if inherited.is_empty() {
         vec!["/usr/local/share".into(), "/usr/share".into()]
     } else {
-        inherited.split(':').filter(|d| !d.is_empty()).map(String::from).collect()
+        inherited
+            .split(':')
+            .filter(|d| !d.is_empty())
+            .map(String::from)
+            .collect()
     };
     let mut extra = vec![
         "/var/lib/flatpak/exports/share".to_string(),

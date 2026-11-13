@@ -18,6 +18,8 @@ use std::{
     time::Duration,
 };
 
+use kiln_files::fs;
+use kiln_ui::{eframe, egui};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use wayland_backend::client::{Backend, ObjectId};
 use wayland_client::{
@@ -39,8 +41,6 @@ use wayland_client::{
         wl_surface::{self, WlSurface},
     },
 };
-use kiln_files::fs;
-use kiln_ui::{eframe, egui};
 
 const URI_LIST: &str = "text/uri-list";
 /// Also offered when dragging out, for apps that only take text (the paths, one per line).

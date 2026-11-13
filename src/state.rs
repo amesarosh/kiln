@@ -297,8 +297,7 @@ impl State {
         let cursor_shape_state = smithay::wayland::cursor_shape::CursorShapeManagerState::new::<Self>(&dh);
         let pointer_gestures_state = smithay::wayland::pointer_gestures::PointerGesturesState::new::<Self>(&dh);
         let clock = smithay::utils::Clock::<smithay::utils::Monotonic>::new();
-        let presentation_state =
-            smithay::wayland::presentation::PresentationState::new::<Self>(&dh, clock.id() as u32);
+        let presentation_state = smithay::wayland::presentation::PresentationState::new::<Self>(&dh, clock.id() as u32);
         Self::create_output_power_global(&dh);
         Self::create_screencopy_global(&dh);
         Self::create_tearing_control_global(&dh);
@@ -817,7 +816,11 @@ impl State {
         let Some(mon) = self.monitor_of(window) else { return };
         let size = window.geometry().size;
         let Some(area) = self.work_area(mon) else { return };
-        let size = if size.w > 0 { (size.w, size.h) } else { picker_size(area) };
+        let size = if size.w > 0 {
+            (size.w, size.h)
+        } else {
+            picker_size(area)
+        };
         let rect = self.place_dialog(window, mon, size);
         let Some(entry) = self.workspace_of_mut(window).and_then(|ws| ws.entry_mut(window)) else {
             return;
@@ -1262,7 +1265,9 @@ impl State {
 
     /// Hide a window until it's focused again (from its bar tab, Alt+Tab or a taskbar).
     pub fn minimize_window(&mut self, window: &Window) {
-        let Some(ws) = self.workspace_of_mut(window) else { return };
+        let Some(ws) = self.workspace_of_mut(window) else {
+            return;
+        };
         if !ws.minimize(window) {
             return;
         }
@@ -1653,7 +1658,12 @@ impl State {
         }
         if config.workspace_labels != self.config.workspace_labels {
             let labels = &config.workspace_labels;
-            for list in self.monitors.iter_mut().map(|m| &mut m.workspaces).chain([&mut self.parked]) {
+            for list in self
+                .monitors
+                .iter_mut()
+                .map(|m| &mut m.workspaces)
+                .chain([&mut self.parked])
+            {
                 for (i, ws) in list.iter_mut().enumerate() {
                     ws.label = labels.get(i).cloned().unwrap_or_default();
                 }
@@ -1843,7 +1853,10 @@ impl State {
 
     /// The launcher has the keyboard: pointer movement shouldn't take it away.
     pub fn launcher_focused(&self) -> bool {
-        self.ws().focus.as_ref().is_some_and(|w| toplevel_ids(w).0.as_deref() == Some(LAUNCHER))
+        self.ws()
+            .focus
+            .as_ref()
+            .is_some_and(|w| toplevel_ids(w).0.as_deref() == Some(LAUNCHER))
     }
 }
 
@@ -1864,10 +1877,7 @@ fn place_floating(
             area.loc.x + x.clamp(0, (area.size.w - w).max(0)),
             area.loc.y + y.clamp(0, (area.size.h - h).max(0)),
         ),
-        Some(RulePosition::Named(_)) | None => (
-            area.loc.x + (area.size.w - w) / 2,
-            area.loc.y + (area.size.h - h) / 2,
-        ),
+        Some(RulePosition::Named(_)) | None => (area.loc.x + (area.size.w - w) / 2, area.loc.y + (area.size.h - h) / 2),
     };
     Rect::new(x, y, w, h)
 }
@@ -1895,7 +1905,8 @@ fn picker_size(area: Rectangle<i32, Logical>) -> (i32, i32) {
 struct WindowOpacity(f32);
 
 fn set_window_opacity(w: &Window, opacity: f32) {
-    w.user_data().insert_if_missing(|| WindowOpacity(opacity.clamp(0.1, 1.0)));
+    w.user_data()
+        .insert_if_missing(|| WindowOpacity(opacity.clamp(0.1, 1.0)));
 }
 
 /// 1.0 unless a rule made the window see-through.

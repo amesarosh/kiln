@@ -12,8 +12,8 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use toml_edit::{DocumentMut, Item, Table, Value};
 use kiln_config::{Config, DEFAULT_CONFIG};
+use toml_edit::{DocumentMut, Item, Table, Value};
 
 /// How long after the last edit to save. Short enough to feel live, long enough that dragging a
 /// slider doesn't make the compositor reload on every frame.
@@ -226,8 +226,7 @@ impl ConfigDoc {
             return;
         };
         let mut out = DocumentMut::new();
-        out.decor_mut()
-            .set_prefix(format!("# kiln theme \"{name}\"\n\n"));
+        out.decor_mut().set_prefix(format!("# kiln theme \"{name}\"\n\n"));
         let root = out.as_table_mut();
         for (k, v) in defaults.iter() {
             root.insert(k, v.clone());

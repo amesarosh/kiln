@@ -3,12 +3,7 @@
 //! A `Sampler` keeps the previous reading, so rates (CPU use, bytes per second) come from the
 //! difference between two samples.
 
-use std::{
-    collections::HashMap,
-    fs,
-    os::unix::fs::MetadataExt,
-    time::Instant,
-};
+use std::{collections::HashMap, fs, os::unix::fs::MetadataExt, time::Instant};
 
 /// One process as shown in the list.
 #[derive(Clone, Debug)]
@@ -105,7 +100,10 @@ impl Sampler {
     /// Read everything once. The first call has no rates yet (they read as zero).
     pub fn sample(&mut self) -> Snapshot {
         let now = Instant::now();
-        let secs = self.prev_at.map(|t| now.duration_since(t).as_secs_f64()).filter(|s| *s > 0.0);
+        let secs = self
+            .prev_at
+            .map(|t| now.duration_since(t).as_secs_f64())
+            .filter(|s| *s > 0.0);
         let first = self.prev_at.is_none();
         self.prev_at = Some(now);
 
@@ -146,7 +144,11 @@ impl Sampler {
         self.prev_net = net;
 
         if let Ok(s) = fs::read_to_string("/proc/uptime") {
-            snap.uptime_secs = s.split_whitespace().next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) as u64;
+            snap.uptime_secs = s
+                .split_whitespace()
+                .next()
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(0.0) as u64;
         }
         if let Ok(s) = fs::read_to_string("/proc/loadavg") {
             for (i, v) in s.split_whitespace().take(3).enumerate() {
@@ -165,7 +167,9 @@ impl Sampler {
             };
             let base = format!("/proc/{pid}");
             // A process can exit at any point; skip it if a file is gone.
-            let Ok(stat) = fs::read_to_string(format!("{base}/stat")) else { continue };
+            let Ok(stat) = fs::read_to_string(format!("{base}/stat")) else {
+                continue;
+            };
             let Some(st) = parse_stat(&stat) else { continue };
             let uid = entry.metadata().map(|m| m.uid()).unwrap_or(0);
             let memory = fs::read_to_string(format!("{base}/statm"))
@@ -181,7 +185,11 @@ impl Sampler {
                 .collect();
             let kernel = args.is_empty();
             let name = display_name(&st.comm, args.first().map(String::as_str));
-            let cmdline = if kernel { format!("[{}]", st.comm) } else { args.join(" ") };
+            let cmdline = if kernel {
+                format!("[{}]", st.comm)
+            } else {
+                args.join(" ")
+            };
 
             let ticks = st.utime + st.stime;
             let key = (pid, st.start);
@@ -312,7 +320,11 @@ fn whole_disks() -> Vec<String> {
     };
     dir.flatten()
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| !["loop", "ram", "zram", "dm-", "sr", "fd"].iter().any(|p| n.starts_with(p)))
+        .filter(|n| {
+            !["loop", "ram", "zram", "dm-", "sr", "fd"]
+                .iter()
+                .any(|p| n.starts_with(p))
+        })
         .collect()
 }
 
@@ -343,7 +355,9 @@ fn read_net_bytes() -> (u64, u64) {
     let mut rx = 0;
     let mut tx = 0;
     for line in s.lines().skip(2) {
-        let Some((name, rest)) = line.split_once(':') else { continue };
+        let Some((name, rest)) = line.split_once(':') else {
+            continue;
+        };
         if name.trim() == "lo" {
             continue;
         }

@@ -139,7 +139,11 @@ fn find_wallpapers() -> Vec<(String, String)> {
         roots.extend([h.join("Pictures"), h.join(".local/share/backgrounds")]);
     }
     let data_dirs = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
-    roots.extend(data_dirs.split(':').map(|d| std::path::Path::new(d).join("backgrounds")));
+    roots.extend(
+        data_dirs
+            .split(':')
+            .map(|d| std::path::Path::new(d).join("backgrounds")),
+    );
     roots.dedup();
 
     let mut found = Vec::new();
@@ -156,7 +160,10 @@ fn find_wallpapers() -> Vec<(String, String)> {
                 }
                 continue;
             }
-            let ext = path.extension().map(|x| x.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let ext = path
+                .extension()
+                .map(|x| x.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
             if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp") {
                 continue;
             }
@@ -165,8 +172,14 @@ fn find_wallpapers() -> Vec<(String, String)> {
                 Some(h) if full.starts_with(&format!("{h}/")) => format!("~{}", &full[h.len()..]),
                 _ => full,
             };
-            let name = path.file_stem().map(|n| n.to_string_lossy().replace(['_', '-'], " ")).unwrap_or_default();
-            let folder = path.parent().and_then(|p| p.file_name()).map(|f| f.to_string_lossy().into_owned());
+            let name = path
+                .file_stem()
+                .map(|n| n.to_string_lossy().replace(['_', '-'], " "))
+                .unwrap_or_default();
+            let folder = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|f| f.to_string_lossy().into_owned());
             let label = match folder {
                 Some(f) => format!("{name}  ({f})"),
                 None => name,

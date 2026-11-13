@@ -1066,7 +1066,10 @@ impl Config {
         for (key, label) in &raw.workspaces {
             match key.parse::<usize>() {
                 Ok(n) if (1..=layout.workspaces).contains(&n) => workspace_labels[n - 1] = label.clone(),
-                Ok(n) => problems.push(format!("workspaces.{n}: there are only {} workspaces", layout.workspaces)),
+                Ok(n) => problems.push(format!(
+                    "workspaces.{n}: there are only {} workspaces",
+                    layout.workspaces
+                )),
                 Err(_) => problems.push(format!("workspaces.{key}: expected a workspace number")),
             }
         }
@@ -1346,7 +1349,11 @@ pub const ACTIONS: &[(&str, &str, &str)] = &[
         "Take keys back from an app holding all of them, or hand them back",
     ),
     ("volume", "+5|-5|mute", "Change the volume by a percentage, or mute"),
-    ("media", "play-pause|next|prev", "Play/pause or skip in the media player"),
+    (
+        "media",
+        "play-pause|next|prev",
+        "Play/pause or skip in the media player",
+    ),
     ("reload", "", "Reload the config file"),
     ("quit", "", "Exit the compositor"),
 ];
@@ -1784,8 +1791,9 @@ mod tests {
 
     #[test]
     fn workspace_labels() {
-        let c = Config::parse_user("[workspaces]\n1 = { name = \"web\", icon = \"firefox\" }\n3 = { name = \"chat\" }\n")
-            .unwrap();
+        let c =
+            Config::parse_user("[workspaces]\n1 = { name = \"web\", icon = \"firefox\" }\n3 = { name = \"chat\" }\n")
+                .unwrap();
         assert_eq!(c.workspace_labels.len(), 9);
         assert_eq!(c.workspace_labels[0].name, "web");
         assert_eq!(c.workspace_labels[0].icon, "firefox");

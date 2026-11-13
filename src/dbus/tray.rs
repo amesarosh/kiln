@@ -212,11 +212,11 @@ impl Host {
 
     /// An item's app sent a change signal from `sender` for the object at `path`.
     pub fn refresh_item(&mut self, conn: &Connection, sender: &str, path: &str) -> Option<Vec<TrayItem>> {
-        let id = self
-            .items
-            .iter()
-            .map(|i| i.id.clone())
-            .find(|id| split_id(id).is_some_and(|(bus, p)| p == path && (bus == sender || self.owners.get(id).is_some_and(|o| o == sender))))?;
+        let id = self.items.iter().map(|i| i.id.clone()).find(|id| {
+            split_id(id).is_some_and(|(bus, p)| {
+                p == path && (bus == sender || self.owners.get(id).is_some_and(|o| o == sender))
+            })
+        })?;
         let item = fetch(conn, &id)?;
         let slot = self.items.iter_mut().find(|i| i.id == id)?;
         if *slot == item {
@@ -233,7 +233,9 @@ impl Host {
             .iter()
             .map(|i| i.id.clone())
             .chain(self.own_items.iter().flat_map(|o| o.lock().unwrap().clone()))
-            .filter(|id| split_id(id).is_some_and(|(bus, _)| bus == name) || self.owners.get(id).is_some_and(|o| o == name))
+            .filter(|id| {
+                split_id(id).is_some_and(|(bus, _)| bus == name) || self.owners.get(id).is_some_and(|o| o == name)
+            })
             .collect();
         if gone.is_empty() {
             return None;
@@ -343,7 +345,11 @@ fn menu_path(conn: &Connection, id: &str) -> Option<String> {
 /// Read an item's properties. Passive items (nothing to show right now) are skipped.
 fn fetch(conn: &Connection, id: &str) -> Option<TrayItem> {
     let p = props(conn, id)?;
-    let s = |k: &str| p.get(k).and_then(|v| String::try_from(v.clone()).ok()).unwrap_or_default();
+    let s = |k: &str| {
+        p.get(k)
+            .and_then(|v| String::try_from(v.clone()).ok())
+            .unwrap_or_default()
+    };
     let status = s("Status");
     if status == "Passive" {
         return None;
@@ -356,7 +362,9 @@ fn fetch(conn: &Connection, id: &str) -> Option<TrayItem> {
         .and_then(|v| Vec::<(i32, i32, Vec<u8>)>::try_from(v.clone()).ok())
         .and_then(|mut list| {
             // The one closest to 32 pixels, bigger preferred.
-            list.retain(|(w, h, d)| (1..=1024).contains(w) && (1..=1024).contains(h) && d.len() >= (*w * *h * 4) as usize);
+            list.retain(|(w, h, d)| {
+                (1..=1024).contains(w) && (1..=1024).contains(h) && d.len() >= (*w * *h * 4) as usize
+            });
             list.sort_by_key(|(w, _, _)| if *w >= 32 { *w - 32 } else { 1000 + 32 - *w });
             list.into_iter().next()
         });
@@ -380,7 +388,10 @@ fn fetch(conn: &Connection, id: &str) -> Option<TrayItem> {
         icon_theme_path: s("IconThemePath"),
         pixmap,
         has_menu: menu,
-        item_is_menu: p.get("ItemIsMenu").and_then(|v| bool::try_from(v.clone()).ok()).unwrap_or(false),
+        item_is_menu: p
+            .get("ItemIsMenu")
+            .and_then(|v| bool::try_from(v.clone()).ok())
+            .unwrap_or(false),
     })
 }
 
@@ -469,7 +480,10 @@ mod tests {
 
     #[test]
     fn ids_split() {
-        assert_eq!(split_id(":1.42/StatusNotifierItem"), Some((":1.42", "/StatusNotifierItem")));
+        assert_eq!(
+            split_id(":1.42/StatusNotifierItem"),
+            Some((":1.42", "/StatusNotifierItem"))
+        );
         assert_eq!(
             split_id("org.kde.StatusNotifierItem-1-1/org/ayatana/NotificationItem/x"),
             Some(("org.kde.StatusNotifierItem-1-1", "/org/ayatana/NotificationItem/x"))

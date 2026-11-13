@@ -327,7 +327,14 @@ where
         );
         if deco.border_width > 0 && geo.size.w > 0 {
             let rect = Rectangle::new(loc.to_i32_round() - output_geo.loc, geo.size);
-            push_border(&mut out, &window, rect, deco.border_width, faded(deco.border_inactive, alpha), scale);
+            push_border(
+                &mut out,
+                &window,
+                rect,
+                deco.border_width,
+                faded(deco.border_inactive, alpha),
+                scale,
+            );
         }
     }
 

@@ -56,7 +56,11 @@ impl State {
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                     let mut line = String::new();
                     let Ok(reader) = stream.try_clone() else { return };
-                    if BufReader::new(std::io::Read::take(reader, 4096)).read_line(&mut line).is_ok() && !line.trim().is_empty() {
+                    if BufReader::new(std::io::Read::take(reader, 4096))
+                        .read_line(&mut line)
+                        .is_ok()
+                        && !line.trim().is_empty()
+                    {
                         let _ = tx.send((line, stream));
                     }
                 });
@@ -172,6 +176,8 @@ pub fn send(action: &str) -> Result<String, String> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     writeln!(stream, "{action}").map_err(|e| e.to_string())?;
     let mut reply = String::new();
-    BufReader::new(stream).read_line(&mut reply).map_err(|e| e.to_string())?;
+    BufReader::new(stream)
+        .read_line(&mut reply)
+        .map_err(|e| e.to_string())?;
     Ok(reply.trim().to_string())
 }

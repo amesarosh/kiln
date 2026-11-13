@@ -90,7 +90,12 @@ pub fn place_row_with(
         }
         let tint = if b.hovered() || current { p.text } else { p.muted };
         if let Some(t) = icons.symbolic(ui.ctx(), icon, SIDE_ICON, tint) {
-            paint_image(ui, &t, Rect::from_center_size(b_rect.center(), vec2(SIDE_ICON, SIDE_ICON)), Color32::WHITE);
+            paint_image(
+                ui,
+                &t,
+                Rect::from_center_size(b_rect.center(), vec2(SIDE_ICON, SIDE_ICON)),
+                Color32::WHITE,
+            );
         }
         b.on_hover_text(tip)
     });
@@ -207,7 +212,10 @@ pub fn crumbs(ui: &mut Ui, p: &Palette, dir: &Path, roots: &[(String, PathBuf)])
 pub fn path_field(ui: &mut Ui, width: f32, typed: &mut String) -> Option<bool> {
     let r = ui.add_sized(
         [width, kiln_ui::field_height(ui.style())],
-        kiln_ui::field(ui, egui::TextEdit::singleline(typed).hint_text("Type a folder or file path")),
+        kiln_ui::field(
+            ui,
+            egui::TextEdit::singleline(typed).hint_text("Type a folder or file path"),
+        ),
     );
     if !r.has_focus() && !r.lost_focus() {
         r.request_focus();
@@ -217,7 +225,10 @@ pub fn path_field(ui: &mut Ui, width: f32, typed: &mut String) -> Option<bool> {
 
 /// The search box. `focus` puts the cursor in it, at the end of what's typed.
 pub fn search_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32, focus: bool) -> egui::Response {
-    let r = ui.add(kiln_ui::field(ui, egui::TextEdit::singleline(text).hint_text(hint).desired_width(width)));
+    let r = ui.add(kiln_ui::field(
+        ui,
+        egui::TextEdit::singleline(text).hint_text(hint).desired_width(width),
+    ));
     if focus {
         r.request_focus();
         if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
@@ -470,7 +481,11 @@ impl Icons {
         let px = (ICON * ppp).round() as u32;
         // About 1.5 points wide, drawn around the icon (so the texture is a little bigger than
         // ICON; see `file_icon_rect`).
-        let width = if e.is_dir && outline[3] > 0 { (1.5 * ppp).round().max(1.0) as u32 } else { 0 };
+        let width = if e.is_dir && outline[3] > 0 {
+            (1.5 * ppp).round().max(1.0) as u32
+        } else {
+            0
+        };
         let tex = mime
             .icons_for(e)
             .iter()
@@ -488,7 +503,9 @@ impl Icons {
 
     /// The pixels of an entry's icon, `px` big (for a drag icon, drawn outside egui).
     pub fn file_pixels(&mut self, mime: &Mime, e: &Entry, px: u32) -> Option<std::rc::Rc<kiln_icons::Icon>> {
-        mime.icons_for(e).iter().find_map(|name| self.icons.any(name, px, [255; 4]))
+        mime.icons_for(e)
+            .iter()
+            .find_map(|name| self.icons.any(name, px, [255; 4]))
     }
 
     /// A full-color icon by name or path, like an app's.
@@ -578,7 +595,10 @@ fn outlined(icon: &kiln_icons::Icon, width: u32, c: [u8; 4]) -> kiln_icons::Icon
             rgba[i + 3] = (src[3] as u32 + line_a * under / 255) as u8;
         }
     }
-    kiln_icons::Icon { size: size as u32, rgba }
+    kiln_icons::Icon {
+        size: size as u32,
+        rgba,
+    }
 }
 
 fn texture(ctx: &egui::Context, name: &str, icon: &kiln_icons::Icon) -> TextureHandle {

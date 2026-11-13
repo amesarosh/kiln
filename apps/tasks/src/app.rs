@@ -4,8 +4,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc,
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -15,8 +14,8 @@ use kiln_config::theme::Palette;
 use kiln_ui::{
     Look, color, eframe,
     egui::{
-        self, Align, Align2, Color32, FontId, Key, Layout, Margin, Painter, Rect, RichText, Sense, Stroke,
-        TextStyle, TextureHandle, Ui, pos2, vec2,
+        self, Align, Align2, Color32, FontId, Key, Layout, Margin, Painter, Rect, RichText, Sense, Stroke, TextStyle,
+        TextureHandle, Ui, pos2, vec2,
     },
 };
 
@@ -47,7 +46,12 @@ impl Page {
 }
 
 /// How often to sample, in milliseconds; 0 pauses.
-const SPEEDS: &[(u64, &str)] = &[(500, "Fast (0.5 s)"), (1000, "Normal (1 s)"), (3000, "Slow (3 s)"), (0, "Paused")];
+const SPEEDS: &[(u64, &str)] = &[
+    (500, "Fast (0.5 s)"),
+    (1000, "Normal (1 s)"),
+    (3000, "Slow (3 s)"),
+    (0, "Paused"),
+];
 
 /// Size of the app icons in the process list, in points.
 const ICON: f32 = 18.0;
@@ -203,7 +207,10 @@ impl ProcessIcons {
 /// Names a process's icon might go by: its own name, without a "-bin" style suffix, and the
 /// folder its program lives in (/opt/vivaldi/vivaldi-bin is "vivaldi").
 fn icon_names(proc: &Process) -> Vec<String> {
-    if matches!(proc.name.as_str(), "bash" | "zsh" | "fish" | "sh" | "dash" | "nu" | "tmux") {
+    if matches!(
+        proc.name.as_str(),
+        "bash" | "zsh" | "fish" | "sh" | "dash" | "nu" | "tmux"
+    ) {
         return vec!["utilities-terminal".into()];
     }
     let mut names = vec![proc.name.clone()];
@@ -358,7 +365,10 @@ impl TasksApp {
     }
 
     fn end(&mut self, pid: i32, force: bool) {
-        let name = self.find(pid).map(|p| p.name.clone()).unwrap_or_else(|| pid.to_string());
+        let name = self
+            .find(pid)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| pid.to_string());
         let verb = if force { "Force quit" } else { "Asked to quit" };
         self.message = Some(match sample::signal(pid, force) {
             Ok(()) => (format!("{verb}: {name}"), Instant::now(), false),
@@ -393,27 +403,73 @@ impl TasksApp {
             let h = &self.history;
             let (accent, second) = (color(p.accent), color(p.muted));
             let mut open = false;
-            open |= tile(ui, p, "CPU", &format!("{:.0}%", s.cpu), 100.0, &[Line {
-                series: &h.cpu,
-                color: accent,
-                fill: true,
-            }])
+            open |= tile(
+                ui,
+                p,
+                "CPU",
+                &format!("{:.0}%", s.cpu),
+                100.0,
+                &[Line {
+                    series: &h.cpu,
+                    color: accent,
+                    fill: true,
+                }],
+            )
             .clicked();
-            open |= tile(ui, p, "Memory", &format!("{:.0}%", percent(s.mem_used, s.mem_total)), 100.0, &[
-                Line { series: &h.memory, color: accent, fill: true },
-            ])
+            open |= tile(
+                ui,
+                p,
+                "Memory",
+                &format!("{:.0}%", percent(s.mem_used, s.mem_total)),
+                100.0,
+                &[Line {
+                    series: &h.memory,
+                    color: accent,
+                    fill: true,
+                }],
+            )
             .clicked();
             let top = h.disk_read.max().max(h.disk_write.max()).max(1024.0);
-            open |= tile(ui, p, "Disk", &rate(s.disk_read + s.disk_write), top, &[
-                Line { series: &h.disk_read, color: accent, fill: true },
-                Line { series: &h.disk_write, color: second, fill: false },
-            ])
+            open |= tile(
+                ui,
+                p,
+                "Disk",
+                &rate(s.disk_read + s.disk_write),
+                top,
+                &[
+                    Line {
+                        series: &h.disk_read,
+                        color: accent,
+                        fill: true,
+                    },
+                    Line {
+                        series: &h.disk_write,
+                        color: second,
+                        fill: false,
+                    },
+                ],
+            )
             .clicked();
             let top = h.net_rx.max().max(h.net_tx.max()).max(1024.0);
-            open |= tile(ui, p, "Network", &rate(s.net_rx + s.net_tx), top, &[
-                Line { series: &h.net_rx, color: accent, fill: true },
-                Line { series: &h.net_tx, color: second, fill: false },
-            ])
+            open |= tile(
+                ui,
+                p,
+                "Network",
+                &rate(s.net_rx + s.net_tx),
+                top,
+                &[
+                    Line {
+                        series: &h.net_rx,
+                        color: accent,
+                        fill: true,
+                    },
+                    Line {
+                        series: &h.net_tx,
+                        color: second,
+                        fill: false,
+                    },
+                ],
+            )
             .clicked();
             if open {
                 self.page = Page::Performance;
@@ -424,16 +480,18 @@ impl TasksApp {
             ui.add_space(14.0);
             let current = self.interval.load(Ordering::Relaxed);
             let label = SPEEDS.iter().find(|s| s.0 == current).map_or("", |s| s.1);
-            kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt("speed")
-                .selected_text(label)
-                .width(ui.available_width())
-                .show_ui(ui, |ui| {
-                    for (ms, name) in SPEEDS {
-                        if ui.selectable_label(current == *ms, *name).clicked() {
-                            self.interval.store(*ms, Ordering::Relaxed);
+            kiln_ui::select(ui, |ui| {
+                egui::ComboBox::from_id_salt("speed")
+                    .selected_text(label)
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        for (ms, name) in SPEEDS {
+                            if ui.selectable_label(current == *ms, *name).clicked() {
+                                self.interval.store(*ms, Ordering::Relaxed);
+                            }
                         }
-                    }
-                }));
+                    })
+            });
             ui.add_space(2.0);
             section_label(ui, p, "Update speed");
         });
@@ -454,7 +512,12 @@ impl TasksApp {
                         egui::TextEdit::singleline(&mut self.search)
                             .id(id)
                             .hint_text("Search  (Ctrl+F)")
-                            .margin(Margin { left: 30, right: kiln_ui::side_padding(ui.style()) as i8, top: 10, bottom: 10 })
+                            .margin(Margin {
+                                left: 30,
+                                right: kiln_ui::side_padding(ui.style()) as i8,
+                                top: 10,
+                                bottom: 10,
+                            })
                             .desired_width(240.0),
                     );
                     if r.has_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
@@ -559,7 +622,15 @@ impl TasksApp {
                             Stroke::NONE,
                         ));
                     }
-                    cell_text(ui, text_cell, col.title(), col.right_aligned(), Align::Center, c, small.clone());
+                    cell_text(
+                        ui,
+                        text_cell,
+                        col.title(),
+                        col.right_aligned(),
+                        Align::Center,
+                        c,
+                        small.clone(),
+                    );
                 }
                 ui.painter().line_segment(
                     [header.left_bottom(), header.right_bottom()],
@@ -625,7 +696,15 @@ impl TasksApp {
                                         let mut name_cell = cell;
                                         name_cell.set_left(icon.right() - 2.0);
                                         let c = if mine || is_sel { p.text } else { p.muted };
-                                        cell_text(ui, name_cell, &proc.name, false, Align::Center, color(c), body.clone());
+                                        cell_text(
+                                            ui,
+                                            name_cell,
+                                            &proc.name,
+                                            false,
+                                            Align::Center,
+                                            color(c),
+                                            body.clone(),
+                                        );
                                         continue;
                                     }
                                     Column::Pid => proc.pid.to_string(),
@@ -635,7 +714,15 @@ impl TasksApp {
                                     Column::Threads => proc.threads.to_string(),
                                 };
                                 let c = if is_sel || share > 0.02 { p.text } else { p.muted };
-                                cell_text(ui, cell, &text, col.right_aligned(), Align::Center, color(c), body.clone());
+                                cell_text(
+                                    ui,
+                                    cell,
+                                    &text,
+                                    col.right_aligned(),
+                                    Align::Center,
+                                    color(c),
+                                    body.clone(),
+                                );
                             }
                             if r.clicked() || r.secondary_clicked() {
                                 clicked = Some(proc.pid);
@@ -685,7 +772,10 @@ impl TasksApp {
         // Footer: count, the last message, and the buttons for the selected process.
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            let sel = self.selected.and_then(|pid| self.find(pid)).map(|p| (p.pid, p.pid == self.my_pid));
+            let sel = self
+                .selected
+                .and_then(|pid| self.find(pid))
+                .map(|p| (p.pid, p.pid == self.my_pid));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let enabled = sel.is_some_and(|(_, me)| !me);
                 let force = RichText::new("Force quit").color(color(if enabled { p.urgent } else { p.subtext }));
@@ -764,16 +854,34 @@ impl TasksApp {
             let subtitle = cpu_model.map_or(cores.clone(), |m| format!("{m}  ·  {cores}"));
             card(ui, p, "CPU", &subtitle, &format!("{:.0}%", s.cpu), |ui| {
                 let w = ui.available_width();
-                graph::draw(ui, p, vec2(w, 150.0), 100.0, &[Line { series: &h.cpu, color: accent, fill: true }]);
+                graph::draw(
+                    ui,
+                    p,
+                    vec2(w, 150.0),
+                    100.0,
+                    &[Line {
+                        series: &h.cpu,
+                        color: accent,
+                        fill: true,
+                    }],
+                );
                 ui.add_space(12.0);
                 let threads: u32 = s.processes.iter().map(|p| p.threads).sum();
-                stats(ui, p, &[
-                    (Some(accent), "Utilization", format!("{:.0}%", s.cpu)),
-                    (None, "Processes", s.processes.len().to_string()),
-                    (None, "Threads", threads.to_string()),
-                    (None, "Load average", format!("{:.2}  {:.2}  {:.2}", s.load[0], s.load[1], s.load[2])),
-                    (None, "Up time", duration(s.uptime_secs)),
-                ]);
+                stats(
+                    ui,
+                    p,
+                    &[
+                        (Some(accent), "Utilization", format!("{:.0}%", s.cpu)),
+                        (None, "Processes", s.processes.len().to_string()),
+                        (None, "Threads", threads.to_string()),
+                        (
+                            None,
+                            "Load average",
+                            format!("{:.2}  {:.2}  {:.2}", s.load[0], s.load[1], s.load[2]),
+                        ),
+                        (None, "Up time", duration(s.uptime_secs)),
+                    ],
+                );
                 ui.add_space(14.0);
                 // Each core: a small graph with its name and use, in as many columns as fit.
                 let gap = 8.0;
@@ -787,15 +895,35 @@ impl TasksApp {
                             let n = row * cols + i;
                             let (rect, _) = ui.allocate_exact_size(vec2(cell_w, 52.0), Sense::hover());
                             let painter = ui.painter();
-                            graph::paint(painter, p, rect, graph::radius(ui), 100.0, &[Line {
-                                series,
-                                color: accent,
-                                fill: true,
-                            }], true);
+                            graph::paint(
+                                painter,
+                                p,
+                                rect,
+                                graph::radius(ui),
+                                100.0,
+                                &[Line {
+                                    series,
+                                    color: accent,
+                                    fill: true,
+                                }],
+                                true,
+                            );
                             let inner = rect.shrink2(vec2(8.0, 6.0));
-                            painter.text(inner.left_top(), Align2::LEFT_TOP, format!("Core {n}"), small.clone(), color(p.subtext));
+                            painter.text(
+                                inner.left_top(),
+                                Align2::LEFT_TOP,
+                                format!("Core {n}"),
+                                small.clone(),
+                                color(p.subtext),
+                            );
                             let v = s.cores.get(n).copied().unwrap_or(0.0);
-                            painter.text(inner.right_top(), Align2::RIGHT_TOP, format!("{v:.0}%"), small.clone(), color(p.text));
+                            painter.text(
+                                inner.right_top(),
+                                Align2::RIGHT_TOP,
+                                format!("{v:.0}%"),
+                                small.clone(),
+                                color(p.text),
+                            );
                         }
                     });
                 }
@@ -810,9 +938,17 @@ impl TasksApp {
                 &format!("{:.0}%", percent(s.mem_used, s.mem_total)),
                 |ui| {
                     let w = ui.available_width();
-                    let mut lines = vec![Line { series: &h.memory, color: accent, fill: true }];
+                    let mut lines = vec![Line {
+                        series: &h.memory,
+                        color: accent,
+                        fill: true,
+                    }];
                     if s.swap_total > 0 {
-                        lines.push(Line { series: &h.swap, color: second, fill: false });
+                        lines.push(Line {
+                            series: &h.swap,
+                            color: second,
+                            fill: false,
+                        });
                     }
                     graph::draw(ui, p, vec2(w, 120.0), 100.0, &lines);
                     ui.add_space(12.0);
@@ -821,11 +957,15 @@ impl TasksApp {
                     } else {
                         "None".to_string()
                     };
-                    stats(ui, p, &[
-                        (Some(accent), "In use", bytes(s.mem_used)),
-                        (None, "Available", bytes(available)),
-                        (s.swap_total.gt(&0).then_some(second), "Swap", swap),
-                    ]);
+                    stats(
+                        ui,
+                        p,
+                        &[
+                            (Some(accent), "In use", bytes(s.mem_used)),
+                            (None, "Available", bytes(available)),
+                            (s.swap_total.gt(&0).then_some(second), "Swap", swap),
+                        ],
+                    );
                 },
             );
 
@@ -913,11 +1053,12 @@ impl eframe::App for TasksApp {
             )
             .show(ui, |ui| self.sidebar(ui, &p));
         egui::CentralPanel::default_margins()
-            .frame(
-                egui::Frame::new()
-                    .fill(color(p.base))
-                    .inner_margin(Margin { left: 24, right: 24, top: 14, bottom: 16 }),
-            )
+            .frame(egui::Frame::new().fill(color(p.base)).inner_margin(Margin {
+                left: 24,
+                right: 24,
+                top: 14,
+                bottom: 16,
+            }))
             .show(ui, |ui| {
                 self.header(ui, &p);
                 match self.page {
@@ -967,10 +1108,24 @@ fn rate_card(
     let top = a.max().max(b.max()).max(1024.0);
     card(ui, p, title, subtitle, &rate(a_now + b_now), |ui| {
         let w = ui.available_width();
-        let r = graph::draw(ui, p, vec2(w, 100.0), top, &[
-            Line { series: a, color: accent, fill: true },
-            Line { series: b, color: second, fill: false },
-        ]);
+        let r = graph::draw(
+            ui,
+            p,
+            vec2(w, 100.0),
+            top,
+            &[
+                Line {
+                    series: a,
+                    color: accent,
+                    fill: true,
+                },
+                Line {
+                    series: b,
+                    color: second,
+                    fill: false,
+                },
+            ],
+        );
         ui.painter().text(
             r.rect.left_top() + vec2(8.0, 6.0),
             Align2::LEFT_TOP,
@@ -979,10 +1134,14 @@ fn rate_card(
             color(p.subtext),
         );
         ui.add_space(12.0);
-        stats(ui, p, &[
-            (Some(accent), names.0, rate(a_now)),
-            (Some(second), names.1, rate(b_now)),
-        ]);
+        stats(
+            ui,
+            p,
+            &[
+                (Some(accent), names.0, rate(a_now)),
+                (Some(second), names.1, rate(b_now)),
+            ],
+        );
     });
 }
 
@@ -1020,7 +1179,13 @@ fn tile(ui: &mut Ui, p: &Palette, name: &str, value: &str, top: f32, lines: &[Li
     let body = TextStyle::Body.resolve(ui.style());
     let line = pos2(inner.left(), inner.top() + body.size / 2.0);
     painter.text(line, Align2::LEFT_CENTER, name, small, color(p.muted));
-    painter.text(pos2(inner.right(), line.y), Align2::RIGHT_CENTER, value, body.clone(), color(p.text));
+    painter.text(
+        pos2(inner.right(), line.y),
+        Align2::RIGHT_CENTER,
+        value,
+        body.clone(),
+        color(p.text),
+    );
     let spark = Rect::from_min_max(pos2(inner.left(), inner.top() + body.size + 6.0), inner.right_bottom());
     graph::paint(painter, p, spark, Default::default(), top, lines, false);
     ui.add_space(8.0);
@@ -1064,7 +1229,12 @@ fn nav_item(ui: &mut Ui, p: &Palette, page: Page, selected: bool) -> egui::Respo
             .rect_filled(rect, ui.visuals().widgets.noninteractive.corner_radius, color(bg));
     }
     let icon = Rect::from_center_size(rect.left_center() + vec2(24.0, 0.0), vec2(16.0, 16.0));
-    page_icon(ui.painter(), page, icon, color(if selected { p.accent } else { p.muted }));
+    page_icon(
+        ui.painter(),
+        page,
+        icon,
+        color(if selected { p.accent } else { p.muted }),
+    );
     ui.painter().text(
         rect.left_center() + vec2(44.0, 0.0),
         Align2::LEFT_CENTER,
@@ -1087,7 +1257,14 @@ fn page_icon(painter: &Painter, page: Page, r: Rect, c: Color32) {
             }
         }
         Page::Performance => {
-            let pts = [(0.0, 0.75), (0.25, 0.75), (0.4, 0.2), (0.6, 0.95), (0.75, 0.5), (1.0, 0.5)];
+            let pts = [
+                (0.0, 0.75),
+                (0.25, 0.75),
+                (0.4, 0.2),
+                (0.6, 0.95),
+                (0.75, 0.5),
+                (1.0, 0.5),
+            ];
             let pts = pts.map(|(x, y)| pos2(r.left() + x * r.width(), r.top() + y * r.height()));
             painter.add(egui::Shape::line(pts.to_vec(), stroke));
         }
@@ -1098,7 +1275,14 @@ fn page_icon(painter: &Painter, page: Page, r: Rect, c: Color32) {
 fn logo(painter: &Painter, p: &Palette, r: Rect) {
     painter.rect_filled(r, 7.0, color(p.accent));
     let inner = r.shrink(6.0);
-    let pts = [(0.0, 0.6), (0.3, 0.6), (0.45, 0.1), (0.6, 0.95), (0.72, 0.6), (1.0, 0.6)];
+    let pts = [
+        (0.0, 0.6),
+        (0.3, 0.6),
+        (0.45, 0.1),
+        (0.6, 0.95),
+        (0.72, 0.6),
+        (1.0, 0.6),
+    ];
     let pts = pts.map(|(x, y)| pos2(inner.left() + x * inner.width(), inner.top() + y * inner.height()));
     painter.add(egui::Shape::line(pts.to_vec(), Stroke::new(1.8, color(p.on_accent))));
 }
@@ -1116,8 +1300,18 @@ fn badge(ui: &Ui, p: &Palette, r: Rect, name: &str) {
     let painter = ui.painter();
     painter.circle_filled(r.center(), r.width() / 2.0, color(p.raised));
     painter.circle_stroke(r.center(), r.width() / 2.0 - 0.5, Stroke::new(1.0, color(p.separator)));
-    let letter: String = name.chars().find(|c| c.is_alphanumeric()).map_or('?', |c| c.to_ascii_uppercase()).into();
-    painter.text(r.center(), Align2::CENTER_CENTER, letter, FontId::proportional(r.height() * 0.55), color(p.muted));
+    let letter: String = name
+        .chars()
+        .find(|c| c.is_alphanumeric())
+        .map_or('?', |c| c.to_ascii_uppercase())
+        .into();
+    painter.text(
+        r.center(),
+        Align2::CENTER_CENTER,
+        letter,
+        FontId::proportional(r.height() * 0.55),
+        color(p.muted),
+    );
 }
 
 /// The CPU's marketing name, without the clutter some vendors add.
@@ -1126,7 +1320,12 @@ fn cpu_model() -> Option<String> {
     let line = info.lines().find(|l| l.starts_with("model name"))?;
     let name = line.split_once(':')?.1;
     let name = name.replace("(R)", "").replace("(TM)", "").replace(" CPU", "");
-    let name = name.split(" @ ").next()?.split_whitespace().collect::<Vec<_>>().join(" ");
+    let name = name
+        .split(" @ ")
+        .next()?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     (!name.is_empty()).then_some(name)
 }
 
@@ -1144,7 +1343,11 @@ fn state_name(state: char) -> &'static str {
 }
 
 fn percent(part: u64, whole: u64) -> f32 {
-    if whole == 0 { 0.0 } else { part as f32 / whole as f32 * 100.0 }
+    if whole == 0 {
+        0.0
+    } else {
+        part as f32 / whole as f32 * 100.0
+    }
 }
 
 fn rate(bytes_per_sec: f64) -> String {

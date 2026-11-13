@@ -440,7 +440,10 @@ pub fn heads(state: &State) -> Vec<crate::handlers::output_management::HeadInfo>
                     refresh: wl.refresh,
                     preferred: m.mode_type().contains(ModeTypeFlags::PREFERRED),
                 };
-                match modes.iter_mut().find(|(x, _)| (x.width, x.height, x.refresh) == (hm.width, hm.height, hm.refresh)) {
+                match modes
+                    .iter_mut()
+                    .find(|(x, _)| (x.width, x.height, x.refresh) == (hm.width, hm.height, hm.refresh))
+                {
                     Some((x, _)) => x.preferred |= hm.preferred,
                     None => modes.push((hm, *m)),
                 }
@@ -472,7 +475,11 @@ pub fn heads(state: &State) -> Vec<crate::handlers::output_management::HeadInfo>
                 }
             };
             HeadInfo {
-                description: if w > 0 { format!("{name} ({w}x{h} mm)") } else { name.clone() },
+                description: if w > 0 {
+                    format!("{name} ({w}x{h} mm)")
+                } else {
+                    name.clone()
+                },
                 name,
                 physical_size: (w as i32, h as i32),
                 modes: modes.into_iter().map(|(m, _)| m).collect(),
@@ -762,7 +769,10 @@ fn relight_surface(state: &mut State, connector: connector::Info, crtc: crtc::Ha
     match set_connector_hdr(gpu.outputs.device(), conn, want_hdr.then_some(&display)) {
         Ok(()) if want_hdr => {
             let peak = display.peak();
-            tracing::info!("{name}: HDR on (peak {peak:.0} nits, SDR white {} nits)", cfg.sdr_brightness);
+            tracing::info!(
+                "{name}: HDR on (peak {peak:.0} nits, SDR white {} nits)",
+                cfg.sdr_brightness
+            );
         }
         Ok(()) => tracing::info!("{name}: HDR off"),
         Err(e) if want_hdr => tracing::warn!("{name}: could not turn HDR on: {e}"),

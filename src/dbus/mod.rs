@@ -27,7 +27,10 @@ pub enum Event {
     /// The tray icons, whenever they change.
     Tray(Vec<tray::TrayItem>),
     /// A tray icon's menu, asked for with [`Command::TrayMenu`].
-    TrayMenu { item: String, menu: Vec<tray::MenuNode> },
+    TrayMenu {
+        item: String,
+        menu: Vec<tray::MenuNode>,
+    },
     /// The media player shown in the bar, whenever it changes.
     Media(Option<mpris::Media>),
 }
@@ -35,16 +38,41 @@ pub enum Event {
 /// From the main loop to the bus.
 #[derive(Debug)]
 pub enum Command {
-    NotificationClosed { id: u32, reason: notify::CloseReason },
-    ActionInvoked { id: u32, key: String },
-    TrayActivate { item: String, x: i32, y: i32 },
-    TraySecondary { item: String, x: i32, y: i32 },
-    TrayScroll { item: String, delta: i32 },
-    TrayMenu { item: String },
-    TrayMenuClick { item: String, id: i32 },
+    NotificationClosed {
+        id: u32,
+        reason: notify::CloseReason,
+    },
+    ActionInvoked {
+        id: u32,
+        key: String,
+    },
+    TrayActivate {
+        item: String,
+        x: i32,
+        y: i32,
+    },
+    TraySecondary {
+        item: String,
+        x: i32,
+        y: i32,
+    },
+    TrayScroll {
+        item: String,
+        delta: i32,
+    },
+    TrayMenu {
+        item: String,
+    },
+    TrayMenuClick {
+        item: String,
+        id: i32,
+    },
     Media(mpris::MediaCommand),
     /// Set a backlight (by name) through logind.
-    SetBrightness { device: String, value: u32 },
+    SetBrightness {
+        device: String,
+        value: u32,
+    },
 }
 
 /// What the worker thread is told: a command, or that something should be read again.
@@ -134,7 +162,8 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(2);
 const MEDIA_POLL: Duration = Duration::from_secs(5);
 
 fn worker(options: Options, events: channel::Sender<Event>, rx: mpsc::Receiver<Msg>, me: mpsc::Sender<Msg>) {
-    let conn = match zbus::blocking::connection::Builder::session().and_then(|b| b.method_timeout(CALL_TIMEOUT).build()) {
+    let conn = match zbus::blocking::connection::Builder::session().and_then(|b| b.method_timeout(CALL_TIMEOUT).build())
+    {
         Ok(c) => c,
         Err(e) => return tracing::warn!("no session bus, so no tray, media or notifications: {e}"),
     };
@@ -206,7 +235,8 @@ fn worker(options: Options, events: channel::Sender<Event>, rx: mpsc::Receiver<M
                 if name.starts_with(mpris::PREFIX) || name.starts_with(':') {
                     let _ = me.send(Msg::Media);
                 }
-                tray.name_gone(&conn, &name).is_none_or(|items| send(Event::Tray(items)))
+                tray.name_gone(&conn, &name)
+                    .is_none_or(|items| send(Event::Tray(items)))
             }
             Msg::Media => media.refresh(&conn).is_none_or(|m| send(Event::Media(m))),
         };
@@ -250,7 +280,8 @@ fn listen(conn: &zbus::blocking::Connection, me: mpsc::Sender<Msg>) {
         ),
     ];
     for (rule, to_msg) in rules {
-        let iter = match zbus::MatchRule::try_from(rule).and_then(|r| zbus::blocking::MessageIterator::for_match_rule(r, conn, Some(64)))
+        let iter = match zbus::MatchRule::try_from(rule)
+            .and_then(|r| zbus::blocking::MessageIterator::for_match_rule(r, conn, Some(64)))
         {
             Ok(i) => i,
             Err(e) => {

@@ -39,7 +39,9 @@ use smithay_client_toolkit::{
         Capability, SeatHandler, SeatState,
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
     },
-    session_lock::{SessionLock, SessionLockHandler, SessionLockState, SessionLockSurface, SessionLockSurfaceConfigure},
+    session_lock::{
+        SessionLock, SessionLockHandler, SessionLockState, SessionLockSurface, SessionLockSurfaceConfigure,
+    },
     shm::{Shm, ShmHandler, slot::SlotPool},
 };
 use wayland_client::{
@@ -82,7 +84,10 @@ fn main() {
     // No core dumps: they could hold the password.
     // SAFETY: setrlimit with a valid struct.
     unsafe {
-        let none = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        let none = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
         libc::setrlimit(libc::RLIMIT_CORE, &none);
         libc::setlocale(libc::LC_TIME, c"".as_ptr());
     }
@@ -186,7 +191,9 @@ fn run(parent_pipe: Option<OwnedFd>) -> Result<i32, Box<dyn std::error::Error>> 
     let mut event_loop: EventLoop<Locker> = EventLoop::try_new()?;
 
     let config = kiln_config::Config::default_path().and_then(|p| kiln_config::Config::read(&p).ok());
-    let theme = config.map(|c| c.theme).unwrap_or_else(|| kiln_config::Config::default().theme);
+    let theme = config
+        .map(|c| c.theme)
+        .unwrap_or_else(|| kiln_config::Config::default().theme);
     let (user, user_label) = user();
     let look = Look {
         text: kiln_draw::Text::load(&theme.font),
@@ -296,7 +303,10 @@ impl Locker {
             return;
         }
         let wl_surface = self.compositor.create_surface(&self.qh);
-        let viewport = self.viewporter.as_ref().map(|v| v.get_viewport(&wl_surface, &self.qh, ()));
+        let viewport = self
+            .viewporter
+            .as_ref()
+            .map(|v| v.get_viewport(&wl_surface, &self.qh, ()));
         let fractional = self
             .fractional
             .as_ref()
@@ -341,7 +351,12 @@ impl Locker {
 
         let bg = draw::background(&self.look.theme);
         let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-        let fill = [to_u8(bg[2] * bg[3]), to_u8(bg[1] * bg[3]), to_u8(bg[0] * bg[3]), to_u8(bg[3])];
+        let fill = [
+            to_u8(bg[2] * bg[3]),
+            to_u8(bg[1] * bg[3]),
+            to_u8(bg[0] * bg[3]),
+            to_u8(bg[3]),
+        ];
         for px in pixels.chunks_exact_mut(4) {
             px.copy_from_slice(&fill);
         }
@@ -452,7 +467,11 @@ impl SessionLockHandler for Locker {
         configure: SessionLockSurfaceConfigure,
         _: u32,
     ) {
-        if let Some(s) = self.screens.iter_mut().find(|s| s.surface.wl_surface() == surface.wl_surface()) {
+        if let Some(s) = self
+            .screens
+            .iter_mut()
+            .find(|s| s.surface.wl_surface() == surface.wl_surface())
+        {
             s.size = configure.new_size;
             s.dirty = true;
         }
@@ -533,7 +552,17 @@ impl SeatHandler for Locker {
 }
 
 impl KeyboardHandler for Locker {
-    fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlKeyboard, _: &WlSurface, _: u32, _: &[u32], _: &[Keysym]) {}
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlKeyboard,
+        _: &WlSurface,
+        _: u32,
+        _: &[u32],
+        _: &[Keysym],
+    ) {
+    }
 
     fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlKeyboard, _: &WlSurface, _: u32) {}
 

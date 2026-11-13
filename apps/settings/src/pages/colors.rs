@@ -1,11 +1,11 @@
 //! The palette editor: every named color with a swatch, its formula and what it's used for.
 
-use toml_edit::Item;
 use kiln_config::theme::{self, ColorDefs, Palette};
 use kiln_ui::{
     color,
     egui::{self, Align, Color32, Layout, RichText, Ui},
 };
+use toml_edit::Item;
 
 use crate::{doc::ConfigDoc, widgets};
 

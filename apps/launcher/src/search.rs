@@ -24,7 +24,10 @@ pub fn score(query: &str, app: &App) -> Option<i32> {
             1000
         } else if name.starts_with(&w) {
             800
-        } else if name.split(|c: char| !c.is_alphanumeric()).any(|part| part.starts_with(&w)) {
+        } else if name
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|part| part.starts_with(&w))
+        {
             600
         } else if name.contains(&w) {
             450

@@ -13,12 +13,12 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use kiln_config::theme::Palette;
 use kiln_files::{
     fs::{self, Entry, Mime, Place, SortBy},
     trash,
     view::{self, CrumbClick, ICON, Icons, Search, cell_text, clipped_text, paint_image},
 };
-use kiln_config::theme::Palette;
 use kiln_ui::{
     Look, color, eframe,
     egui::{
@@ -955,7 +955,10 @@ impl eframe::App for Manager {
 impl Manager {
     /// Add folders to the sidebar (GTK's bookmarks, shared with other apps).
     fn add_to_sidebar(&mut self, dirs: Vec<PathBuf>) {
-        let name = |d: &Path| d.file_name().map_or_else(|| d.display().to_string(), |n| n.to_string_lossy().into_owned());
+        let name = |d: &Path| {
+            d.file_name()
+                .map_or_else(|| d.display().to_string(), |n| n.to_string_lossy().into_owned())
+        };
         let mut added = Vec::new();
         for dir in &dirs {
             if self.places.iter().any(|p| p.path.as_ref() == Some(dir)) {
@@ -984,7 +987,12 @@ impl Manager {
 
     /// What Ctrl+D and the menus add: the folders selected, else the folder shown.
     fn sidebar_candidates(&self) -> Vec<PathBuf> {
-        let dirs: Vec<PathBuf> = self.selection().into_iter().filter(|e| e.is_dir).map(|e| e.path).collect();
+        let dirs: Vec<PathBuf> = self
+            .selection()
+            .into_iter()
+            .filter(|e| e.is_dir)
+            .map(|e| e.path)
+            .collect();
         if !dirs.is_empty() || self.loc == Loc::Trash {
             return dirs;
         }
@@ -1102,7 +1110,14 @@ impl Manager {
             });
             let (r, b) = view::place_row_with(ui, p, &mut self.icons, &d.label, &d.icon, current, Some(&tip), button);
             if b.is_some_and(|b| b.clicked()) {
-                act = Some((d.clone(), if d.ejectable { DriveAct::Eject } else { DriveAct::Unmount }));
+                act = Some((
+                    d.clone(),
+                    if d.ejectable {
+                        DriveAct::Eject
+                    } else {
+                        DriveAct::Unmount
+                    },
+                ));
             } else if r.clicked() {
                 act = Some((d.clone(), DriveAct::Open));
             }
@@ -1224,8 +1239,12 @@ impl Manager {
             });
         });
         if target == Some(DropTarget::Sidebar) {
-            ui.painter()
-                .rect_stroke(panel.shrink(2.0), radius, Stroke::new(2.0, accent), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(
+                panel.shrink(2.0),
+                radius,
+                Stroke::new(2.0, accent),
+                egui::StrokeKind::Inside,
+            );
         }
         if target.is_some() {
             self.drop_target = target;
@@ -1423,7 +1442,9 @@ impl Manager {
             self.open_entries(sel.clone());
         }
         if all_dirs {
-            let new = sel.iter().any(|e| !self.places.iter().any(|p| p.path.as_ref() == Some(&e.path)));
+            let new = sel
+                .iter()
+                .any(|e| !self.places.iter().any(|p| p.path.as_ref() == Some(&e.path)));
             if ui
                 .add_enabled(new, egui::Button::new("Add to Sidebar").shortcut_text("Ctrl+D"))
                 .clicked()
@@ -1532,14 +1553,7 @@ impl Manager {
             (SortBy::Size, "Size", size_w, true),
             (SortBy::Modified, date_title, date_w, true),
         ];
-        if view::sort_header(
-            ui,
-            p,
-            &columns,
-            &mut self.sort,
-            &mut self.descending,
-            false,
-        ) {
+        if view::sort_header(ui, p, &columns, &mut self.sort, &mut self.descending, false) {
             self.refresh();
         }
 
@@ -1608,7 +1622,11 @@ impl Manager {
         let out = area.show_rows(ui, row_h, shown.len(), |ui, range| {
             for i in range {
                 let e = &shown[i];
-                let sense = if can_drag { Sense::click_and_drag() } else { Sense::click() };
+                let sense = if can_drag {
+                    Sense::click_and_drag()
+                } else {
+                    Sense::click()
+                };
                 let (rect, r) = ui.allocate_exact_size(vec2(width, row_h), sense);
                 let is_sel = selected.contains(&e.path);
                 if is_sel {
@@ -1650,8 +1668,8 @@ impl Manager {
                         );
                         // In a child of its own, so it can't push the rows below.
                         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(field));
-                        let edit = kiln_ui::field(&child, egui::TextEdit::singleline(&mut rn.name))
-                            .min_size(field.size());
+                        let edit =
+                            kiln_ui::field(&child, egui::TextEdit::singleline(&mut rn.name)).min_size(field.size());
                         let te = child.add_sized(field.size(), edit);
                         if std::mem::take(&mut rn.fresh) {
                             te.request_focus();

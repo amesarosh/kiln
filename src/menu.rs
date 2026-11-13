@@ -311,7 +311,10 @@ impl Panel {
                     canvas.fill_rect(rs.x + 4 * s, rs.y + rs.h / 2, rs.w - 8 * s, s, p.separator);
                 }
                 Entry::Item {
-                    label: t, danger, checked, ..
+                    label: t,
+                    danger,
+                    checked,
+                    ..
                 } => {
                     let hovered = self.hover == Some(Hit::Item(i));
                     if hovered {

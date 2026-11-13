@@ -136,7 +136,9 @@ impl State {
             .find(|s| s.window == *window)
             .and_then(|s| s.current(now))
             .unwrap_or_default();
-        let switch = self.switch_transform(window, now).map_or_else(Default::default, |(o, _)| o);
+        let switch = self
+            .switch_transform(window, now)
+            .map_or_else(Default::default, |(o, _)| o);
         Some(loc + offset + switch)
     }
 
@@ -145,7 +147,10 @@ impl State {
         let sw = self.anims.ws_switch.as_ref()?;
         sw.progress(now)?;
         let mon = self.monitor_index(&sw.output)?;
-        self.monitors[mon].ws().contains(window).then(|| sw.transform(now, true))
+        self.monitors[mon]
+            .ws()
+            .contains(window)
+            .then(|| sw.transform(now, true))
     }
 
     /// How opaque a window is drawn this frame (fading in with a workspace switch).
@@ -173,7 +178,11 @@ impl State {
             return Vec::new();
         }
         let (offset, alpha) = sw.transform(now, false);
-        sw.old.iter().rev().map(|(w, loc)| (w.clone(), *loc + offset, alpha)).collect()
+        sw.old
+            .iter()
+            .rev()
+            .map(|(w, loc)| (w.clone(), *loc + offset, alpha))
+            .collect()
     }
 
     /// Note what monitor `mon` shows before its workspace changes, to animate from it.
@@ -330,7 +339,12 @@ impl State {
                 .anims
                 .slides
                 .retain(|s| s.current(now).is_some() && alive.contains(&s.window));
-            if state.anims.ws_switch.as_ref().is_some_and(|w| w.progress(now).is_none()) {
+            if state
+                .anims
+                .ws_switch
+                .as_ref()
+                .is_some_and(|w| w.progress(now).is_none())
+            {
                 state.anims.ws_switch = None;
             }
             state.overview_tick();

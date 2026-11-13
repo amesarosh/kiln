@@ -71,10 +71,21 @@ pub enum Event {
     /// The drives now (only sent when they change).
     List(Vec<Drive>),
     /// A drive was mounted at `path`; `open` it if that was asked for.
-    Mounted { label: String, path: PathBuf, open: bool },
+    Mounted {
+        label: String,
+        path: PathBuf,
+        open: bool,
+    },
     /// A drive was unmounted (and maybe ejected); it's no longer at `path`.
-    Unmounted { label: String, path: PathBuf, ejected: bool },
-    Failed { what: String, error: String },
+    Unmounted {
+        label: String,
+        path: PathBuf,
+        ejected: bool,
+    },
+    Failed {
+        what: String,
+        error: String,
+    },
 }
 
 pub struct Drives {
@@ -124,7 +135,9 @@ impl Drives {
                 Source::UDisks { block, .. } => {
                     PathBuf::from(call(conn, block, FILESYSTEM, "Mount")?.body().deserialize::<String>()?)
                 }
-                Source::Gvfs { monitor, volume, uri, .. } => {
+                Source::Gvfs {
+                    monitor, volume, uri, ..
+                } => {
                     // Without a mount operation: these devices don't ask for passwords.
                     let args = (volume.as_str(), "", 0u32, "");
                     conn.call_method(Some(*monitor), MONITOR_PATH, Some(MONITOR), "VolumeMount", &args)?;
@@ -133,10 +146,16 @@ impl Drives {
                         .find(|m| m.is(uri))
                         .map(|m| m.folder())
                         .filter(|p| !p.as_os_str().is_empty())
-                        .ok_or_else(|| zbus::Error::Failure("GVfs gave it no folder (is gvfs-fuse installed?)".into()))?
+                        .ok_or_else(|| {
+                            zbus::Error::Failure("GVfs gave it no folder (is gvfs-fuse installed?)".into())
+                        })?
                 }
             };
-            Ok(Event::Mounted { label: d.label, path, open })
+            Ok(Event::Mounted {
+                label: d.label,
+                path,
+                open,
+            })
         });
     }
 
@@ -152,10 +171,19 @@ impl Drives {
                         call(conn, disk, DRIVE, "Eject")?;
                     }
                 }
-                Source::Gvfs { mounted: Some((daemon, object)), .. } => {
+                Source::Gvfs {
+                    mounted: Some((daemon, object)),
+                    ..
+                } => {
                     // No mount operation to report back to.
                     let args = ("", ObjectPath::from_static_str_unchecked("/"), 0u32);
-                    conn.call_method(Some(daemon.as_str()), object, Some("org.gtk.vfs.Mount"), "Unmount", &args)?;
+                    conn.call_method(
+                        Some(daemon.as_str()),
+                        object,
+                        Some("org.gtk.vfs.Mount"),
+                        "Unmount",
+                        &args,
+                    )?;
                 }
                 Source::Gvfs { mounted: None, .. } => {}
             }
@@ -176,7 +204,10 @@ impl Drives {
         let Some(conn) = conn.clone() else { return };
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
-            let event = f(&conn).unwrap_or_else(|e| Event::Failed { what, error: message(&e) });
+            let event = f(&conn).unwrap_or_else(|e| Event::Failed {
+                what,
+                error: message(&e),
+            });
             let _ = tx.send(event);
             ctx.request_repaint();
         });
@@ -334,7 +365,9 @@ impl GvfsMount {
     /// Whether this is the mount of the volume at `uri` (`scheme://host/`): its spec has that
     /// type and (unescaped) host.
     fn is(&self, uri: &str) -> bool {
-        let Some((scheme, rest)) = uri.split_once("://") else { return false };
+        let Some((scheme, rest)) = uri.split_once("://") else {
+            return false;
+        };
         let host = unescape(rest.split('/').next().unwrap_or_default());
         let item = |key: &str| -> Option<Vec<u8>> {
             let mut v = Vec::<u8>::try_from(self.spec.1.get(key)?.try_clone().ok()?).ok()?;
@@ -383,7 +416,10 @@ fn gvfs_list(conn: &Connection, monitors: &mut Vec<&'static str>) -> Vec<Drive> 
     monitors.retain(|&monitor| {
         let reply = conn
             .call_method(Some(monitor), MONITOR_PATH, Some(MONITOR), "List", &())
-            .and_then(|m| m.body().deserialize::<(Vec<GvfsDrive>, Vec<GvfsVolume>, Vec<GvfsMonitorMount>)>());
+            .and_then(|m| {
+                m.body()
+                    .deserialize::<(Vec<GvfsDrive>, Vec<GvfsVolume>, Vec<GvfsMonitorMount>)>()
+            });
         match reply {
             Ok((_, vols, _)) => {
                 volumes.extend(vols.into_iter().map(|v| (monitor, v)));
@@ -455,7 +491,8 @@ fn list(objects: &Objects) -> Vec<Drive> {
         let (Some(block), Some(filesystem)) = (iface(o, BLOCK), iface(o, FILESYSTEM)) else {
             continue;
         };
-        if get(&block, "HintIgnore") == Some(true) || get::<String>(&block, "IdUsage").as_deref() != Some("filesystem") {
+        if get(&block, "HintIgnore") == Some(true) || get::<String>(&block, "IdUsage").as_deref() != Some("filesystem")
+        {
             continue;
         }
         let mounts: Vec<PathBuf> = get::<Vec<Vec<u8>>>(&filesystem, "MountPoints")
@@ -479,7 +516,10 @@ fn list(objects: &Objects) -> Vec<Drive> {
             None
         } else {
             // Mounted somewhere for people to use, or else part of the system.
-            match mounts.into_iter().find(|m| ["/media/", "/run/media/", "/mnt/"].iter().any(|r| m.starts_with(r))) {
+            match mounts
+                .into_iter()
+                .find(|m| ["/media/", "/run/media/", "/mnt/"].iter().any(|r| m.starts_with(r)))
+            {
                 Some(m) => Some(m),
                 None => continue,
             }

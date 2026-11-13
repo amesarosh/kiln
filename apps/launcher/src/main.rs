@@ -107,7 +107,10 @@ impl Launcher {
                 Some((s + (count(a) * 15).min(300), i))
             })
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| self.apps[a.1].name.cmp(&self.apps[b.1].name)));
+        scored.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| self.apps[a.1].name.cmp(&self.apps[b.1].name))
+        });
         self.matches = scored.into_iter().map(|(_, i)| i).collect();
         self.selected = 0;
         self.first = 0;
@@ -170,8 +173,12 @@ impl Launcher {
         let (down, up, enter, escape, page_down, page_up) = ctx.input(|i| {
             let ctrl = i.modifiers.ctrl;
             (
-                i.key_pressed(Key::ArrowDown) || (i.key_pressed(Key::Tab) && !i.modifiers.shift) || (ctrl && i.key_pressed(Key::N)),
-                i.key_pressed(Key::ArrowUp) || (i.key_pressed(Key::Tab) && i.modifiers.shift) || (ctrl && i.key_pressed(Key::P)),
+                i.key_pressed(Key::ArrowDown)
+                    || (i.key_pressed(Key::Tab) && !i.modifiers.shift)
+                    || (ctrl && i.key_pressed(Key::N)),
+                i.key_pressed(Key::ArrowUp)
+                    || (i.key_pressed(Key::Tab) && i.modifiers.shift)
+                    || (ctrl && i.key_pressed(Key::P)),
                 i.key_pressed(Key::Enter),
                 i.key_pressed(Key::Escape),
                 i.key_pressed(Key::PageDown),
@@ -222,25 +229,52 @@ impl Launcher {
             let (title, detail, icon) = match self.matches.get(row) {
                 Some(&i) => {
                     let a = &self.apps[i];
-                    let detail = if !a.comment.is_empty() { a.comment.clone() } else { a.generic.clone() };
+                    let detail = if !a.comment.is_empty() {
+                        a.comment.clone()
+                    } else {
+                        a.generic.clone()
+                    };
                     (a.name.clone(), detail, a.icon.clone())
                 }
-                None => (format!("Run “{}”", self.query.trim()), "As a command".into(), String::new()),
+                None => (
+                    format!("Run “{}”", self.query.trim()),
+                    "As a command".into(),
+                    String::new(),
+                ),
             };
             match (!icon.is_empty()).then(|| self.texture(&ctx, &icon, px)).flatten() {
                 Some(t) => {
-                    painter.image(t.id(), icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    painter.image(
+                        t.id(),
+                        icon_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
                 }
                 None => {
                     painter.rect_filled(icon_rect, radius.min(ICON / 3.0), color(p.hover));
-                    let letter: String = title.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
-                    painter.text(icon_rect.center(), egui::Align2::CENTER_CENTER, letter, egui::FontId::proportional(18.0), color(p.text));
+                    let letter: String = title
+                        .chars()
+                        .next()
+                        .map(|c| c.to_uppercase().collect())
+                        .unwrap_or_default();
+                    painter.text(
+                        icon_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        letter,
+                        egui::FontId::proportional(18.0),
+                        color(p.text),
+                    );
                 }
             }
             let size = self.look.theme.font_size;
             let galley_title = painter.layout_no_wrap(title, egui::FontId::proportional(size), color(p.text));
             let has_detail = !detail.is_empty();
-            let title_y = if has_detail { rect.min.y + 6.0 } else { rect.center().y - galley_title.size().y / 2.0 };
+            let title_y = if has_detail {
+                rect.min.y + 6.0
+            } else {
+                rect.center().y - galley_title.size().y / 2.0
+            };
             painter.galley(egui::pos2(text_x, title_y), galley_title, color(p.text));
             if has_detail {
                 let galley = painter.layout(
@@ -251,8 +285,15 @@ impl Launcher {
                 );
                 // One line only.
                 let row_h = galley.rows.first().map_or(0.0, |r| r.rect().height());
-                let clip = egui::Rect::from_min_max(egui::pos2(text_x, rect.min.y), egui::pos2(rect.max.x - 10.0, rect.min.y + 8.0 + size * 1.25 + row_h));
-                painter.with_clip_rect(clip).galley(egui::pos2(text_x, rect.min.y + 8.0 + size * 1.25), galley, color(p.subtext));
+                let clip = egui::Rect::from_min_max(
+                    egui::pos2(text_x, rect.min.y),
+                    egui::pos2(rect.max.x - 10.0, rect.min.y + 8.0 + size * 1.25 + row_h),
+                );
+                painter.with_clip_rect(clip).galley(
+                    egui::pos2(text_x, rect.min.y + 8.0 + size * 1.25),
+                    galley,
+                    color(p.subtext),
+                );
             }
         }
         if self.row_count() == 0 {

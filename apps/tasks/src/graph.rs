@@ -92,7 +92,12 @@ pub fn paint(
         }
     }
     if framed {
-        painter.rect_stroke(rect, radius, Stroke::new(1.0, color(p.separator)), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.0, color(p.separator)),
+            egui::StrokeKind::Inside,
+        );
     }
 }
 

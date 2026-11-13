@@ -67,7 +67,14 @@ pub fn card(look: &Look, ui: &Ui, scale: f64, cw: i32, ch: i32) -> Canvas {
         let x = (cw as f32 - total) / 2.0;
         let baseline = y + big * 1.05;
         text.draw(&mut c, &time, big, (x, baseline), p.text, full);
-        text.draw(&mut c, ampm, small, (x + text.width(&time, big) + gap, baseline), p.subtext, full);
+        text.draw(
+            &mut c,
+            ampm,
+            small,
+            (x + text.width(&time, big) + gap, baseline),
+            p.subtext,
+            full,
+        );
         y = baseline + fs * 0.9;
 
         let day = date();
@@ -110,7 +117,11 @@ pub fn card(look: &Look, ui: &Ui, scale: f64, cw: i32, ch: i32) -> Canvas {
     let mid_y = fy as f32 + field_h as f32 / 2.0;
     if ui.password.is_empty() || ui.checking {
         if let Some(text) = &look.text {
-            let hint = if ui.checking { "Checking…" } else { "Type your password" };
+            let hint = if ui.checking {
+                "Checking…"
+            } else {
+                "Type your password"
+            };
             let px = fs;
             let baseline = text.centered_baseline(fy as f32, field_h as f32, px);
             text.draw(&mut c, hint, px, (center(text, hint, px), baseline), p.subtext, full);
@@ -157,7 +168,10 @@ pub fn card(look: &Look, ui: &Ui, scale: f64, cw: i32, ch: i32) -> Canvas {
 fn clock() -> (String, &'static str) {
     let tm = local_time();
     let h12 = if tm.tm_hour % 12 == 0 { 12 } else { tm.tm_hour % 12 };
-    (format!("{h12}:{:02}", tm.tm_min), if tm.tm_hour < 12 { "AM" } else { "PM" })
+    (
+        format!("{h12}:{:02}", tm.tm_min),
+        if tm.tm_hour < 12 { "AM" } else { "PM" },
+    )
 }
 
 /// Today, like "Wednesday, October 21", in the user's language.

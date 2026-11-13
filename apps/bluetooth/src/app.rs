@@ -368,8 +368,9 @@ impl BluetoothApp {
                     title(ui, format!("Pair with {device}"));
                     ui.label(RichText::new(format!("Type the code {device} shows:")).color(color(p.subtext)));
                     ui.add_space(6.0);
-                    let field = ui
-                        .add(kiln_ui::field(ui, egui::TextEdit::singleline(&mut self.code)).desired_width(f32::INFINITY));
+                    let field = ui.add(
+                        kiln_ui::field(ui, egui::TextEdit::singleline(&mut self.code)).desired_width(f32::INFINITY),
+                    );
                     field.request_focus();
                     let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.add_space(6.0);

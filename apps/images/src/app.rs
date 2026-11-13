@@ -8,8 +8,8 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use kiln_files::{fs, trash, view::Icons};
 use kiln_config::theme::Palette;
+use kiln_files::{fs, trash, view::Icons};
 use kiln_ui::{
     Look, color, eframe,
     egui::{
@@ -421,15 +421,8 @@ impl Viewer {
             {
                 self.step(-1);
             }
-            if kiln_files::view::icon_button(
-                ui,
-                p,
-                &mut self.icons,
-                "go-next-symbolic",
-                "Next (Right)",
-                several,
-            )
-            .clicked()
+            if kiln_files::view::icon_button(ui, p, &mut self.icons, "go-next-symbolic", "Next (Right)", several)
+                .clicked()
             {
                 self.step(1);
             }
@@ -537,15 +530,8 @@ impl Viewer {
                         self.actual_size(&ctx, None);
                     }
                 }
-                if kiln_files::view::icon_button(
-                    ui,
-                    p,
-                    &mut self.icons,
-                    "zoom-out-symbolic",
-                    "Zoom out (−)",
-                    has,
-                )
-                .clicked()
+                if kiln_files::view::icon_button(ui, p, &mut self.icons, "zoom-out-symbolic", "Zoom out (−)", has)
+                    .clicked()
                 {
                     self.zoom_by(&ctx, 0.8, None);
                 }

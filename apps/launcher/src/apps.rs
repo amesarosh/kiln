@@ -35,7 +35,9 @@ pub fn load() -> Vec<App> {
             if !seen.insert(id.clone()) {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(&file) else { continue };
+            let Ok(text) = std::fs::read_to_string(&file) else {
+                continue;
+            };
             if let Some(app) = parse(&id, &text) {
                 apps.push(app);
             }
@@ -61,7 +63,13 @@ fn parse(id: &str, text: &str) -> Option<App> {
         return None;
     }
     let desktop = "kiln";
-    let list = |k: &str| get(k).split(';').filter(|s| !s.is_empty()).map(str::to_string).collect::<Vec<_>>();
+    let list = |k: &str| {
+        get(k)
+            .split(';')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
     let only = list("OnlyShowIn");
     if !only.is_empty() && !only.iter().any(|d| d.eq_ignore_ascii_case(desktop)) {
         return None;
@@ -123,10 +131,19 @@ pub fn terminal() -> Option<String> {
     {
         return Some(t);
     }
-    ["alacritty", "kitty", "foot", "wezterm", "ghostty", "gnome-terminal", "konsole", "xterm"]
-        .into_iter()
-        .find(|t| on_path(t))
-        .map(String::from)
+    [
+        "alacritty",
+        "kitty",
+        "foot",
+        "wezterm",
+        "ghostty",
+        "gnome-terminal",
+        "konsole",
+        "xterm",
+    ]
+    .into_iter()
+    .find(|t| on_path(t))
+    .map(String::from)
 }
 
 /// How many times each app was launched, kept in the state folder.
@@ -195,7 +212,19 @@ mod tests {
         assert_eq!(app.name, "Files");
         assert_eq!(app.exec, "nautilus --new-window");
         assert_eq!(app.keywords, vec!["folder", "manager"]);
-        assert!(parse("y.desktop", "[Desktop Entry]\nType=Application\nName=X\nExec=x\nNoDisplay=true\n").is_none());
-        assert!(parse("z.desktop", "[Desktop Entry]\nType=Application\nName=X\nExec=x\nOnlyShowIn=GNOME;\n").is_none());
+        assert!(
+            parse(
+                "y.desktop",
+                "[Desktop Entry]\nType=Application\nName=X\nExec=x\nNoDisplay=true\n"
+            )
+            .is_none()
+        );
+        assert!(
+            parse(
+                "z.desktop",
+                "[Desktop Entry]\nType=Application\nName=X\nExec=x\nOnlyShowIn=GNOME;\n"
+            )
+            .is_none()
+        );
     }
 }

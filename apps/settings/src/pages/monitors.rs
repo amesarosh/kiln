@@ -1,12 +1,12 @@
 //! Per-monitor settings (`[[outputs]]`): mode, scale, position, rotation, HDR, bar, clock and
 //! layout.
 
-use toml_edit::{Item, Table, Value};
 use kiln_config::theme::Palette;
 use kiln_ui::{
     color,
     egui::{self, Align, Layout, RichText, Ui},
 };
+use toml_edit::{Item, Table, Value};
 
 use super::Cache;
 use crate::{
@@ -201,7 +201,10 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                 widgets::row(
                     ui,
                     p,
-                    info("HDR", "Brighter highlights and richer colours, on monitors that support HDR10."),
+                    info(
+                        "HDR",
+                        "Brighter highlights and richer colours, on monitors that support HDR10.",
+                    ),
                     |ui| {
                         let mut on = hdr;
                         if widgets::toggle(ui, p, &mut on).changed() {
@@ -338,7 +341,10 @@ struct Screen {
 
 impl Screen {
     fn overlaps(&self, o: &Screen) -> bool {
-        self.x < o.x + o.w - 0.5 && o.x < self.x + self.w - 0.5 && self.y < o.y + o.h - 0.5 && o.y < self.y + self.h - 0.5
+        self.x < o.x + o.w - 0.5
+            && o.x < self.x + self.w - 0.5
+            && self.y < o.y + o.h - 0.5
+            && o.y < self.y + self.h - 0.5
     }
 }
 
@@ -397,9 +403,15 @@ fn snap(dropped: &Screen, others: &[Screen]) -> (f32, f32) {
     for o in others {
         // Along a vertical edge (left or right of `o`), keep y but stay touching.
         let y = (d.y).clamp(o.y - d.h + 1.0, o.y + o.h - 1.0);
-        let y = [o.y, o.y + o.h - d.h].into_iter().find(|a| (a - y).abs() < ALIGN).unwrap_or(y);
+        let y = [o.y, o.y + o.h - d.h]
+            .into_iter()
+            .find(|a| (a - y).abs() < ALIGN)
+            .unwrap_or(y);
         let x = (d.x).clamp(o.x - d.w + 1.0, o.x + o.w - 1.0);
-        let x = [o.x, o.x + o.w - d.w].into_iter().find(|a| (a - x).abs() < ALIGN).unwrap_or(x);
+        let x = [o.x, o.x + o.w - d.w]
+            .into_iter()
+            .find(|a| (a - x).abs() < ALIGN)
+            .unwrap_or(x);
         for (cx, cy) in [(o.x + o.w, y), (o.x - d.w, y), (x, o.y + o.h), (x, o.y - d.h)] {
             let c = Screen {
                 x: cx,
@@ -432,77 +444,99 @@ fn arrangement(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, connected: &[Monit
     let (bw, bh) = ((max_x - min_x).max(1.0), (max_y - min_y).max(1.0));
 
     let mut save: Option<Vec<Screen>> = None;
-    widgets::card(ui, p, "Arrangement", "Drag a monitor to move it. It snaps to the edges of the others.", |ui| {
-        let width = ui.available_width();
-        let height = 220.0f32.min(width * 0.45);
-        let (area, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-        let pad = 16.0;
-        // Leave room around the monitors so one can be dragged past the others.
-        let k = ((width - 2.0 * pad) / (bw * 1.4)).min((height - 2.0 * pad) / (bh * 1.4));
-        let origin = area.center() - egui::vec2(bw * k, bh * k) / 2.0;
-        let to_ui = |s: &Screen| {
-            egui::Rect::from_min_size(
-                origin + egui::vec2((s.x - min_x) * k, (s.y - min_y) * k),
-                egui::vec2(s.w * k, s.h * k),
-            )
-        };
-        let painter = ui.painter_at(area);
-        painter.rect_filled(area, 6.0, color(p.base));
-
-        let drag_id = ui.id().with("map-drag");
-        let mut dragging: Option<(String, egui::Vec2)> = ui.data(|d| d.get_temp(drag_id));
-        for s in &screens {
-            let rect = to_ui(s);
-            let r = ui.interact(rect, drag_id.with(&s.name), egui::Sense::drag());
-            if r.drag_started()
-                && let Some(pos) = r.interact_pointer_pos()
-            {
-                dragging = Some((s.name.clone(), pos - rect.min));
-            }
-            let held = dragging.as_ref().is_some_and(|(n, _)| *n == s.name);
-            let shown = match (&dragging, r.interact_pointer_pos()) {
-                (Some((n, grab)), Some(pos)) if *n == s.name => egui::Rect::from_min_size(pos - *grab, rect.size()),
-                _ => rect,
+    widgets::card(
+        ui,
+        p,
+        "Arrangement",
+        "Drag a monitor to move it. It snaps to the edges of the others.",
+        |ui| {
+            let width = ui.available_width();
+            let height = 220.0f32.min(width * 0.45);
+            let (area, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+            let pad = 16.0;
+            // Leave room around the monitors so one can be dragged past the others.
+            let k = ((width - 2.0 * pad) / (bw * 1.4)).min((height - 2.0 * pad) / (bh * 1.4));
+            let origin = area.center() - egui::vec2(bw * k, bh * k) / 2.0;
+            let to_ui = |s: &Screen| {
+                egui::Rect::from_min_size(
+                    origin + egui::vec2((s.x - min_x) * k, (s.y - min_y) * k),
+                    egui::vec2(s.w * k, s.h * k),
+                )
             };
-            if r.drag_stopped()
-                && held
-                && let Some((_, grab)) = &dragging
-                && let Some(pos) = r.interact_pointer_pos().or(ui.input(|i| i.pointer.latest_pos()))
-            {
-                let corner = pos - *grab - origin;
-                let dropped = Screen {
-                    x: corner.x / k + min_x,
-                    y: corner.y / k + min_y,
-                    ..s.clone()
+            let painter = ui.painter_at(area);
+            painter.rect_filled(area, 6.0, color(p.base));
+
+            let drag_id = ui.id().with("map-drag");
+            let mut dragging: Option<(String, egui::Vec2)> = ui.data(|d| d.get_temp(drag_id));
+            for s in &screens {
+                let rect = to_ui(s);
+                let r = ui.interact(rect, drag_id.with(&s.name), egui::Sense::drag());
+                if r.drag_started()
+                    && let Some(pos) = r.interact_pointer_pos()
+                {
+                    dragging = Some((s.name.clone(), pos - rect.min));
+                }
+                let held = dragging.as_ref().is_some_and(|(n, _)| *n == s.name);
+                let shown = match (&dragging, r.interact_pointer_pos()) {
+                    (Some((n, grab)), Some(pos)) if *n == s.name => egui::Rect::from_min_size(pos - *grab, rect.size()),
+                    _ => rect,
                 };
-                let others: Vec<Screen> = screens.iter().filter(|o| o.name != s.name).cloned().collect();
-                let (x, y) = snap(&dropped, &others);
-                let mut all = others;
-                all.push(Screen { x, y, ..s.clone() });
-                save = Some(all);
-                dragging = None;
+                if r.drag_stopped()
+                    && held
+                    && let Some((_, grab)) = &dragging
+                    && let Some(pos) = r.interact_pointer_pos().or(ui.input(|i| i.pointer.latest_pos()))
+                {
+                    let corner = pos - *grab - origin;
+                    let dropped = Screen {
+                        x: corner.x / k + min_x,
+                        y: corner.y / k + min_y,
+                        ..s.clone()
+                    };
+                    let others: Vec<Screen> = screens.iter().filter(|o| o.name != s.name).cloned().collect();
+                    let (x, y) = snap(&dropped, &others);
+                    let mut all = others;
+                    all.push(Screen { x, y, ..s.clone() });
+                    save = Some(all);
+                    dragging = None;
+                }
+                let fill = if held {
+                    p.selected
+                } else if r.hovered() {
+                    p.hover
+                } else {
+                    p.raised
+                };
+                let stroke = if held { p.accent } else { p.separator };
+                painter.rect(
+                    shown,
+                    4.0,
+                    color(fill),
+                    egui::Stroke::new(1.5, color(stroke)),
+                    egui::StrokeKind::Inside,
+                );
+                painter.text(
+                    shown.center(),
+                    egui::Align2::CENTER_CENTER,
+                    &s.name,
+                    egui::FontId::proportional(13.0),
+                    color(p.text),
+                );
+                if r.hovered() || held {
+                    ui.ctx().set_cursor_icon(if held {
+                        egui::CursorIcon::Grabbing
+                    } else {
+                        egui::CursorIcon::Grab
+                    });
+                }
             }
-            let fill = if held { p.selected } else if r.hovered() { p.hover } else { p.raised };
-            let stroke = if held { p.accent } else { p.separator };
-            painter.rect(shown, 4.0, color(fill), egui::Stroke::new(1.5, color(stroke)), egui::StrokeKind::Inside);
-            painter.text(
-                shown.center(),
-                egui::Align2::CENTER_CENTER,
-                &s.name,
-                egui::FontId::proportional(13.0),
-                color(p.text),
-            );
-            if r.hovered() || held {
-                ui.ctx().set_cursor_icon(if held { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
-            }
-        }
-        ui.data_mut(|d| match &dragging {
-            Some(v) => {
-                d.insert_temp(drag_id, v.clone());
-            }
-            None => d.remove::<(String, egui::Vec2)>(drag_id),
-        });
-    });
+            ui.data_mut(|d| match &dragging {
+                Some(v) => {
+                    d.insert_temp(drag_id, v.clone());
+                }
+                None => d.remove::<(String, egui::Vec2)>(drag_id),
+            });
+        },
+    );
 
     // Save every monitor's position, shifted so the top-left one is at 0, 0.
     if let Some(all) = save {
@@ -535,9 +569,15 @@ mod tests {
     fn snaps_to_the_nearest_free_edge() {
         let a = s("A", 0.0, 0.0, 1920.0, 1080.0);
         // Dropped overlapping A's right half: goes to A's right edge, tops lined up.
-        assert_eq!(snap(&s("B", 1500.0, 30.0, 1280.0, 1024.0), std::slice::from_ref(&a)), (1920.0, 0.0));
+        assert_eq!(
+            snap(&s("B", 1500.0, 30.0, 1280.0, 1024.0), std::slice::from_ref(&a)),
+            (1920.0, 0.0)
+        );
         // Dropped below A, a little left: goes under it, left edges lined up.
-        assert_eq!(snap(&s("B", -20.0, 1200.0, 1280.0, 1024.0), std::slice::from_ref(&a)), (0.0, 1080.0));
+        assert_eq!(
+            snap(&s("B", -20.0, 1200.0, 1280.0, 1024.0), std::slice::from_ref(&a)),
+            (0.0, 1080.0)
+        );
         // Never on top of a third monitor.
         let c = s("C", 1920.0, 0.0, 1920.0, 1080.0);
         let (x, y) = snap(&s("B", 1800.0, 10.0, 1280.0, 1024.0), &[a, c.clone()]);

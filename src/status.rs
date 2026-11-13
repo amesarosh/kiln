@@ -69,7 +69,9 @@ pub fn battery() -> Option<Battery> {
     let mut n = 0u32;
     let (mut charging, mut all_full) = (false, true);
     for dev in entries("/sys/class/power_supply") {
-        if read(&dev.join("type")).as_deref() != Some("Battery") || read(&dev.join("scope")).as_deref() == Some("Device") {
+        if read(&dev.join("type")).as_deref() != Some("Battery")
+            || read(&dev.join("scope")).as_deref() == Some("Device")
+        {
             continue;
         }
         let Some(cap) = read(&dev.join("capacity")).and_then(|c| c.parse::<u32>().ok()) else {
@@ -99,7 +101,10 @@ pub fn network() -> Network {
             continue;
         }
         if dev.join("wireless").is_dir() || dev.join("phy80211").exists() {
-            let name = dev.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let name = dev
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
             // "wlan0: 0000   54.  -56.  ..." – link quality out of 70.
             let quality = wireless_quality
                 .lines()
@@ -131,10 +136,12 @@ impl State {
     /// Read the status now and every few seconds after.
     pub fn start_status_timer(&mut self) {
         self.refresh_status();
-        let result = self.loop_handle.insert_source(Timer::from_duration(POLL), |_, _, state| {
-            state.refresh_status();
-            TimeoutAction::ToDuration(POLL)
-        });
+        let result = self
+            .loop_handle
+            .insert_source(Timer::from_duration(POLL), |_, _, state| {
+                state.refresh_status();
+                TimeoutAction::ToDuration(POLL)
+            });
         if let Err(e) = result {
             tracing::warn!("status timer: {e}");
         }
@@ -151,7 +158,11 @@ impl State {
         let bar = &self.config.bar;
         let status = Status {
             battery: bar.has(Widget::Battery).then(battery).flatten(),
-            network: if bar.has(Widget::Network) { network() } else { Network::Offline },
+            network: if bar.has(Widget::Network) {
+                network()
+            } else {
+                Network::Offline
+            },
             brightness: bar.has(Widget::Brightness).then(brightness).flatten(),
         };
         if status != self.status {
@@ -199,6 +210,11 @@ mod tests {
     /// Reports what this machine has. `cargo test status_here -- --nocapture`
     #[test]
     fn status_here() {
-        eprintln!("battery {:?} network {:?} brightness {:?}", battery(), network(), brightness());
+        eprintln!(
+            "battery {:?} network {:?} brightness {:?}",
+            battery(),
+            network(),
+            brightness()
+        );
     }
 }

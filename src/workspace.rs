@@ -77,11 +77,7 @@ impl<W: Clone + PartialEq> Workspace<W> {
 
     /// Height shares of the tiled windows, in tiling order.
     pub fn tiled_weights(&self) -> Vec<f32> {
-        self.entries
-            .iter()
-            .filter(|e| e.is_tiled())
-            .map(|e| e.weight)
-            .collect()
+        self.entries.iter().filter(|e| e.is_tiled()).map(|e| e.weight).collect()
     }
 
     pub fn tiled(&self) -> impl Iterator<Item = &W> {
@@ -183,7 +179,9 @@ impl<W: Clone + PartialEq> Workspace<W> {
 
     /// Focus the next or previous shown window; minimized ones are skipped.
     pub fn focus_dir(&mut self, dir: Dir) {
-        let shown: Vec<usize> = (0..self.entries.len()).filter(|&i| !self.entries[i].minimized).collect();
+        let shown: Vec<usize> = (0..self.entries.len())
+            .filter(|&i| !self.entries[i].minimized)
+            .collect();
         if shown.is_empty() {
             return;
         }
@@ -290,7 +288,10 @@ impl<W: Clone + PartialEq> Workspace<W> {
         let mut entry = self.entries.remove(k);
         entry.weight = 1.0;
         let at = if after {
-            self.entries.iter().rposition(|e| e.is_tiled()).map_or(self.entries.len(), |i| i + 1)
+            self.entries
+                .iter()
+                .rposition(|e| e.is_tiled())
+                .map_or(self.entries.len(), |i| i + 1)
         } else {
             self.entries.iter().position(|e| e.is_tiled()).unwrap_or(0)
         };
@@ -351,9 +352,7 @@ pub fn merge_workspaces<W: Clone + PartialEq>(into: &mut [Workspace<W>], from: V
             }
         }
         // Keep what the target had focused; otherwise use what was focused on the old monitor.
-        target.focus = focus_before
-            .or(ws.focus)
-            .or_else(|| target.shown_near(0));
+        target.focus = focus_before.or(ws.focus).or_else(|| target.shown_near(0));
     }
 }
 
