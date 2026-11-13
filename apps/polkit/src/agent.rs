@@ -11,7 +11,7 @@ use std::{collections::HashMap, sync::Mutex};
 use smithay_client_toolkit::reexports::calloop::channel::Sender;
 use zbus::zvariant::{OwnedValue, Value};
 
-const PATH: &str = "/org/wayland_time/PolicyKit1/AuthenticationAgent";
+const PATH: &str = "/org/kiln/PolicyKit1/AuthenticationAgent";
 
 /// Someone who can give the password: polkit asks for one of these.
 #[derive(Debug, Clone, PartialEq)]

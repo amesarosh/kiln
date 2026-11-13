@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Files
+Comment=Browse, open, copy, move and trash your files
+Exec=kiln-file-manager %U
+Icon=system-file-manager
+Categories=System;FileTools;FileManager;
+Keywords=folder;explorer;browser;file manager;
+OnlyShowIn=kiln;
+StartupWMClass=kiln-file-manager

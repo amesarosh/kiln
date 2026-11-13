@@ -1,7 +1,7 @@
-//! `wayland-time msg <action>`: run an action in the running compositor from a script.
+//! `kiln msg <action>`: run an action in the running compositor from a script.
 //!
-//! The compositor listens on `$XDG_RUNTIME_DIR/wayland-time.<WAYLAND_DISPLAY>.sock` (the path
-//! is also in `$WAYLAND_TIME_SOCKET` for programs it starts). A client sends one line, an action
+//! The compositor listens on `$XDG_RUNTIME_DIR/kiln.<WAYLAND_DISPLAY>.sock` (the path
+//! is also in `$KILN_SOCKET` for programs it starts). A client sends one line, an action
 //! written as in `[binds]`, and gets back one line: `ok` or `error: ...`.
 //!
 //! A thread accepts connections and reads the line, so a slow client never holds up the
@@ -21,7 +21,7 @@ use crate::state::State;
 /// Where the socket for a Wayland display lives.
 pub fn socket_path(wayland_display: &str) -> Option<PathBuf> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty())?;
-    Some(PathBuf::from(dir).join(format!("wayland-time.{wayland_display}.sock")))
+    Some(PathBuf::from(dir).join(format!("kiln.{wayland_display}.sock")))
 }
 
 impl State {
@@ -66,7 +66,7 @@ impl State {
             tracing::warn!("msg socket thread: {e}");
             return None;
         }
-        tracing::info!("listening for `wayland-time msg` on {}", path.display());
+        tracing::info!("listening for `kiln msg` on {}", path.display());
         Some(path)
     }
 
@@ -163,11 +163,11 @@ impl State {
 
 /// The client side: send `action` to the compositor this shell's `$WAYLAND_DISPLAY` belongs to.
 pub fn send(action: &str) -> Result<String, String> {
-    let path = std::env::var_os("WAYLAND_TIME_SOCKET")
+    let path = std::env::var_os("KILN_SOCKET")
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .or_else(|| socket_path(&std::env::var("WAYLAND_DISPLAY").ok()?))
-        .ok_or("can't find the compositor: WAYLAND_DISPLAY and WAYLAND_TIME_SOCKET are unset")?;
+        .ok_or("can't find the compositor: WAYLAND_DISPLAY and KILN_SOCKET are unset")?;
     let mut stream = UnixStream::connect(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     writeln!(stream, "{action}").map_err(|e| e.to_string())?;

@@ -1,14 +1,14 @@
 [package]
-name = "wayland-time-tasks"
+name = "kiln-tasks"
 version = "0.1.0"
 edition = "2024"
-description = "Task manager for the wayland-time compositor: processes, CPU, memory, disk and network"
+description = "Task manager for the kiln compositor: processes, CPU, memory, disk and network"
 license = "MIT"
 
 [dependencies]
-wt-config = { path = "../../crates/wt-config" }
-wt-ui = { path = "../../crates/wt-ui" }
-wt-icons = { path = "../../crates/wt-icons" }
+kiln-config = { path = "../../crates/kiln-config" }
+kiln-ui = { path = "../../crates/kiln-ui" }
+kiln-icons = { path = "../../crates/kiln-icons" }
 libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

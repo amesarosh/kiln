@@ -433,7 +433,7 @@ impl DrmSurface {
         self.page_flip_with(planes, event, false)
     }
 
-    /// wayland-time: like [`page_flip`](Self::page_flip), but with `tearing` the flip happens
+    /// kiln: like [`page_flip`](Self::page_flip), but with `tearing` the flip happens
     /// as soon as possible instead of at the next vblank. The kernel refuses such a flip
     /// (`InvalidInput`) when more than the primary plane's buffer changes.
     #[profiling::function]

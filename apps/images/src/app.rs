@@ -8,9 +8,9 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
-use wayland_time_files::{fs, trash, view::Icons};
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_files::{fs, trash, view::Icons};
+use kiln_config::theme::Palette;
+use kiln_ui::{
     Look, color, eframe,
     egui::{
         self, Align, Color32, Key, Layout, Margin, PointerButton, Pos2, Rect, RichText, Sense, TextureHandle,
@@ -80,7 +80,7 @@ pub struct Viewer {
 
 impl Viewer {
     pub fn new(cc: &eframe::CreationContext<'_>, path: Option<PathBuf>) -> Self {
-        let look = Look::new(&cc.egui_ctx, wt_config::Config::default_path());
+        let look = Look::new(&cc.egui_ctx, kiln_config::Config::default_path());
         let icons = Icons::new(&look.theme.icon_theme);
         let max_side = cc.egui_ctx.input(|i| i.max_texture_side).max(2048);
         let mut v = Self {
@@ -409,7 +409,7 @@ impl Viewer {
         let has = !self.files.is_empty();
         let several = self.files.len() > 1;
         ui.horizontal(|ui| {
-            if wayland_time_files::view::icon_button(
+            if kiln_files::view::icon_button(
                 ui,
                 p,
                 &mut self.icons,
@@ -421,7 +421,7 @@ impl Viewer {
             {
                 self.step(-1);
             }
-            if wayland_time_files::view::icon_button(
+            if kiln_files::view::icon_button(
                 ui,
                 p,
                 &mut self.icons,
@@ -470,10 +470,10 @@ impl Viewer {
                 } else {
                     ("view-fullscreen-symbolic", "Full screen (F)")
                 };
-                if wayland_time_files::view::icon_button(ui, p, &mut self.icons, icon, tip, true).clicked() {
+                if kiln_files::view::icon_button(ui, p, &mut self.icons, icon, tip, true).clicked() {
                     self.set_fullscreen(&ctx, !fullscreen);
                 }
-                if wayland_time_files::view::icon_button(
+                if kiln_files::view::icon_button(
                     ui,
                     p,
                     &mut self.icons,
@@ -486,7 +486,7 @@ impl Viewer {
                     self.trash_current();
                 }
                 ui.add_space(6.0);
-                if wayland_time_files::view::icon_button(
+                if kiln_files::view::icon_button(
                     ui,
                     p,
                     &mut self.icons,
@@ -498,7 +498,7 @@ impl Viewer {
                 {
                     self.turn(1);
                 }
-                if wayland_time_files::view::icon_button(
+                if kiln_files::view::icon_button(
                     ui,
                     p,
                     &mut self.icons,
@@ -511,7 +511,7 @@ impl Viewer {
                     self.turn(3);
                 }
                 ui.add_space(6.0);
-                if wayland_time_files::view::icon_button(ui, p, &mut self.icons, "zoom-in-symbolic", "Zoom in (+)", has)
+                if kiln_files::view::icon_button(ui, p, &mut self.icons, "zoom-in-symbolic", "Zoom in (+)", has)
                     .clicked()
                 {
                     self.zoom_by(&ctx, 1.25, None);
@@ -537,7 +537,7 @@ impl Viewer {
                         self.actual_size(&ctx, None);
                     }
                 }
-                if wayland_time_files::view::icon_button(
+                if kiln_files::view::icon_button(
                     ui,
                     p,
                     &mut self.icons,
@@ -566,7 +566,7 @@ impl Viewer {
                     rect,
                     "image-x-generic-symbolic",
                     "No image open",
-                    "Open a picture from Files, or run: wayland-time-image-viewer <file>",
+                    "Open a picture from Files, or run: kiln-image-viewer <file>",
                 );
             }
             Some(Slot::Loading) => {
@@ -670,7 +670,7 @@ impl Viewer {
                                 ui.add_space(8.0);
                                 clicked_undo = ui.button("Undo").clicked();
                             }
-                            dismiss = wayland_time_files::view::icon_button(
+                            dismiss = kiln_files::view::icon_button(
                                 ui,
                                 p,
                                 &mut self.icons,

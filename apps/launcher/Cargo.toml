@@ -1,13 +1,13 @@
 [package]
-name = "wayland-time-launcher"
+name = "kiln-launcher"
 version = "0.1.0"
 edition = "2024"
-description = "App launcher for the wayland-time compositor"
+description = "App launcher for the kiln compositor"
 license = "MIT"
 
 [dependencies]
-wt-config = { path = "../../crates/wt-config" }
-wt-icons = { path = "../../crates/wt-icons" }
-wt-ui = { path = "../../crates/wt-ui" }
+kiln-config = { path = "../../crates/kiln-config" }
+kiln-icons = { path = "../../crates/kiln-icons" }
+kiln-ui = { path = "../../crates/kiln-ui" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

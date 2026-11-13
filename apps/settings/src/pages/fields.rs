@@ -1,8 +1,8 @@
 //! Plain settings, described as data: where they live in the file, how they're labelled and
 //! which control edits them. Pages list sections of these; the search box looks through them.
 
-use wt_config::theme::Palette;
-use wt_ui::egui::{self, Ui};
+use kiln_config::theme::Palette;
+use kiln_ui::egui::{self, Ui};
 
 use super::Cache;
 use crate::{
@@ -132,7 +132,7 @@ pub const GENERAL: &[Section] = &[
             f(
                 &["general", "locker"],
                 "Screen locker",
-                "Used by Lock and Suspend in the power menu. Empty uses the first installed of wayland-time-lock, hyprlock, swaylock, gtklock and waylock.",
+                "Used by Lock and Suspend in the power menu. Empty uses the first installed of kiln-lock, hyprlock, swaylock, gtklock and waylock.",
                 Kind::Text("automatic"),
             ),
         ],
@@ -156,7 +156,7 @@ pub const GENERAL: &[Section] = &[
             at_start(f(
                 &["general", "polkit_agent"],
                 "Password prompt for admin rights",
-                "The polkit agent that asks for your password when an app needs admin rights. Empty uses wayland-time-polkit, or another one installed; \"none\" starts none.",
+                "The polkit agent that asks for your password when an app needs admin rights. Empty uses kiln-polkit, or another one installed; \"none\" starts none.",
                 Kind::Text("automatic"),
             )),
         ],
@@ -510,7 +510,7 @@ pub fn show_field(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cac
                 if widgets::toggle(ui, p, &mut v).changed() {
                     changed = Some((*value, v));
                 }
-                ui.label(wt_ui::egui::RichText::new(*label).color(wt_ui::color(p.text)));
+                ui.label(kiln_ui::egui::RichText::new(*label).color(kiln_ui::color(p.text)));
             });
         }
         if let Some((value, v)) = changed {
@@ -639,7 +639,7 @@ pub fn set_number(doc: &mut ConfigDoc, path: &[&str], v: f64, decimals: usize) {
 }
 
 fn keymap_error(ui: &mut Ui, p: &Palette, doc: &ConfigDoc) {
-    let kb = wt_config::KeyboardConfig {
+    let kb = kiln_config::KeyboardConfig {
         layout: doc.str(&["keyboard", "layout"]),
         variant: doc.str(&["keyboard", "variant"]),
         options: doc.str(&["keyboard", "options"]),
@@ -647,7 +647,7 @@ fn keymap_error(ui: &mut Ui, p: &Palette, doc: &ConfigDoc) {
         repeat_delay: 0,
         numlock: false,
     };
-    if let Err(e) = wt_config::check_keymap(&kb) {
+    if let Err(e) = kiln_config::check_keymap(&kb) {
         widgets::error(ui, p, &e);
     }
 }
@@ -657,12 +657,12 @@ fn font_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool {
     let before = value.clone();
     let id = ui.id().with("font-filter");
     let mut filter: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
-    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt("font")
+    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt("font")
         .selected_text(value.as_str())
         .width(ui.available_width())
         .height(320.0)
         .show_ui(ui, |ui| {
-            ui.add(wt_ui::field(ui, egui::TextEdit::singleline(&mut filter).hint_text("Search fonts")))
+            ui.add(kiln_ui::field(ui, egui::TextEdit::singleline(&mut filter).hint_text("Search fonts")))
                 .request_focus();
             let q = filter.to_lowercase();
             for family in ["sans", "serif", "monospace"]
@@ -692,16 +692,16 @@ fn wallpaper_picker(ui: &mut Ui, cache: &mut Cache, value: &mut String) -> bool 
             .file_name()
             .map_or(value.clone(), |n| n.to_string_lossy().into_owned())
     };
-    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt("wallpaper")
+    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt("wallpaper")
         .selected_text(shown)
         .width(ui.available_width())
         .height(360.0)
         .show_ui(ui, |ui| {
-            ui.add(wt_ui::field(ui, egui::TextEdit::singleline(&mut filter).hint_text("Search, or type a file's path")))
+            ui.add(kiln_ui::field(ui, egui::TextEdit::singleline(&mut filter).hint_text("Search, or type a file's path")))
                 .request_focus();
             let typed = filter.trim();
             if (typed.starts_with('/') || typed.starts_with('~'))
-                && std::path::Path::new(&wt_config::expand_home(typed)).is_file()
+                && std::path::Path::new(&kiln_config::expand_home(typed)).is_file()
             {
                 ui.selectable_value(value, typed.to_string(), format!("Use {typed}"));
             }

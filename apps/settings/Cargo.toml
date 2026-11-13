@@ -1,13 +1,13 @@
 [package]
-name = "wayland-time-settings"
+name = "kiln-settings"
 version = "0.1.0"
 edition = "2024"
-description = "Settings app for the wayland-time compositor"
+description = "Settings app for the kiln compositor"
 license = "MIT"
 
 [dependencies]
-wt-config = { path = "../../crates/wt-config" }
-wt-ui = { path = "../../crates/wt-ui" }
+kiln-config = { path = "../../crates/kiln-config" }
+kiln-ui = { path = "../../crates/kiln-ui" }
 toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
 wayland-client = "0.31"
 tracing = "0.1"

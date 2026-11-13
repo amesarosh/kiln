@@ -31,7 +31,8 @@ impl Entry {
             hidden: name.starts_with('.') || name.ends_with('~'),
             is_dir: meta.is_dir(),
             size: if meta.is_dir() { 0 } else { meta.len() },
-            modified: meta.modified().ok(),
+            // Phones (MTP) give folders no time: shown as none, not as 1970.
+            modified: meta.modified().ok().filter(|t| *t != SystemTime::UNIX_EPOCH),
             name,
             path,
         })
@@ -105,7 +106,7 @@ pub fn natural(a: &str, b: &str) -> std::cmp::Ordering {
 
 /// `~` and `~/x` in typed paths.
 pub fn expand(s: &str) -> PathBuf {
-    PathBuf::from(wt_config::expand_home(s))
+    PathBuf::from(kiln_config::expand_home(s))
 }
 
 /// Delete a file, or a folder and everything in it.
@@ -275,7 +276,7 @@ fn edit_bookmarks(change: impl FnOnce(&mut Vec<String>)) -> std::io::Result<()> 
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let tmp = file.with_extension("wt-tmp");
+    let tmp = file.with_extension("kiln-tmp");
     let mut out = lines.join("\n");
     if !out.is_empty() {
         out.push('\n');

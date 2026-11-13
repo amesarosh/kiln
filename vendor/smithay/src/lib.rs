@@ -1,4 +1,4 @@
-// wayland-time: upstream warnings are not ours to fix; keep our build output clean.
+// kiln: upstream warnings are not ours to fix; keep our build output clean.
 #![allow(warnings)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]

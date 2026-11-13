@@ -22,7 +22,7 @@ pub enum PowerAction {
 
 /// Lockers tried in order when `[general] locker` is empty, as (program, command).
 const LOCKERS: &[(&str, &str)] = &[
-    ("wayland-time-lock", "wayland-time-lock"),
+    ("kiln-lock", "kiln-lock"),
     ("hyprlock", "hyprlock"),
     ("swaylock", "swaylock -f"),
     ("gtklock", "gtklock -d"),
@@ -102,7 +102,7 @@ impl State {
                 true
             }
             None => {
-                tracing::warn!("no screen locker found: install wayland-time-lock, or set [general] locker");
+                tracing::warn!("no screen locker found: install kiln-lock, or set [general] locker");
                 false
             }
         }

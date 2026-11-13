@@ -1,13 +1,13 @@
 [package]
-name = "wayland-time-lock"
+name = "kiln-lock"
 version = "0.1.0"
 edition = "2024"
-description = "Screen locker for the wayland-time compositor"
+description = "Screen locker for the kiln compositor"
 license = "MIT"
 
 [dependencies]
-wt-config = { path = "../../crates/wt-config" }
-wt-draw = { path = "../../crates/wt-draw" }
+kiln-config = { path = "../../crates/kiln-config" }
+kiln-draw = { path = "../../crates/kiln-draw" }
 # Session lock, keyboard with key repeat, shared-memory buffers. Its calloop and protocols
 # are used through its re-exports, so the versions always match.
 smithay-client-toolkit = "0.20"

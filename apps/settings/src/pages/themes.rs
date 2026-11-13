@@ -1,7 +1,7 @@
 //! Saved themes: pick the one in use, save the current look as a new one, delete one.
 
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     color,
     egui::{self, RichText, Ui},
 };
@@ -56,7 +56,7 @@ impl ThemesPage {
                 widgets::divider(ui, p);
                 let name = self.new_name.trim().to_string();
                 let taken = names.iter().any(|n| n.eq_ignore_ascii_case(&name));
-                let valid = wt_config::valid_theme_name(&name) && !taken;
+                let valid = kiln_config::valid_theme_name(&name) && !taken;
                 let info = RowInfo {
                     label: "Save as a new theme",
                     help: "A copy of the current look, which then becomes the theme in use.",

@@ -1,4 +1,4 @@
-//! wayland-time-lock: the screen locker.
+//! kiln-lock: the screen locker.
 //!
 //! Locks with the standard session lock protocol (ext-session-lock-v1), so the compositor
 //! keeps the screen locked even if this program crashes. Draws one lock screen per monitor
@@ -52,10 +52,10 @@ use draw::{Look, Ui};
 use password::Password;
 
 const HELP: &str = "\
-wayland-time-lock — lock the screen
+kiln-lock — lock the screen
 
 USAGE:
-    wayland-time-lock [-f]
+    kiln-lock [-f]
 
 OPTIONS:
     -f, --daemonize   return once the screen is locked, and keep running in the background
@@ -185,11 +185,11 @@ fn run(parent_pipe: Option<OwnedFd>) -> Result<i32, Box<dyn std::error::Error>> 
     let qh = queue.handle();
     let mut event_loop: EventLoop<Locker> = EventLoop::try_new()?;
 
-    let config = wt_config::Config::default_path().and_then(|p| wt_config::Config::read(&p).ok());
-    let theme = config.map(|c| c.theme).unwrap_or_else(|| wt_config::Config::default().theme);
+    let config = kiln_config::Config::default_path().and_then(|p| kiln_config::Config::read(&p).ok());
+    let theme = config.map(|c| c.theme).unwrap_or_else(|| kiln_config::Config::default().theme);
     let (user, user_label) = user();
     let look = Look {
-        text: wt_draw::Text::load(&theme.font),
+        text: kiln_draw::Text::load(&theme.font),
         theme,
         user_label,
     };

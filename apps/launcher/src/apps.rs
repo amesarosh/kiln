@@ -21,10 +21,10 @@ pub struct App {
 pub fn load() -> Vec<App> {
     let mut seen = std::collections::HashSet::new();
     let mut apps = Vec::new();
-    for dir in wt_icons::data_dirs() {
+    for dir in kiln_icons::data_dirs() {
         let root = dir.join("applications");
         let mut files = Vec::new();
-        wt_icons::collect_desktop_files(&root, 3, &mut files);
+        kiln_icons::collect_desktop_files(&root, 3, &mut files);
         files.sort();
         for file in files {
             let id = file
@@ -60,7 +60,7 @@ fn parse(id: &str, text: &str) -> Option<App> {
     if get("Type") != "Application" || get("NoDisplay") == "true" || get("Hidden") == "true" {
         return None;
     }
-    let desktop = "wayland-time";
+    let desktop = "kiln";
     let list = |k: &str| get(k).split(';').filter(|s| !s.is_empty()).map(str::to_string).collect::<Vec<_>>();
     let only = list("OnlyShowIn");
     if !only.is_empty() && !only.iter().any(|d| d.eq_ignore_ascii_case(desktop)) {
@@ -142,7 +142,7 @@ impl History {
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
-            .map(|d| d.join("wayland-time").join("launcher-history"));
+            .map(|d| d.join("kiln").join("launcher-history"));
         let counts = path
             .as_ref()
             .and_then(|p| std::fs::read_to_string(p).ok())

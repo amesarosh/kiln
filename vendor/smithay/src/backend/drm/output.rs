@@ -215,7 +215,7 @@ where
     ///   `None` will result in the compositor to use all planes as specified by [`DrmSurface::planes`][super::DrmSurface::planes]
     /// - `renderer` used for compositing, when commits are necessarily to realize bandwidth constraints
     /// - `render_elements` used for rendering, when commits are necessarily to realize bandwidth constraints
-    /// wayland-time: change the buffer formats tried, in order, for outputs initialized from now
+    /// kiln: change the buffer formats tried, in order, for outputs initialized from now
     /// on (10-bit ones for an HDR monitor, say).
     pub fn set_color_formats(&mut self, color_formats: impl IntoIterator<Item = DrmFourcc>) {
         self.color_formats = color_formats.into_iter().collect();

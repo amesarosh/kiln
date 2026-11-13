@@ -2,7 +2,7 @@
 //!
 //! While locked, only lock surfaces are drawn and get input. If the locker crashes, the screen
 //! stays locked (and turns red) until a new locker takes over: any key starts the configured
-//! locker again, or start one from another VT with `WAYLAND_DISPLAY=wayland-1 wayland-time-lock`.
+//! locker again, or start one from another VT with `WAYLAND_DISPLAY=wayland-1 kiln-lock`.
 
 use smithay::{
     output::Output,

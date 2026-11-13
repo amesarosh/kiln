@@ -1,4 +1,4 @@
-//! wayland-time-files: the file picker apps get when they ask the desktop portal to open or
+//! kiln-files: the file picker apps get when they ask the desktop portal to open or
 //! save a file, drawn in the theme's colors and font.
 //!
 //! `--portal` serves `org.freedesktop.impl.portal.FileChooser` on the session bus (D-Bus starts
@@ -14,11 +14,11 @@ use std::io::Read;
 use request::{Mode, Request};
 
 const HELP: &str = "\
-wayland-time-files — file picker for the wayland-time compositor
+kiln-files — file picker for the kiln compositor
 
 USAGE:
-    wayland-time-files [--open | --open-many | --folder | --save NAME]
-    wayland-time-files --portal
+    kiln-files [--open | --open-many | --folder | --save NAME]
+    kiln-files --portal
 
 With no option, or one of the first ones, shows a picker and prints what was picked, one
 path per line (exit status 1 if cancelled). Apps get it through the desktop portal: --portal
@@ -70,14 +70,14 @@ fn main() {
     } else {
         req.title.clone()
     };
-    let viewport = wt_ui::egui::ViewportBuilder::default()
+    let viewport = kiln_ui::egui::ViewportBuilder::default()
         .with_inner_size([920.0, 600.0])
         .with_min_inner_size([560.0, 380.0]);
-    let result = wt_ui::run_viewport("wayland-time-files", &title, viewport, move |cc| {
+    let result = kiln_ui::run_viewport("kiln-files", &title, viewport, move |cc| {
         app::Picker::new(cc, req, plain)
     });
     if let Err(e) = result {
-        eprintln!("wayland-time-files: {e}");
+        eprintln!("kiln-files: {e}");
         std::process::exit(2);
     }
     // The window was closed without picking anything.

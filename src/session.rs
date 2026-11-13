@@ -1,6 +1,6 @@
 //! Saving and restoring the session: which apps were open, and where their windows were.
 //!
-//! The state is written to `~/.local/state/wayland-time/session.toml` a few seconds after
+//! The state is written to `~/.local/state/kiln/session.toml` a few seconds after
 //! anything changes, and right away on quit. Waiting a moment matters at shutdown: the
 //! system stops apps and the compositor at the same time, and apps closing then must not be
 //! saved as "closed by you". So a change is only written after it has lasted [`SAVE_DELAY`].
@@ -598,7 +598,7 @@ fn session_path(nested: bool) -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
     let name = if nested { "session-nested.toml" } else { "session.toml" };
-    Some(base.join("wayland-time").join(name))
+    Some(base.join("kiln").join(name))
 }
 
 fn load(path: &Path) -> Option<Snapshot> {
@@ -621,7 +621,7 @@ fn write(path: &Path, snap: &Snapshot) -> std::io::Result<()> {
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(
         &tmp,
-        format!("# Written by wayland-time; restored at the next start.\n{text}"),
+        format!("# Written by kiln; restored at the next start.\n{text}"),
     )?;
     std::fs::rename(tmp, path)
 }

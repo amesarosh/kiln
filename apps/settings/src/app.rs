@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     Look, color, eframe,
     egui::{self, Align, Layout, RichText, Sense, Ui, vec2},
 };

@@ -1,15 +1,15 @@
 [package]
-name = "wayland-time-image-viewer"
+name = "kiln-image-viewer"
 version = "0.1.0"
 edition = "2024"
-description = "Image viewer for the wayland-time compositor"
+description = "Image viewer for the kiln compositor"
 license = "MIT"
 
 [dependencies]
-wt-config = { path = "../../crates/wt-config" }
-wt-ui = { path = "../../crates/wt-ui" }
+kiln-config = { path = "../../crates/kiln-config" }
+kiln-ui = { path = "../../crates/kiln-ui" }
 # Folder listing order, file sizes, icons and the trash, shared with the file manager.
-wayland-time-files = { path = "../files" }
+kiln-files = { path = "../files" }
 image = { version = "0.25", default-features = false, features = [
     "png", "jpeg", "webp", "gif", "bmp", "tiff", "ico", "tga", "qoi", "pnm",
 ] }

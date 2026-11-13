@@ -397,8 +397,8 @@ mod tests {
     #[test]
     fn long_names_come_from_argv() {
         assert_eq!(
-            display_name("wayland-time-se", Some("/usr/bin/wayland-time-settings")),
-            "wayland-time-settings"
+            display_name("kiln-image-view", Some("/usr/bin/kiln-image-viewer")),
+            "kiln-image-viewer"
         );
         assert_eq!(display_name("bash", Some("-bash")), "bash");
         assert_eq!(display_name("kworker/0:1", None), "kworker/0:1");

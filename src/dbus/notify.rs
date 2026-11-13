@@ -153,7 +153,7 @@ impl Server {
     }
 
     fn get_server_information(&self) -> (&'static str, &'static str, &'static str, &'static str) {
-        ("wayland-time", "wayland-time", env!("CARGO_PKG_VERSION"), "1.2")
+        ("kiln", "kiln", env!("CARGO_PKG_VERSION"), "1.2")
     }
 }
 

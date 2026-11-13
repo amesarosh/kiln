@@ -6,7 +6,7 @@ use std::path::Path;
 /// Agents tried in order when `polkit_agent` is empty: program names are looked up in PATH,
 /// full paths as they are.
 const AGENTS: &[&str] = &[
-    "wayland-time-polkit",
+    "kiln-polkit",
     "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
     "/usr/libexec/polkit-gnome-authentication-agent-1",
     "/usr/lib/x86_64-linux-gnu/libexec/polkit-kde-authentication-agent-1",

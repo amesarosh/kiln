@@ -13,7 +13,7 @@ use std::{
 };
 
 use toml_edit::{DocumentMut, Item, Table, Value};
-use wt_config::{Config, DEFAULT_CONFIG};
+use kiln_config::{Config, DEFAULT_CONFIG};
 
 /// How long after the last edit to save. Short enough to feel live, long enough that dragging a
 /// slider doesn't make the compositor reload on every frame.
@@ -44,7 +44,7 @@ struct ThemeDoc {
 impl ThemeDoc {
     /// A missing file reads as an empty theme (all defaults); it's written on the next save.
     fn open(config_path: &std::path::Path, name: &str) -> Result<Self, String> {
-        let path = wt_config::theme_path(config_path, name);
+        let path = kiln_config::theme_path(config_path, name);
         let disk_time = modified(&path);
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
@@ -135,7 +135,7 @@ impl ConfigDoc {
     fn load_theme(&mut self) {
         self.theme = None;
         let Some(name) = self.theme_name() else { return };
-        if !wt_config::valid_theme_name(&name) {
+        if !kiln_config::valid_theme_name(&name) {
             self.broken = Some(format!("theme.name \"{name}\" can't be used as a file name"));
             return;
         }
@@ -146,7 +146,7 @@ impl ConfigDoc {
     }
 
     /// Parse config text the way the compositor would, with the theme as edited here.
-    fn parse(&self, text: &str) -> Result<Config, wt_config::ConfigError> {
+    fn parse(&self, text: &str) -> Result<Config, kiln_config::ConfigError> {
         let theme = self.theme.as_ref().map(|t| t.doc.to_string());
         Config::parse_user_with(text, |_| theme.ok_or_else(|| "not loaded".to_string()))
     }
@@ -162,7 +162,7 @@ impl ConfigDoc {
 
     /// Saved theme names.
     pub fn theme_names(&self) -> Vec<String> {
-        let mut names = wt_config::theme_names(&self.path);
+        let mut names = kiln_config::theme_names(&self.path);
         // One just made exists only here until the save lands.
         if let Some(t) = &self.theme
             && !names.contains(&t.name)
@@ -227,7 +227,7 @@ impl ConfigDoc {
         };
         let mut out = DocumentMut::new();
         out.decor_mut()
-            .set_prefix(format!("# wayland-time theme \"{name}\"\n\n"));
+            .set_prefix(format!("# kiln theme \"{name}\"\n\n"));
         let root = out.as_table_mut();
         for (k, v) in defaults.iter() {
             root.insert(k, v.clone());
@@ -273,7 +273,7 @@ impl ConfigDoc {
         self.set_raw(&["theme", "name"], name);
         self.theme = Some(ThemeDoc {
             name: name.to_string(),
-            path: wt_config::theme_path(&self.path, name),
+            path: kiln_config::theme_path(&self.path, name),
             doc: out,
             disk_time: None,
             disk_text: String::new(),
@@ -288,7 +288,7 @@ impl ConfigDoc {
             self.use_theme(None);
             self.flush();
         }
-        let path = wt_config::theme_path(&self.path, name);
+        let path = kiln_config::theme_path(&self.path, name);
         match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -509,7 +509,7 @@ impl ConfigDoc {
                 return false;
             }
         };
-        if let Err(e) = wt_config::check_keymap(&config.keyboard) {
+        if let Err(e) = kiln_config::check_keymap(&config.keyboard) {
             self.status = Status::Invalid(e);
             return false;
         }
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn saves_only_valid_edits() {
-        let dir = std::env::temp_dir().join(format!("wt-settings-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kiln-settings-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
         std::fs::write(&path, "# mine\n[layout]\ngaps_inner = 6\n").unwrap();
@@ -709,7 +709,7 @@ mod tests {
     }
 
     fn temp_config(tag: &str, text: &str) -> (PathBuf, ConfigDoc) {
-        let dir = std::env::temp_dir().join(format!("wt-settings-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kiln-settings-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");

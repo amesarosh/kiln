@@ -1,5 +1,5 @@
 //! Sound for the bar: the default output's volume and whether it's muted, followed live from
-//! PipeWire (see `wt_pipewire::watch`), so the widget matches changes made anywhere (volume
+//! PipeWire (see `kiln_pipewire::watch`), so the widget matches changes made anywhere (volume
 //! keys, the Sound app, another mixer).
 
 use smithay::reexports::calloop::channel;
@@ -34,7 +34,7 @@ impl State {
             return tracing::warn!("sound channel: {e}");
         }
         let mut last = None;
-        wt_pipewire::watch(move |model| {
+        kiln_pipewire::watch(move |model| {
             let sound = model
                 .as_ref()
                 .and_then(|m| m.default_output())

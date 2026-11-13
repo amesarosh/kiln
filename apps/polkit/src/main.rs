@@ -1,4 +1,4 @@
-//! wayland-time-polkit: asks for your password when an app needs admin rights.
+//! kiln-polkit: asks for your password when an app needs admin rights.
 //!
 //! Registers with polkitd as this login session's authentication agent. When an app asks for
 //! something that needs a password (installing software, mounting a disk, `pkexec`), polkitd
@@ -65,10 +65,10 @@ use helper::{Event, Helper};
 use password::Password;
 
 const HELP: &str = "\
-wayland-time-polkit — ask for passwords when apps need admin rights
+kiln-polkit — ask for passwords when apps need admin rights
 
 USAGE:
-    wayland-time-polkit
+    kiln-polkit
 
 Runs for the whole session as its polkit authentication agent. The compositor starts it at
 login (see `polkit_agent` under [general] in the config). Only one agent can run per session.
@@ -257,12 +257,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn load_look() -> Look {
-    let config = wt_config::Config::default_path().and_then(|p| wt_config::Config::read(&p).ok());
+    let config = kiln_config::Config::default_path().and_then(|p| kiln_config::Config::read(&p).ok());
     let theme = config
         .map(|c| c.theme)
-        .unwrap_or_else(|| wt_config::Config::default().theme);
+        .unwrap_or_else(|| kiln_config::Config::default().theme);
     Look {
-        text: wt_draw::Text::load(&theme.font),
+        text: kiln_draw::Text::load(&theme.font),
         theme,
     }
 }
@@ -307,7 +307,7 @@ impl App {
             &self.qh,
             wl_surface,
             Layer::Overlay,
-            Some("wayland-time-polkit"),
+            Some("kiln-polkit"),
             None,
         );
         surface.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);

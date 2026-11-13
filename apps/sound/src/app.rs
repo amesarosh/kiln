@@ -7,9 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use wt_config::theme::Palette;
-use wt_pipewire::{Command, Control, Device, Kind, Model, Stream};
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_pipewire::{Command, Control, Device, Kind, Model, Stream};
+use kiln_ui::{
     Look, color, eframe,
     egui::{self, Align, Layout, Margin, RichText, Sense, TextureHandle, Ui, vec2},
 };
@@ -39,11 +39,11 @@ pub struct SoundApp {
 
 impl SoundApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let look = Look::new(&cc.egui_ctx, wt_config::Config::default_path());
+        let look = Look::new(&cc.egui_ctx, kiln_config::Config::default_path());
         let icons = Icons::new(&look.theme.icon_theme);
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (s, ctx) = (shared.clone(), cc.egui_ctx.clone());
-        wt_pipewire::watch(move |model| {
+        kiln_pipewire::watch(move |model| {
             let mut s = s.lock().unwrap();
             s.loaded = true;
             s.model = model;
@@ -203,13 +203,13 @@ impl SoundApp {
                     self.icon(ui, kind_icon(icon), ICON, p.text, "audio-speakers-symbolic");
                     ui.add_space(4.0);
                     let selected = current.map_or("Choose a device", |d| d.label.as_str());
-                    wt_ui::select(ui, |ui| {
+                    kiln_ui::select(ui, |ui| {
                         egui::ComboBox::from_id_salt(title)
                             .selected_text(selected)
                             .width(ui.available_width())
                             .truncate()
                             .show_ui(ui, |ui| {
-                                wt_ui::roomy_menu(ui);
+                                kiln_ui::roomy_menu(ui);
                                 for d in devices {
                                     let on = current.is_some_and(|c| c.id == d.id);
                                     if ui.selectable_label(on, &d.label).clicked() && !on {
@@ -271,7 +271,7 @@ impl SoundApp {
                     let hint = if output { "Play on…" } else { "Record from…" };
                     let menu = ui.add(button.frame(false)).on_hover_text(hint);
                     egui::Popup::menu(&menu).show(|ui| {
-                        wt_ui::roomy_menu(ui);
+                        kiln_ui::roomy_menu(ui);
                         ui.label(
                             RichText::new(if output { "Play on" } else { "Record from" })
                                 .small()
@@ -299,7 +299,7 @@ impl SoundApp {
     }
 
     /// A sound card and its profile.
-    fn card_row(&mut self, ui: &mut Ui, p: &Palette, c: &wt_pipewire::Card) {
+    fn card_row(&mut self, ui: &mut Ui, p: &Palette, c: &kiln_pipewire::Card) {
         inset(ui, |ui| {
             ui.horizontal(|ui| {
                 self.icon(ui, "audio-card-symbolic", ICON, p.text, "audio-speakers-symbolic");
@@ -307,7 +307,7 @@ impl SoundApp {
                 let combo_w = (ui.available_width() * 0.55).clamp(140.0, 260.0);
                 let text_w = (ui.available_width() - combo_w - 8.0).max(40.0);
                 ui.allocate_ui_with_layout(
-                    vec2(text_w, wt_ui::field_height(ui.style())),
+                    vec2(text_w, kiln_ui::field_height(ui.style())),
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.add(egui::Label::new(RichText::new(&c.label).color(color(p.text))).truncate());
@@ -315,13 +315,13 @@ impl SoundApp {
                 );
                 let current = c.profiles.iter().find(|pr| Some(pr.index) == c.current);
                 let selected = current.map_or("—", |pr| pr.label.as_str());
-                wt_ui::select(ui, |ui| {
+                kiln_ui::select(ui, |ui| {
                     egui::ComboBox::from_id_salt(("card", c.id))
                         .selected_text(selected)
                         .width(combo_w)
                         .truncate()
                         .show_ui(ui, |ui| {
-                            wt_ui::roomy_menu(ui);
+                            kiln_ui::roomy_menu(ui);
                             ui.set_min_width(280.0);
                             for pr in c
                                 .profiles
@@ -391,7 +391,7 @@ impl SoundApp {
         });
     }
 
-    fn icon(&mut self, ui: &mut Ui, name: &str, size: f32, tint: wt_config::Color, fallback: &str) {
+    fn icon(&mut self, ui: &mut Ui, name: &str, size: f32, tint: kiln_config::Color, fallback: &str) {
         let t = self
             .icons
             .symbolic(ui.ctx(), name, size, tint)
@@ -480,7 +480,7 @@ fn empty(ui: &mut Ui, p: &Palette, icons: &mut Icons, icon: &str, title: &str, b
 
 /// Icons from the theme, as textures: symbolic ones in the theme's colors, and app icons.
 struct Icons {
-    icons: wt_icons::Icons,
+    icons: kiln_icons::Icons,
     theme: String,
     cache: HashMap<(String, [u8; 4], u32), Option<TextureHandle>>,
 }
@@ -488,7 +488,7 @@ struct Icons {
 impl Icons {
     fn new(theme: &str) -> Self {
         Self {
-            icons: wt_icons::Icons::new(theme),
+            icons: kiln_icons::Icons::new(theme),
             theme: theme.to_string(),
             cache: HashMap::new(),
         }
@@ -499,7 +499,7 @@ impl Icons {
         ctx: &egui::Context,
         name: &str,
         size: f32,
-        tint: wt_config::Color,
+        tint: kiln_config::Color,
     ) -> Option<TextureHandle> {
         let c = color(tint).to_srgba_unmultiplied();
         let px = (size * ctx.pixels_per_point()).round() as u32;
@@ -528,7 +528,7 @@ impl Icons {
     }
 }
 
-fn texture(ctx: &egui::Context, name: &str, icon: &wt_icons::Icon) -> TextureHandle {
+fn texture(ctx: &egui::Context, name: &str, icon: &kiln_icons::Icon) -> TextureHandle {
     let image = egui::ColorImage::from_rgba_premultiplied([icon.size as usize; 2], &icon.rgba);
     ctx.load_texture(format!("icon:{name}"), image, egui::TextureOptions::LINEAR)
 }

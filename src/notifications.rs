@@ -495,10 +495,10 @@ impl State {
         let picture = n
             .image
             .as_ref()
-            .map(|img| std::rc::Rc::new(wt_icons::scaled(&img.rgba, img.width, img.height, px)))
+            .map(|img| std::rc::Rc::new(kiln_icons::scaled(&img.rgba, img.width, img.height, px)))
             .or_else(|| {
                 let path = n.image_path.as_deref()?.trim_start_matches("file://");
-                wt_icons::load_file(std::path::Path::new(path), px).map(std::rc::Rc::new)
+                kiln_icons::load_file(std::path::Path::new(path), px).map(std::rc::Rc::new)
             })
             .or_else(|| self.bar.any_icon(&n.app_icon, px, to_u8(p.text)))
             .or_else(|| self.bar.icon(&n.app_name, px))

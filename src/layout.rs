@@ -33,7 +33,7 @@ impl Rect {
     }
 }
 
-pub use wt_config::LayoutKind;
+pub use kiln_config::LayoutKind;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Params {
@@ -45,7 +45,7 @@ pub struct Params {
 }
 
 /// The tiling settings from the config, with negative gaps treated as none.
-pub fn params(c: &wt_config::Config) -> Params {
+pub fn params(c: &kiln_config::Config) -> Params {
     Params {
         master_ratio: c.layout.master_ratio,
         master_count: c.layout.master_count,

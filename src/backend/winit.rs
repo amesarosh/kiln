@@ -1,6 +1,6 @@
 //! Nested backend: runs the compositor as a window inside an existing X11 or Wayland session.
 //!
-//! For testing multi-monitor behaviour without hardware, `WAYLAND_TIME_NESTED_OUTPUTS=N` splits
+//! For testing multi-monitor behaviour without hardware, `KILN_NESTED_OUTPUTS=N` splits
 //! the window into N side-by-side monitors named winit-1..winit-N.
 
 use smithay::{
@@ -44,7 +44,7 @@ pub struct WinitData {
 const WINDOW_TRANSFORM: Transform = Transform::Flipped180;
 
 fn nested_output_count() -> usize {
-    std::env::var("WAYLAND_TIME_NESTED_OUTPUTS")
+    std::env::var("KILN_NESTED_OUTPUTS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1)
@@ -169,7 +169,7 @@ impl WinitData {
                 let loc = state.space.output_geometry(o).map(|g| g.loc).unwrap_or_default();
                 HeadInfo {
                     name: o.name(),
-                    description: "wayland-time nested window".into(),
+                    description: "kiln nested window".into(),
                     physical_size: (0, 0),
                     modes: mode.into_iter().collect(),
                     enabled: true,
@@ -186,7 +186,7 @@ impl WinitData {
 
 pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<(), Box<dyn std::error::Error>> {
     let (mut backend, winit_loop) = winit::init::<GlesRenderer>()?;
-    backend.window().set_title("wayland-time");
+    backend.window().set_title("kiln");
 
     let count = nested_output_count();
     let outputs: Vec<Output> = (1..=count)
@@ -201,7 +201,7 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
                 PhysicalProperties {
                     size: (0, 0).into(),
                     subpixel: Subpixel::Unknown,
-                    make: "wayland-time".into(),
+                    make: "kiln".into(),
                     model: "nested".into(),
                 },
             );

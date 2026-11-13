@@ -2,8 +2,8 @@
 //! middle a card with what is being asked, whose password, the password field, a status line,
 //! and Cancel / Authenticate buttons.
 
-use wt_config::{config::Color, theme::Theme};
-use wt_draw::{Canvas, Text};
+use kiln_config::{config::Color, theme::Theme};
+use kiln_draw::{Canvas, Text};
 
 use crate::password::Password;
 

@@ -125,6 +125,16 @@ impl<W: Clone + PartialEq> Workspace<W> {
     /// Remove a window, moving focus to a neighbour. Returns false if it wasn't here.
     pub fn remove(&mut self, w: &W) -> bool {
         let Some(idx) = self.index_of(w) else { return false };
+        // A master column of several windows loses a row when one of them goes; without
+        // this the first stack window would jump across to fill the gap, and with only two
+        // tiles left they would end up stacked in one column.
+        if self.entries[idx].is_tiled() && self.master_count > 1 {
+            let pos = self.entries[..idx].iter().filter(|e| e.is_tiled()).count();
+            let masters = self.master_count.min(self.tiled().count());
+            if pos < masters {
+                self.master_count = masters - 1;
+            }
+        }
         self.entries.remove(idx);
         if self.fullscreen.as_ref() == Some(w) {
             self.fullscreen = None;
@@ -263,6 +273,29 @@ impl<W: Clone + PartialEq> Workspace<W> {
         if is_first == below {
             self.swap_windows(w, target);
         }
+        true
+    }
+
+    /// When every tile sits in one column, pull a window out into a column of its own:
+    /// before the others (it becomes the only master) or after them (the only stack
+    /// window). Returns false when there already are two columns.
+    pub fn split_column(&mut self, w: &W, after: bool) -> bool {
+        let n = self.tiled().count();
+        let masters = self.master_count.min(n);
+        let tiled = self.entry(w).is_some_and(|e| e.is_tiled());
+        if self.layout == LayoutKind::Monocle || n < 2 || (masters != 0 && masters != n) || !tiled {
+            return false;
+        }
+        let Some(k) = self.index_of(w) else { return false };
+        let mut entry = self.entries.remove(k);
+        entry.weight = 1.0;
+        let at = if after {
+            self.entries.iter().rposition(|e| e.is_tiled()).map_or(self.entries.len(), |i| i + 1)
+        } else {
+            self.entries.iter().position(|e| e.is_tiled()).unwrap_or(0)
+        };
+        self.entries.insert(at, entry);
+        self.master_count = if after { n - 1 } else { 1 };
         true
     }
 
@@ -457,6 +490,43 @@ mod tests {
         let mut three = ws(&[1, 2, 3]);
         three.master_count = 1;
         assert!(!three.flip_pair(&1, &2, true), "only for two tiles");
+    }
+
+    #[test]
+    fn closing_a_master_keeps_the_stack_in_its_column() {
+        // 1 over 2 on the left, 3 on the right.
+        let mut w = ws(&[1, 2, 3]);
+        w.master_count = 2;
+        w.remove(&2);
+        assert_eq!(w.master_count, 1, "1 | 3, not 1 over 3");
+        // Closing the stack window leaves one column, and the count alone.
+        let mut w = ws(&[1, 2, 3]);
+        w.master_count = 2;
+        w.remove(&3);
+        assert_eq!(w.master_count, 2);
+        // A single master is never taken away.
+        let mut w = ws(&[1, 2, 3]);
+        w.remove(&1);
+        assert_eq!(w.master_count, 1);
+    }
+
+    #[test]
+    fn split_column_pulls_a_window_out_of_a_single_column() {
+        let mut w = ws(&[1, 2]);
+        w.master_count = 2;
+        assert!(w.split_column(&2, false));
+        assert_eq!(order(&w), vec![2, 1]);
+        assert_eq!(w.master_count, 1);
+        assert!(!w.split_column(&2, true), "already two columns");
+
+        let mut w = ws(&[1, 2, 3]);
+        w.master_count = 0;
+        assert!(w.split_column(&1, true));
+        assert_eq!(order(&w), vec![2, 3, 1]);
+        assert_eq!(w.master_count, 2);
+
+        let mut one = ws(&[1]);
+        assert!(!one.split_column(&1, true));
     }
 
     #[test]

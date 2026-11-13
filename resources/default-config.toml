@@ -1,4 +1,4 @@
-# wayland-time configuration
+# kiln configuration
 #
 # This file is reloaded automatically when you save it. If it has an error,
 # the previous working config stays active and the error is logged.
@@ -14,7 +14,7 @@ focus_follows_mouse = true
 new_window = "master"
 # Commands run once at startup, through `sh -c`. To lock after 5 minutes idle
 # and before suspend:
-#   autostart = ["swayidle -w timeout 300 'wayland-time-lock -f' before-sleep 'wayland-time-lock -f'"]
+#   autostart = ["swayidle -w timeout 300 'kiln-lock -f' before-sleep 'kiln-lock -f'"]
 # To keep a clipboard history for Mod+v (needs cliphist):
 #   autostart = ["wl-paste --watch cliphist store"]
 autostart = []
@@ -42,12 +42,12 @@ allow_shortcuts_inhibit = true
 # picture can tear. Only on real hardware, and only for games that ask.
 allow_tearing = true
 # Screen locker used by Lock and Suspend in the bar's power menu. Empty picks
-# the first one installed of wayland-time-lock (our own), hyprlock, swaylock,
+# the first one installed of kiln-lock (our own), hyprlock, swaylock,
 # gtklock and waylock.
 locker = ""
 # Program that asks for your password when an app needs admin rights (installing
 # software, mounting a disk, `pkexec`): a polkit agent, started at login. Empty
-# picks the first one installed of wayland-time-polkit (our own),
+# picks the first one installed of kiln-polkit (our own),
 # polkit-gnome, polkit-kde, polkit-mate and lxpolkit; "none" starts none (if
 # you start one yourself in autostart). Changing this takes effect at the next
 # start.
@@ -56,7 +56,7 @@ polkit_agent = ""
 # The look shared by everything the compositor draws: the bar, window borders,
 # the lock screen, and menus and panels as they are added.
 #
-# Saved themes: name = "Nord" uses ~/.config/wayland-time/themes/Nord.toml, a
+# Saved themes: name = "Nord" uses ~/.config/kiln/themes/Nord.toml, a
 # file with these same keys and a [colors] table. Anything else set here goes
 # on top of it. The settings app can save the current look as a theme.
 [theme]
@@ -161,7 +161,7 @@ gestures = true
 
 # Bring back your apps and windows at the next start: the same monitors,
 # workspaces, tiling order, sizes and layouts. Saved a few seconds after any
-# change and when you quit, to ~/.local/state/wayland-time/session.toml.
+# change and when you quit, to ~/.local/state/kiln/session.toml.
 [session]
 restore = true    # read at startup only
 # App ids never saved or started again. A trailing * matches any ending, e.g.
@@ -236,7 +236,7 @@ duration = 220        # milliseconds
 "Mod+Shift+e" = "quit"
 "Mod+Shift+r" = "reload"
 "Mod+Escape" = "lock"
-"Ctrl+Shift+Escape" = "spawn wayland-time-tasks"
+"Ctrl+Shift+Escape" = "spawn kiln-tasks"
 # Take your binds back from an app holding every key (a VM, a remote desktop).
 "Mod+Ctrl+Escape" = "toggle-shortcuts-inhibit"
 # Screenshots, saved to ~/Pictures/Screenshots: pick a region (also copied to the

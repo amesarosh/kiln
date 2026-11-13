@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use wt_ui::egui;
+use kiln_ui::egui;
 use zbus::{
     MatchRule,
     blocking::{Connection, MessageIterator, fdo::ObjectManagerProxy},
@@ -18,7 +18,7 @@ use zbus::{
 };
 
 const BLUEZ: &str = "org.bluez";
-const AGENT_PATH: &str = "/org/wayland_time/bluetooth/agent";
+const AGENT_PATH: &str = "/org/kiln/bluetooth/agent";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Adapter {

@@ -4,8 +4,8 @@
 //! Only the middle block (the "card") is drawn with text; the rest is a flat fill. The card
 //! keeps the same size for a given screen, so a redraw only damages that rectangle.
 
-use wt_config::{config::Color, theme::Theme};
-use wt_draw::{Canvas, Text};
+use kiln_config::{config::Color, theme::Theme};
+use kiln_draw::{Canvas, Text};
 
 use crate::password::Password;
 

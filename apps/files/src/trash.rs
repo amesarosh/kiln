@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn trash_and_restore() {
-        let dir = std::env::temp_dir().join(format!("wt-trash-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kiln-trash-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // A private trash, so the test doesn't touch the real one.

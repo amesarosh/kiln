@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Sound
+Comment=Choose speakers, headphones and microphone, and set volumes for each app
+Exec=kiln-sound
+Icon=multimedia-volume-control
+Categories=Settings;HardwareSettings;AudioVideo;Audio;Mixer;
+Keywords=sound;audio;volume;mixer;speaker;headphones;microphone;output;input;mute;
+OnlyShowIn=kiln;
+StartupWMClass=kiln-sound

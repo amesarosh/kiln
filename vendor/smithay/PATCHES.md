@@ -1,7 +1,7 @@
 # Changes to Smithay 0.7.0
 
-This is Smithay 0.7.0 from crates.io with a few small additions wayland-time needs that
-upstream doesn't have yet. Every change is marked with a `wayland-time:` comment.
+This is Smithay 0.7.0 from crates.io with a few small additions kiln needs that
+upstream doesn't have yet. Every change is marked with a `kiln:` comment.
 
 - `src/lib.rs`: upstream warnings are silenced (`#![allow(warnings)]`), since a path
   dependency's warnings show up in our build.

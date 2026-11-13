@@ -1,13 +1,13 @@
 [package]
-name = "wayland-time-polkit"
+name = "kiln-polkit"
 version = "0.1.0"
 edition = "2024"
-description = "Password prompt for apps that need admin rights (a polkit agent) for the wayland-time compositor"
+description = "Password prompt for apps that need admin rights (a polkit agent) for the kiln compositor"
 license = "MIT"
 
 [dependencies]
-wt-config = { path = "../../crates/wt-config" }
-wt-draw = { path = "../../crates/wt-draw" }
+kiln-config = { path = "../../crates/kiln-config" }
+kiln-draw = { path = "../../crates/kiln-draw" }
 # Layer shell, keyboard with key repeat, pointer, shared-memory buffers. Its calloop and
 # protocols are used through its re-exports, so the versions always match.
 smithay-client-toolkit = "0.20"

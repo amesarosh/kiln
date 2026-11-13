@@ -1,0 +1,20 @@
+# Default apps inside a kiln session (XDG_CURRENT_DESKTOP=kiln).
+# Your own ~/.config/mimeapps.list, or "Open With" in Files, still overrides these.
+[Default Applications]
+image/png=kiln-image-viewer.desktop
+image/apng=kiln-image-viewer.desktop
+image/jpeg=kiln-image-viewer.desktop
+image/webp=kiln-image-viewer.desktop
+image/gif=kiln-image-viewer.desktop
+image/bmp=kiln-image-viewer.desktop
+image/x-bmp=kiln-image-viewer.desktop
+image/tiff=kiln-image-viewer.desktop
+image/x-icon=kiln-image-viewer.desktop
+image/vnd.microsoft.icon=kiln-image-viewer.desktop
+image/x-tga=kiln-image-viewer.desktop
+image/x-portable-anymap=kiln-image-viewer.desktop
+image/x-portable-bitmap=kiln-image-viewer.desktop
+image/x-portable-graymap=kiln-image-viewer.desktop
+image/x-portable-pixmap=kiln-image-viewer.desktop
+image/qoi=kiln-image-viewer.desktop
+image/svg+xml=kiln-image-viewer.desktop

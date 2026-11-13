@@ -77,7 +77,7 @@ pub struct Cache {
 
 impl Cache {
     pub fn fonts(&mut self) -> &[String] {
-        self.fonts.get_or_insert_with(wt_config::fonts::families)
+        self.fonts.get_or_insert_with(kiln_config::fonts::families)
     }
 
     pub fn icon_themes(&mut self) -> &[String] {

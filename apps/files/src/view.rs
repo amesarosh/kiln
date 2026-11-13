@@ -7,8 +7,8 @@ use std::{
     sync::mpsc,
 };
 
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     color,
     egui::{
         self, Align2, Color32, FontId, Key, Rect, RichText, Sense, Stroke, TextStyle, TextureHandle, Ui, pos2, vec2,
@@ -145,15 +145,24 @@ pub enum CrumbClick {
 }
 
 /// A folder's path as buttons ("Home / Documents / x"), the end kept in view.
-pub fn crumbs(ui: &mut Ui, p: &Palette, dir: &Path) -> Option<CrumbClick> {
+/// `roots` are named folders (drives) that start the path instead of Home or Computer.
+pub fn crumbs(ui: &mut Ui, p: &Palette, dir: &Path, roots: &[(String, PathBuf)]) -> Option<CrumbClick> {
     let home = fs::home();
     let mut parts: Vec<(String, PathBuf)> = Vec::new();
-    let rest = match dir.strip_prefix(&home) {
-        Ok(rest) if home != Path::new("/") => {
+    let root = roots
+        .iter()
+        .filter(|(_, r)| dir.starts_with(r))
+        .max_by_key(|(_, r)| r.components().count());
+    let rest = match (root, dir.strip_prefix(&home)) {
+        (Some((label, r)), _) => {
+            parts.push((label.clone(), r.clone()));
+            dir.strip_prefix(r).unwrap_or(dir).to_path_buf()
+        }
+        (None, Ok(rest)) if home != Path::new("/") => {
             parts.push(("Home".into(), home.clone()));
             rest.to_path_buf()
         }
-        _ => {
+        (None, _) => {
             parts.push(("Computer".into(), PathBuf::from("/")));
             dir.strip_prefix("/").unwrap_or(dir).to_path_buf()
         }
@@ -197,8 +206,8 @@ pub fn crumbs(ui: &mut Ui, p: &Palette, dir: &Path) -> Option<CrumbClick> {
 /// pressed, Some(false) when it was left.
 pub fn path_field(ui: &mut Ui, width: f32, typed: &mut String) -> Option<bool> {
     let r = ui.add_sized(
-        [width, wt_ui::field_height(ui.style())],
-        wt_ui::field(ui, egui::TextEdit::singleline(typed).hint_text("Type a folder or file path")),
+        [width, kiln_ui::field_height(ui.style())],
+        kiln_ui::field(ui, egui::TextEdit::singleline(typed).hint_text("Type a folder or file path")),
     );
     if !r.has_focus() && !r.lost_focus() {
         r.request_focus();
@@ -208,7 +217,7 @@ pub fn path_field(ui: &mut Ui, width: f32, typed: &mut String) -> Option<bool> {
 
 /// The search box. `focus` puts the cursor in it, at the end of what's typed.
 pub fn search_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32, focus: bool) -> egui::Response {
-    let r = ui.add(wt_ui::field(ui, egui::TextEdit::singleline(text).hint_text(hint).desired_width(width)));
+    let r = ui.add(kiln_ui::field(ui, egui::TextEdit::singleline(text).hint_text(hint).desired_width(width)));
     if focus {
         r.request_focus();
         if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
@@ -419,7 +428,7 @@ fn search(root: &Path, needle: &str, hidden: bool, tx: &mpsc::Sender<Vec<Entry>>
 
 /// File, app and place icons as textures, looked up once.
 pub struct Icons {
-    icons: wt_icons::Icons,
+    icons: kiln_icons::Icons,
     pub theme: String,
     /// File icons by kind ("/dir", or the MIME type).
     files: HashMap<String, Option<TextureHandle>>,
@@ -431,7 +440,7 @@ pub struct Icons {
 impl Icons {
     pub fn new(theme: &str) -> Self {
         Self {
-            icons: wt_icons::Icons::new(theme),
+            icons: kiln_icons::Icons::new(theme),
             theme: theme.to_string(),
             files: HashMap::new(),
             named: HashMap::new(),
@@ -445,7 +454,7 @@ impl Icons {
         ctx: &egui::Context,
         mime: &Mime,
         e: &Entry,
-        outline: wt_config::Color,
+        outline: kiln_config::Color,
     ) -> Option<TextureHandle> {
         let outline = color(outline).to_srgba_unmultiplied();
         let key = if e.is_dir {
@@ -478,7 +487,7 @@ impl Icons {
     }
 
     /// The pixels of an entry's icon, `px` big (for a drag icon, drawn outside egui).
-    pub fn file_pixels(&mut self, mime: &Mime, e: &Entry, px: u32) -> Option<std::rc::Rc<wt_icons::Icon>> {
+    pub fn file_pixels(&mut self, mime: &Mime, e: &Entry, px: u32) -> Option<std::rc::Rc<kiln_icons::Icon>> {
         mime.icons_for(e).iter().find_map(|name| self.icons.any(name, px, [255; 4]))
     }
 
@@ -489,7 +498,7 @@ impl Icons {
         }
         let px = (size * ctx.pixels_per_point()).round() as u32;
         let icon = if name.starts_with('/') {
-            wt_icons::load_file(Path::new(name), px).map(std::rc::Rc::new)
+            kiln_icons::load_file(Path::new(name), px).map(std::rc::Rc::new)
         } else {
             self.icons.any(name, px, [255; 4])
         };
@@ -503,7 +512,7 @@ impl Icons {
         ctx: &egui::Context,
         name: &str,
         size: f32,
-        tint: wt_config::Color,
+        tint: kiln_config::Color,
     ) -> Option<TextureHandle> {
         let c = color(tint).to_srgba_unmultiplied();
         let key = (name.to_string(), c);
@@ -527,7 +536,7 @@ pub fn file_icon_rect(ctx: &egui::Context, t: &TextureHandle, center: egui::Pos2
 
 /// `icon` with a `width`-pixel outline of color `c` (unmultiplied) around its shape, on a canvas
 /// `width` bigger on each side.
-fn outlined(icon: &wt_icons::Icon, width: u32, c: [u8; 4]) -> wt_icons::Icon {
+fn outlined(icon: &kiln_icons::Icon, width: u32, c: [u8; 4]) -> kiln_icons::Icon {
     let (n, w) = (icon.size as i32, width as i32);
     let size = n + 2 * w;
     // How solid the icon is at a pixel. Faint edges (soft shadows) are left out, so the outline
@@ -569,10 +578,10 @@ fn outlined(icon: &wt_icons::Icon, width: u32, c: [u8; 4]) -> wt_icons::Icon {
             rgba[i + 3] = (src[3] as u32 + line_a * under / 255) as u8;
         }
     }
-    wt_icons::Icon { size: size as u32, rgba }
+    kiln_icons::Icon { size: size as u32, rgba }
 }
 
-fn texture(ctx: &egui::Context, name: &str, icon: &wt_icons::Icon) -> TextureHandle {
+fn texture(ctx: &egui::Context, name: &str, icon: &kiln_icons::Icon) -> TextureHandle {
     let image = egui::ColorImage::from_rgba_premultiplied([icon.size as usize; 2], &icon.rgba);
     ctx.load_texture(name, image, egui::TextureOptions::LINEAR)
 }

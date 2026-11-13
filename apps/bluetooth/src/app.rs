@@ -6,8 +6,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     Look, color, eframe,
     egui::{self, Align, Layout, Margin, RichText, Sense, TextureHandle, Ui, vec2},
 };
@@ -31,7 +31,7 @@ pub struct BluetoothApp {
 
 impl BluetoothApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let look = Look::new(&cc.egui_ctx, wt_config::Config::default_path());
+        let look = Look::new(&cc.egui_ctx, kiln_config::Config::default_path());
         let icons = Icons::new(&look.theme.icon_theme);
         Self {
             look,
@@ -285,7 +285,7 @@ impl BluetoothApp {
                 };
                 let menu = ui.add_enabled(!busy, button.frame(false)).on_hover_text("More");
                 egui::Popup::menu(&menu).show(|ui| {
-                    wt_ui::roomy_menu(ui);
+                    kiln_ui::roomy_menu(ui);
                     if ui.button("Forget").clicked() {
                         bt.forget(&d.path);
                     }
@@ -307,7 +307,7 @@ impl BluetoothApp {
         });
         if d.paired {
             r.context_menu(|ui| {
-                wt_ui::roomy_menu(ui);
+                kiln_ui::roomy_menu(ui);
                 if ui.add_enabled(!busy, egui::Button::new("Forget")).clicked() {
                     bt.forget(&d.path);
                 }
@@ -369,7 +369,7 @@ impl BluetoothApp {
                     ui.label(RichText::new(format!("Type the code {device} shows:")).color(color(p.subtext)));
                     ui.add_space(6.0);
                     let field = ui
-                        .add(wt_ui::field(ui, egui::TextEdit::singleline(&mut self.code)).desired_width(f32::INFINITY));
+                        .add(kiln_ui::field(ui, egui::TextEdit::singleline(&mut self.code)).desired_width(f32::INFINITY));
                     field.request_focus();
                     let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.add_space(6.0);
@@ -469,8 +469,8 @@ fn toggle(ui: &mut Ui, p: &Palette, on: &mut bool) -> egui::Response {
     if ui.is_rect_visible(rect) {
         let t = ui.ctx().animate_bool_responsive(response.id, *on);
         let off_track = if response.hovered() { p.hover } else { p.selected };
-        let track = wt_config::theme::mix(off_track, p.accent, t);
-        let knob = wt_config::theme::mix(p.muted, p.on_accent, t);
+        let track = kiln_config::theme::mix(off_track, p.accent, t);
+        let knob = kiln_config::theme::mix(p.muted, p.on_accent, t);
         let radius = rect.height() / 2.0;
         ui.painter()
             .rect(rect, radius, color(track), egui::Stroke::NONE, egui::StrokeKind::Inside);
@@ -483,7 +483,7 @@ fn toggle(ui: &mut Ui, p: &Palette, on: &mut bool) -> egui::Response {
 
 /// Symbolic icons in the theme's colors, as textures.
 struct Icons {
-    icons: wt_icons::Icons,
+    icons: kiln_icons::Icons,
     theme: String,
     cache: HashMap<(String, [u8; 4], u32), Option<TextureHandle>>,
 }
@@ -491,7 +491,7 @@ struct Icons {
 impl Icons {
     fn new(theme: &str) -> Self {
         Self {
-            icons: wt_icons::Icons::new(theme),
+            icons: kiln_icons::Icons::new(theme),
             theme: theme.to_string(),
             cache: HashMap::new(),
         }
@@ -502,7 +502,7 @@ impl Icons {
         ctx: &egui::Context,
         name: &str,
         size: f32,
-        tint: wt_config::Color,
+        tint: kiln_config::Color,
     ) -> Option<TextureHandle> {
         let c = color(tint).to_srgba_unmultiplied();
         let px = (size * ctx.pixels_per_point()).round() as u32;

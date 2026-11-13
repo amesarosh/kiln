@@ -1,8 +1,8 @@
 //! Window rules: which windows float, and which workspace or monitor they open on.
 
 use toml_edit::{Item, Table};
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     color,
     egui::{self, Align, Layout, RichText, Ui},
 };

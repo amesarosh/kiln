@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=wayland-time Settings
-Comment=Change how the desktop looks and behaves
-Exec=wayland-time-settings
-Icon=preferences-system
-Categories=Settings;DesktopSettings;
-OnlyShowIn=wayland-time;
-StartupWMClass=wayland-time-settings

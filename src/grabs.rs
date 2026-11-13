@@ -296,7 +296,8 @@ impl TileResizeGrab {
 
 /// Dragging a tiled window: it stays tiled and trades places with whichever tile the
 /// pointer enters. Near the top or bottom of a tile in the other column it joins that
-/// column instead, above or below the tile.
+/// column instead, above or below the tile. When all tiles share one column, the left or
+/// right side of a tile splits the window off into a column of its own.
 struct TileMoveGrab {
     start: GrabStartData<State>,
     window: Window,
@@ -329,20 +330,23 @@ impl TileMoveGrab {
         };
         let ws = state.monitors[mon].ws_mut();
         // Rows run across in the vertical layout, so its drop zones are the left and right edges.
-        let (p, start, len) = if ws.layout == LayoutKind::Vertical {
-            (location.x, r.x, r.w)
-        } else {
-            (location.y, r.y, r.h)
+        let fx = (location.x - r.x as f64) / r.w.max(1) as f64;
+        let fy = (location.y - r.y as f64) / r.h.max(1) as f64;
+        let (f, across) = if ws.layout == LayoutKind::Vertical { (fx, fy) } else { (fy, fx) };
+        let zone = |f: f64| {
+            if f < EDGE_ZONE {
+                Some(false)
+            } else if f > 1.0 - EDGE_ZONE {
+                Some(true)
+            } else {
+                None
+            }
         };
-        let f = (p - start as f64) / len.max(1) as f64;
-        let edge = if f < EDGE_ZONE {
-            Some(false)
-        } else if f > 1.0 - EDGE_ZONE {
-            Some(true)
-        } else {
-            None
-        };
-        if edge.is_some_and(|below| {
+        // With every tile in one column, the side edges pull the window out into a column
+        // of its own; otherwise there would be no way back to two columns by dragging.
+        if zone(across).is_some_and(|after| ws.split_column(&self.window, after)) {
+            // The tiles all move, so nothing is left to bounce back from.
+        } else if zone(f).is_some_and(|below| {
             ws.move_to_column(&self.window, &other, below) || ws.flip_pair(&self.window, &other, below)
         }) {
             self.settled_over = Some(other);

@@ -8,12 +8,12 @@
 
 use std::path::{Path, PathBuf};
 
-use wayland_time_files::{
+use kiln_files::{
     fs::{self, Entry, Mime, Place, SortBy},
     view::{self, CrumbClick, ICON, Icons, Search, cell_text, clipped_text, paint_image},
 };
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     Look, color, eframe,
     egui::{self, Align, Color32, Key, Layout, Margin, Rect, RichText, Sense, TextStyle, Ui, pos2, vec2},
 };
@@ -67,7 +67,7 @@ pub struct Picker {
 
 impl Picker {
     pub fn new(cc: &eframe::CreationContext<'_>, req: Request, plain: bool) -> Self {
-        let look = Look::new(&cc.egui_ctx, wt_config::Config::default_path());
+        let look = Look::new(&cc.egui_ctx, kiln_config::Config::default_path());
         let icons = Icons::new(&look.theme.icon_theme);
         let start = req.folder.clone().filter(|f| f.is_dir()).unwrap_or_else(fs::home);
         let mut me = Self {
@@ -622,7 +622,7 @@ impl Picker {
             ui.label(RichText::new("Recent files").color(color(p.text)));
             return;
         };
-        match view::crumbs(ui, p, &dir) {
+        match view::crumbs(ui, p, &dir, &[]) {
             Some(CrumbClick::Go(d)) => self.open(Some(d), true),
             Some(CrumbClick::Edit) => self.editing_path = Some(dir.to_string_lossy().into_owned()),
             None => {}
@@ -660,7 +660,7 @@ impl Picker {
         let small = TextStyle::Small.resolve(ui.style());
         let body = TextStyle::Body.resolve(ui.style());
         // Folders stand out by their names in semi-bold.
-        let bold = wt_ui::semibold(body.size);
+        let bold = kiln_ui::semibold(body.size);
         let name_font = |e: &Entry| if e.is_dir { bold.clone() } else { body.clone() };
         let size_w = 100.0;
         let date_w = 130.0;
@@ -785,13 +785,13 @@ impl Picker {
     }
 
     fn actions(&mut self, ui: &mut Ui, p: &Palette) {
-        let field_h = wt_ui::field_height(ui.style());
+        let field_h = kiln_ui::field_height(ui.style());
         if self.mode() == Mode::Save {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Name").color(color(p.muted)));
                 let r = ui.add_sized(
                     [ui.available_width(), field_h],
-                    wt_ui::field(ui, egui::TextEdit::singleline(&mut self.name).hint_text("File name")),
+                    kiln_ui::field(ui, egui::TextEdit::singleline(&mut self.name).hint_text("File name")),
                 );
                 if std::mem::take(&mut self.focus_name) {
                     r.request_focus();
@@ -860,7 +860,7 @@ impl Picker {
                     .map_or("All files", |f| f.name.as_str())
                     .to_string();
                 let mut pick = self.filter;
-                wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt("filter")
+                kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt("filter")
                     .selected_text(current)
                     .width(180.0)
                     .show_ui(ui, |ui| {
@@ -891,7 +891,7 @@ impl Picker {
                         .iter()
                         .find(|(id, _)| id == value)
                         .map_or(value.clone(), |(_, l)| l.clone());
-                    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt(("choice", i))
+                    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt(("choice", i))
                         .selected_text(current)
                         .show_ui(ui, |ui| {
                             for (id, label) in &c.options {

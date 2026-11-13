@@ -28,10 +28,10 @@ mod state;
 mod status;
 mod switcher;
 // Text and canvas drawing are shared with the lock screen.
-use wt_draw as text;
+use kiln_draw as text;
 mod volume;
 mod wallpaper;
-use wt_config::theme;
+use kiln_config::theme;
 mod workspace;
 
 use std::{fs::File, path::PathBuf, sync::Mutex};
@@ -41,13 +41,13 @@ use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 use crate::{config::Config, state::State};
 
 const HELP: &str = "\
-wayland-time — a lightweight tiling Wayland compositor
+kiln — a lightweight tiling Wayland compositor
 
 USAGE:
-    wayland-time [OPTIONS]
+    kiln [OPTIONS]
 
 OPTIONS:
-    -c, --config <PATH>      Use this config file instead of ~/.config/wayland-time/config.toml
+    -c, --config <PATH>      Use this config file instead of ~/.config/kiln/config.toml
     -e, --exec <CMD>         Run a command once the compositor is ready (repeatable)
     -b, --backend <NAME>     auto (default), winit (nested window), tty (real hardware) or
                              headless (no screen, for testing; see `msg`)
@@ -56,13 +56,13 @@ OPTIONS:
         --check-config       Validate the config file and exit
     -h, --help               Show this help
 
-    wayland-time msg <ACTION>
+    kiln msg <ACTION>
                              Run an action in the running compositor, e.g.
-                             wayland-time msg \"workspace 2\". Actions are the same as in [binds].
+                             kiln msg \"workspace 2\". Actions are the same as in [binds].
 
 
 Logging is controlled with RUST_LOG, e.g. RUST_LOG=debug. When running from a TTY,
-logs are also written to ~/.local/state/wayland-time/wayland-time.log.
+logs are also written to ~/.local/state/kiln/kiln.log.
 ";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -137,21 +137,21 @@ fn log_file() -> Option<(File, PathBuf)> {
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
-    let dir = base.join("wayland-time");
+    let dir = base.join("kiln");
     std::fs::create_dir_all(&dir).ok()?;
-    let path = dir.join("wayland-time.log");
+    let path = dir.join("kiln.log");
     // Keep the previous run's log for debugging crashes.
-    let _ = std::fs::rename(&path, dir.join("wayland-time.log.old"));
+    let _ = std::fs::rename(&path, dir.join("kiln.log.old"));
     File::create(&path).ok().map(|f| (f, path))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // `wayland-time msg <action>`: talk to the running compositor and exit.
+    // `kiln msg <action>`: talk to the running compositor and exit.
     let mut argv = std::env::args().skip(1);
     if argv.next().as_deref() == Some("msg") {
         let action = argv.collect::<Vec<_>>().join(" ");
         if action.trim().is_empty() {
-            eprintln!("usage: wayland-time msg <action>, e.g. wayland-time msg \"workspace 2\"");
+            eprintln!("usage: kiln msg <action>, e.g. kiln msg \"workspace 2\"");
             std::process::exit(2);
         }
         match ipc::send(&action) {

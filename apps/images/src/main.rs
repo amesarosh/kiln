@@ -1,14 +1,14 @@
-//! wayland-time-image-viewer: look at a picture, and the others in its folder, in the theme's
+//! kiln-image-viewer: look at a picture, and the others in its folder, in the theme's
 //! colors and font.
 
 mod app;
 mod load;
 
 const HELP: &str = "\
-wayland-time-image-viewer — Image viewer for the wayland-time compositor
+kiln-image-viewer — Image viewer for the kiln compositor
 
 USAGE:
-    wayland-time-image-viewer [IMAGE or FOLDER]
+    kiln-image-viewer [IMAGE or FOLDER]
 
 Shows the image (or the first one in the folder); the others in its folder are a key away.
 
@@ -36,18 +36,18 @@ fn main() {
     let path = arg.map(|a| {
         let s = a.to_string_lossy();
         match s.strip_prefix("file://") {
-            Some(_) => wayland_time_files::fs::uri_to_path(&s).unwrap_or_else(|| a.into()),
+            Some(_) => kiln_files::fs::uri_to_path(&s).unwrap_or_else(|| a.into()),
             None => std::path::PathBuf::from(a),
         }
     });
     let path = path.map(|p| std::fs::canonicalize(&p).unwrap_or(p));
-    let viewport = wt_ui::egui::ViewportBuilder::default()
+    let viewport = kiln_ui::egui::ViewportBuilder::default()
         .with_inner_size([1000.0, 720.0])
         .with_min_inner_size([360.0, 260.0]);
-    if let Err(e) = wt_ui::run_viewport("wayland-time-image-viewer", "Image Viewer", viewport, |cc| {
+    if let Err(e) = kiln_ui::run_viewport("kiln-image-viewer", "Image Viewer", viewport, |cc| {
         app::Viewer::new(cc, path)
     }) {
-        eprintln!("wayland-time-image-viewer: {e}");
+        eprintln!("kiln-image-viewer: {e}");
         std::process::exit(1);
     }
 }

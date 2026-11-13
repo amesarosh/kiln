@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Kiln Settings
+Comment=Change how the desktop looks and behaves
+Exec=kiln-settings
+Icon=preferences-system
+Categories=Settings;DesktopSettings;
+OnlyShowIn=kiln;
+StartupWMClass=kiln-settings

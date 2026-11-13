@@ -11,8 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     Look, color, eframe,
     egui::{
         self, Align, Align2, Color32, FontId, Key, Layout, Margin, Painter, Rect, RichText, Sense, Stroke,
@@ -165,7 +165,7 @@ struct Confirm {
 
 /// App icons for process names, found once and kept as textures.
 struct ProcessIcons {
-    icons: wt_icons::Icons,
+    icons: kiln_icons::Icons,
     /// The icon theme `icons` was made for.
     theme: String,
     textures: HashMap<String, Option<TextureHandle>>,
@@ -174,7 +174,7 @@ struct ProcessIcons {
 impl ProcessIcons {
     fn new(theme: &str) -> Self {
         Self {
-            icons: wt_icons::Icons::new(theme),
+            icons: kiln_icons::Icons::new(theme),
             theme: theme.to_string(),
             textures: HashMap::new(),
         }
@@ -251,7 +251,7 @@ pub struct TasksApp {
 
 impl TasksApp {
     pub fn new(cc: &eframe::CreationContext<'_>, page: Page) -> Self {
-        let look = Look::new(&cc.egui_ctx, wt_config::Config::default_path());
+        let look = Look::new(&cc.egui_ctx, kiln_config::Config::default_path());
         let interval = Arc::new(AtomicU64::new(1000));
         let latest = Arc::new(Mutex::new(Latest::default()));
         let shared = latest.clone();
@@ -335,7 +335,7 @@ impl TasksApp {
     /// End a process, asking first when that would take the desktop down with it.
     fn request_end(&mut self, pid: i32, force: bool) {
         let Some(p) = self.find(pid) else { return };
-        let why = if p.name == "wayland-time" {
+        let why = if p.name == "kiln" {
             Some("This is the desktop itself: ending it logs you out and closes every app.")
         } else if p.pid == 1 {
             Some("This is the system's first process; ending it shuts the system down.")
@@ -424,7 +424,7 @@ impl TasksApp {
             ui.add_space(14.0);
             let current = self.interval.load(Ordering::Relaxed);
             let label = SPEEDS.iter().find(|s| s.0 == current).map_or("", |s| s.1);
-            wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt("speed")
+            kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt("speed")
                 .selected_text(label)
                 .width(ui.available_width())
                 .show_ui(ui, |ui| {
@@ -454,7 +454,7 @@ impl TasksApp {
                         egui::TextEdit::singleline(&mut self.search)
                             .id(id)
                             .hint_text("Search  (Ctrl+F)")
-                            .margin(Margin { left: 30, right: wt_ui::side_padding(ui.style()) as i8, top: 10, bottom: 10 })
+                            .margin(Margin { left: 30, right: kiln_ui::side_padding(ui.style()) as i8, top: 10, bottom: 10 })
                             .desired_width(240.0),
                     );
                     if r.has_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {

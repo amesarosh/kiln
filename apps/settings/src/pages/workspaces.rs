@@ -1,8 +1,8 @@
 //! Names and icons for workspaces, shown on the bar instead of their numbers.
 
 use toml_edit::{Item, Value};
-use wt_config::theme::Palette;
-use wt_ui::egui::{self, Ui};
+use kiln_config::theme::Palette;
+use kiln_ui::egui::{self, Ui};
 
 use crate::{doc::ConfigDoc, widgets};
 

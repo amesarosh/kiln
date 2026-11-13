@@ -1,7 +1,7 @@
 //! The desktop portal backend: `org.freedesktop.impl.portal.FileChooser` on the session bus.
 //!
 //! xdg-desktop-portal forwards an app's "open a file" request here (when the portal config
-//! picks `wayland-time` for FileChooser). Each request starts the picker window as its own
+//! picks `kiln` for FileChooser). Each request starts the picker window as its own
 //! process and answers once it closes. The request's handle object takes `Close`, which
 //! closes the window, for when the app gives up.
 
@@ -22,11 +22,11 @@ use zbus::{
     zvariant::{OwnedObjectPath, OwnedValue, Structure, StructureBuilder, Value},
 };
 
-use wayland_time_files::fs::{self, Filter};
+use kiln_files::fs::{self, Filter};
 
 use crate::request::{Answer, Choice, Mode, Request};
 
-pub const BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.wayland-time";
+pub const BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.kiln";
 const PATH: &str = "/org/freedesktop/portal/desktop";
 
 /// Portal answers: 0 done, 1 cancelled, 2 something went wrong.

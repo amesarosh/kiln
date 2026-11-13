@@ -1,4 +1,4 @@
-//! wayland-time-launcher: type to find an app, Enter to start it.
+//! kiln-launcher: type to find an app, Enter to start it.
 //!
 //! Arrows (or Tab, Ctrl+N/P) move, Enter starts, Escape or clicking elsewhere closes. Text
 //! that matches no app runs as a command. Apps launched often come first.
@@ -11,7 +11,7 @@ use std::{
     io::{BufRead, BufReader, Write},
 };
 
-use wt_ui::{
+use kiln_ui::{
     Look, color, eframe,
     egui::{self, Key, RichText, Sense, TextureHandle, Ui, vec2},
 };
@@ -19,16 +19,16 @@ use wt_ui::{
 use apps::{App, History};
 
 const HELP: &str = "\
-wayland-time-launcher — find and start apps
+kiln-launcher — find and start apps
 
 USAGE:
-    wayland-time-launcher
+    kiln-launcher
 
 Type to search, arrows to move, Enter to start, Escape to close. Text that matches no app
 runs as a command.
 ";
 
-const APP_ID: &str = "wayland-time-launcher";
+const APP_ID: &str = "kiln-launcher";
 /// Rows shown at once.
 const ROWS: usize = 8;
 const ROW_H: f32 = 46.0;
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_inner_size([580.0, 78.0 + ROWS as f32 * ROW_H])
         .with_decorations(false)
         .with_resizable(false);
-    wt_ui::run_viewport(APP_ID, "Launcher", viewport, Launcher::new)?;
+    kiln_ui::run_viewport(APP_ID, "Launcher", viewport, Launcher::new)?;
     Ok(())
 }
 
@@ -60,7 +60,7 @@ struct Launcher {
     selected: usize,
     /// Scrolled-off rows at the top.
     first: usize,
-    icons: wt_icons::Icons,
+    icons: kiln_icons::Icons,
     textures: HashMap<String, Option<TextureHandle>>,
     /// The window has had focus; losing it after that closes the launcher.
     had_focus: bool,
@@ -68,12 +68,12 @@ struct Launcher {
 
 impl Launcher {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let config = wt_config::Config::default_path();
+        let config = kiln_config::Config::default_path();
         let theme = config
             .as_ref()
-            .and_then(|p| wt_config::Config::read(p).ok())
+            .and_then(|p| kiln_config::Config::read(p).ok())
             .map(|c| c.theme)
-            .unwrap_or_else(|| wt_config::Config::default().theme);
+            .unwrap_or_else(|| kiln_config::Config::default().theme);
         let mut look = Look::new(&cc.egui_ctx, config);
         let icon_theme = theme.icon_theme.clone();
         look.set(&cc.egui_ctx, theme);
@@ -85,7 +85,7 @@ impl Launcher {
             matches: Vec::new(),
             selected: 0,
             first: 0,
-            icons: wt_icons::Icons::new(&icon_theme),
+            icons: kiln_icons::Icons::new(&icon_theme),
             textures: HashMap::new(),
             had_focus: false,
         };
@@ -157,7 +157,7 @@ impl Launcher {
         if let Some(t) = self.textures.get(name) {
             return t.clone();
         }
-        let tint = wt_ui::color(self.look.theme.palette.text).to_array();
+        let tint = kiln_ui::color(self.look.theme.palette.text).to_array();
         let tex = self.icons.any(name, px, tint).map(|icon| {
             let image = egui::ColorImage::from_rgba_premultiplied([icon.size as usize; 2], &icon.rgba);
             ctx.load_texture(format!("icon:{name}"), image, egui::TextureOptions::LINEAR)
@@ -198,7 +198,7 @@ impl Launcher {
         }
     }
 
-    fn rows(&mut self, ui: &mut Ui, p: &wt_config::theme::Palette) {
+    fn rows(&mut self, ui: &mut Ui, p: &kiln_config::theme::Palette) {
         let ctx = ui.ctx().clone();
         let px = (ICON * ctx.pixels_per_point()).round() as u32;
         let radius = self.look.theme.radius;
@@ -300,7 +300,7 @@ impl eframe::App for Launcher {
                 let edit = egui::TextEdit::singleline(&mut self.query)
                     .hint_text("Search apps, or type a command")
                     .desired_width(f32::INFINITY)
-                    .margin(egui::Margin::symmetric(wt_ui::side_padding(ui.style()) as i8, 12))
+                    .margin(egui::Margin::symmetric(kiln_ui::side_padding(ui.style()) as i8, 12))
                     .lock_focus(true);
                 let r = ui.add(edit);
                 r.request_focus();
@@ -316,7 +316,7 @@ impl eframe::App for Launcher {
 /// Start a command through the compositor, so it gets the session's environment and may bring
 /// its window forward. Without the compositor's socket, start it directly.
 fn start(cmd: &str) {
-    if let Some(path) = std::env::var_os("WAYLAND_TIME_SOCKET").filter(|p| !p.is_empty())
+    if let Some(path) = std::env::var_os("KILN_SOCKET").filter(|p| !p.is_empty())
         && let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&path)
     {
         let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));

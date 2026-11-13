@@ -8,7 +8,7 @@
 
 use std::{cell::RefCell, collections::HashMap};
 
-use wt_config::theme::Palette;
+use kiln_config::theme::Palette;
 
 use smithay::{
     backend::{
@@ -141,9 +141,9 @@ fn end_buttons(m: &Model) -> Vec<Part> {
 }
 
 /// What the settings button runs, and the app id its window has.
-const SETTINGS_APP: &str = "wayland-time-settings";
-const BLUETOOTH_APP: &str = "wayland-time-bluetooth";
-const SOUND_APP: &str = "wayland-time-sound";
+const SETTINGS_APP: &str = "kiln-settings";
+const BLUETOOTH_APP: &str = "kiln-bluetooth";
+const SOUND_APP: &str = "kiln-sound";
 
 /// One workspace button.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -787,7 +787,7 @@ impl Bar {
                     .or_else(|| (!icon_name.is_empty()).then(|| self.any_icon(icon_name, size as u32, tint)).flatten())
                     .or_else(|| {
                         let (w, h, argb) = pixmap.as_ref()?;
-                        Some(std::rc::Rc::new(wt_icons::scaled(&argb_to_rgba(argb), *w as u32, *h as u32, size as u32)))
+                        Some(std::rc::Rc::new(kiln_icons::scaled(&argb_to_rgba(argb), *w as u32, *h as u32, size as u32)))
                     });
                 match icon {
                     Some(icon) => canvas.draw_image(x, y, icon.size, &icon.rgba),
@@ -1796,10 +1796,10 @@ mod tests {
             size,
             position,
             &[
-                ("uaio@host: ~/git/wayland-time", true),
+                ("uaio@host: ~/git/kiln", true),
                 ("Start Page - Vivaldi", false),
                 (
-                    "bar.rs - wayland-time - A very long window title that will need to be cut short",
+                    "bar.rs - kiln - A very long window title that will need to be cut short",
                     false,
                 ),
                 ("Steam", false),

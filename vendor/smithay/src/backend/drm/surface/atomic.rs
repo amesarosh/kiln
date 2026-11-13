@@ -861,7 +861,7 @@ impl AtomicDrmSurface {
         self.page_flip_with(planes, event, false)
     }
 
-    /// wayland-time: a page flip that may happen right away instead of at vblank (tearing).
+    /// kiln: a page flip that may happen right away instead of at vblank (tearing).
     /// The kernel refuses it (EINVAL) when anything but the primary plane's buffer changes.
     pub fn page_flip_with<'a>(
         &self,

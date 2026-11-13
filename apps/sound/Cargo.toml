@@ -1,14 +1,14 @@
 [package]
-name = "wayland-time-sound"
+name = "kiln-sound"
 version = "0.1.0"
 edition = "2024"
-description = "Sound for the wayland-time compositor: output and input devices, volumes, and each app's volume"
+description = "Sound for the kiln compositor: output and input devices, volumes, and each app's volume"
 license = "MIT"
 
 [dependencies]
-wt-config = { path = "../../crates/wt-config" }
-wt-ui = { path = "../../crates/wt-ui" }
-wt-icons = { path = "../../crates/wt-icons" }
-wt-pipewire = { path = "../../crates/wt-pipewire" }
+kiln-config = { path = "../../crates/kiln-config" }
+kiln-ui = { path = "../../crates/kiln-ui" }
+kiln-icons = { path = "../../crates/kiln-icons" }
+kiln-pipewire = { path = "../../crates/kiln-pipewire" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

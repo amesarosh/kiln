@@ -2,8 +2,8 @@
 //! layout.
 
 use toml_edit::{Item, Table, Value};
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     color,
     egui::{self, Align, Layout, RichText, Ui},
 };
@@ -218,10 +218,10 @@ pub fn show(ui: &mut Ui, p: &Palette, doc: &mut ConfigDoc, cache: &mut Cache) {
                         |ui| {
                             let mut nits = get("sdr_brightness")
                                 .and_then(|i| crate::doc::as_number(&i))
-                                .unwrap_or(wt_config::config::DEFAULT_SDR_BRIGHTNESS as f64);
+                                .unwrap_or(kiln_config::config::DEFAULT_SDR_BRIGHTNESS as f64);
                             if widgets::slider(ui, p, &mut nits, 80.0..=600.0, 0, "nits").changed() {
                                 let v = nits.round() as i64;
-                                let default = wt_config::config::DEFAULT_SDR_BRIGHTNESS as i64;
+                                let default = kiln_config::config::DEFAULT_SDR_BRIGHTNESS as i64;
                                 edits.push(("sdr_brightness", (v != default).then(|| v.into())));
                             }
                         },

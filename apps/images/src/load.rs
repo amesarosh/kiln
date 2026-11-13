@@ -14,7 +14,7 @@ use image::{
     codecs::{gif::GifDecoder, png::PngDecoder, webp::WebPDecoder},
     imageops::FilterType,
 };
-use wt_ui::egui;
+use kiln_ui::egui;
 
 /// File name endings we open.
 pub const EXTENSIONS: &[&str] = &[

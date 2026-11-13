@@ -2,8 +2,8 @@
 
 use std::collections::VecDeque;
 
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     color,
     egui::{self, Color32, CornerRadius, Mesh, Painter, Pos2, Rect, Sense, Stroke, Ui, pos2},
 };

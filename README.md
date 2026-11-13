@@ -1,4 +1,4 @@
-# wayland-time
+# Kiln
 
 A lightweight, fast, configurable tiling Wayland compositor written in Rust, built on [Smithay](https://github.com/Smithay/smithay).
 
@@ -6,12 +6,12 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **Multiple monitors**, each with its own set of workspaces (like dwm), placed left to right
 - **Built-in clickable bar** per monitor (top, bottom, left or right): workspaces (with optional names and icons), one tab per window with its app icon, status widgets (tray icons, what's playing, network, battery, brightness, a notifications bell), layout switcher, a settings button and a power button (lock, suspend, log out, restart, shut down)
 - **Overview** (`Mod+Tab`): every workspace of every monitor as live thumbnails; click a window or workspace to go there, drag windows between workspaces
-- **App launcher** (`wayland-time-launcher`): fuzzy search over installed apps, with the ones you use most first
+- **App launcher** (`kiln-launcher`): fuzzy search over installed apps, with the ones you use most first
 - **Desktop notifications** built in: pop-ups with actions, do not disturb, and a list of missed ones behind the bell (or leave it to mako/dunst)
 - **Animations**: workspaces slide or fade, tiles glide into place; touchpad swipes change workspace and open the overview
 - **One TOML file** for keybinds, gaps, borders, colors, keyboard layout and window rules, **reloaded on save**
-- **Settings app** (`wayland-time-settings`) that edits that file for you, with every change applied as you make it
-- **Task manager** (`wayland-time-tasks`, `Ctrl+Shift+Escape`): the running processes, to search, sort and end, and graphs of CPU, memory, disk and network use
+- **Settings app** (`kiln-settings`) that edits that file for you, with every change applied as you make it
+- **Task manager** (`kiln-tasks`, `Ctrl+Shift+Escape`): the running processes, to search, sort and end, and graphs of CPU, memory, disk and network use
 - **Idle costs nothing:** frames are only drawn when something changes, and only damaged regions are repainted
 - Works with standard desktop tools: bars (waybar), launchers (fuzzel, rofi, wofi), wallpaper tools (swaybg) via `wlr-layer-shell`
 - Runs nested for development or **on real hardware from a TTY**, with hardware cursor planes, direct scanout and GPU buffer sharing (linux-dmabuf)
@@ -23,15 +23,15 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 - **Games**: fullscreen games that ask can skip vsync for lower input lag (tearing control), and virtual machines, remote desktops and games can take every key, binds included (`Mod+Ctrl+Escape` takes them back)
 - **Sessions come back**: apps open when you quit, log out or shut down are started again at the next login, with each window on the same monitor and workspace, in the same tiling order, size and floating position
 - **Wallpaper** built in (`[theme] wallpaper`, or one per monitor): fill, fit, stretch, center or tile, picked in the settings app
-- **File picker** (`wayland-time-files`) in the theme's look, given to apps through the desktop portal (Vivaldi, Firefox, Chrome, Flatpaks...): places, path bar, search, filters, open/save/folders. Dialogs always float, centered over the window that opened them, sized to fit the screen
-- **File manager** (`wayland-time-file-manager`, "Files" in the launcher) in the theme's look, built on the file picker: open files in their default app or pick one, copy, cut and paste (in the background, with progress), rename, new folders, a trash that works with other file managers', search, drag and drop with other apps, folders added to the sidebar, and live updates when files change
-- **Bluetooth** (`wayland-time-bluetooth`, and a bar widget: click to open it, right-click to turn Bluetooth on or off): pair (with passkey and PIN prompts), connect, disconnect and forget devices, with battery levels
-- **Sound** (`wayland-time-sound`, and a bar widget showing the volume: click to open it, right-click to mute, scroll to change it): pick the output and microphone, set their volumes, set or mute each app's volume, send an app to another output, and choose sound card profiles
-- **Image viewer** (`wayland-time-image-viewer`, "Image Viewer" in the launcher and the file manager's Open With): flip through a folder's pictures, zoom around the pointer and drag, turn, full screen, and move to the trash with Undo; PNG, JPEG (turned the way the camera says), WebP, GIF and animated GIF/WebP/APNG, BMP, TIFF, ICO, TGA, QOI, PNM and SVG
-- **Password prompt for admin rights** (`wayland-time-polkit`, a polkit agent in the theme's look), started at login, so installing software, mounting disks and `pkexec` can ask for your password
-- **Screen locking** with its own lock screen (`wayland-time-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
+- **File picker** (`kiln-files`) in the theme's look, given to apps through the desktop portal (Vivaldi, Firefox, Chrome, Flatpaks...): places, path bar, search, filters, open/save/folders. Dialogs always float, centered over the window that opened them, sized to fit the screen
+- **File manager** (`kiln-file-manager`, "Files" in the launcher) in the theme's look, built on the file picker: open files in their default app or pick one, copy, cut and paste (in the background, with progress), rename, new folders, a trash that works with other file managers', search, drag and drop with other apps, folders added to the sidebar, and live updates when files change
+- **Bluetooth** (`kiln-bluetooth`, and a bar widget: click to open it, right-click to turn Bluetooth on or off): pair (with passkey and PIN prompts), connect, disconnect and forget devices, with battery levels
+- **Sound** (`kiln-sound`, and a bar widget showing the volume: click to open it, right-click to mute, scroll to change it): pick the output and microphone, set their volumes, set or mute each app's volume, send an app to another output, and choose sound card profiles
+- **Image viewer** (`kiln-image-viewer`, "Image Viewer" in the launcher and the file manager's Open With): flip through a folder's pictures, zoom around the pointer and drag, turn, full screen, and move to the trash with Undo; PNG, JPEG (turned the way the camera says), WebP, GIF and animated GIF/WebP/APNG, BMP, TIFF, ICO, TGA, QOI, PNM and SVG
+- **Password prompt for admin rights** (`kiln-polkit`, a polkit agent in the theme's look), started at login, so installing software, mounting disks and `pkexec` can ask for your password
+- **Screen locking** with its own lock screen (`kiln-lock`, in the theme's colors and font) or any standard locker (swaylock, hyprlock), idle handling (swayidle) and monitors turning off when idle, with video players able to keep the screen awake
 - **Monitor tools** (kanshi, wdisplays, wlr-randr) can change modes, scale and arrangement live, and the settings app has a monitor map you drag; frame timing for video players and games (presentation-time)
-- **Scripting**: `wayland-time msg "<action>"` runs any action from a shell
+- **Scripting**: `kiln msg "<action>"` runs any action from a shell
 
 ## Status
 
@@ -45,10 +45,10 @@ A lightweight, fast, configurable tiling Wayland compositor written in Rust, bui
 
 ```sh
 cargo build --release        # the compositor and its apps
-./target/release/wayland-time -e alacritty
+./target/release/kiln -e alacritty
 ```
 
-On first start it writes a fully commented default config to `~/.config/wayland-time/config.toml`.
+On first start it writes a fully commented default config to `~/.config/kiln/config.toml`.
 
 ```
 -c, --config <PATH>    use a different config file
@@ -57,7 +57,7 @@ On first start it writes a fully commented default config to `~/.config/wayland-
 -o, --output <NAME>    tty only: light up just this monitor, e.g. DP-4 (repeatable)
     --check-config     validate the config and exit
 
-wayland-time msg <ACTION>   run an action in the running compositor, e.g. "workspace 2"
+kiln msg <ACTION>   run an action in the running compositor, e.g. "workspace 2"
 ```
 
 Logging uses `RUST_LOG`, e.g. `RUST_LOG=debug`.
@@ -69,41 +69,41 @@ For X11 apps, install `xwayland` (turn it off with `xwayland = false` under `[ge
 
 1. Switch to a free text console with `Ctrl+Alt+F3` and log in.
 2. For a first test, use a timeout so it exits on its own even if input doesn't work:
-   `timeout 60 ./target/release/wayland-time -e alacritty`
+   `timeout 60 ./target/release/kiln -e alacritty`
 3. Quit with `Super+Shift+e`. `Ctrl+Alt+F1..F12` switch consoles at any time.
 
-When run from a TTY, logs go to `~/.local/state/wayland-time/wayland-time.log` (previous run: `.log.old`).
+When run from a TTY, logs go to `~/.local/state/kiln/kiln.log` (previous run: `.log.old`).
 
 To pick it from a login screen (GDM, SDDM…), install the binary and session file.
 `./install.sh` builds everything and does all of this for you (it asks for sudo); by hand:
 
 ```sh
-sudo install -m755 target/release/wayland-time /usr/local/bin/
-sudo install -m644 resources/wayland-time.desktop /usr/share/wayland-sessions/
+sudo install -m755 target/release/kiln /usr/local/bin/
+sudo install -m644 resources/kiln.desktop /usr/share/wayland-sessions/
 # The settings app, and its launcher entry:
-sudo install -m755 target/release/wayland-time-settings /usr/local/bin/
-sudo install -m644 resources/wayland-time-settings.desktop /usr/share/applications/
+sudo install -m755 target/release/kiln-settings /usr/local/bin/
+sudo install -m644 resources/kiln-settings.desktop /usr/share/applications/
 # The task manager, and its launcher entry:
-sudo install -m755 target/release/wayland-time-tasks /usr/local/bin/
-sudo install -m644 resources/wayland-time-tasks.desktop /usr/share/applications/
+sudo install -m755 target/release/kiln-tasks /usr/local/bin/
+sudo install -m644 resources/kiln-tasks.desktop /usr/share/applications/
 # The app launcher:
-sudo install -m755 target/release/wayland-time-launcher /usr/local/bin/
+sudo install -m755 target/release/kiln-launcher /usr/local/bin/
 # The lock screen, and the PAM rules it checks passwords with:
-sudo install -m755 target/release/wayland-time-lock /usr/local/bin/
+sudo install -m755 target/release/kiln-lock /usr/local/bin/
 # The password prompt for apps that need admin rights:
-sudo install -m755 target/release/wayland-time-polkit /usr/local/bin/
-sudo install -m644 resources/pam.d/wayland-time-lock /etc/pam.d/
+sudo install -m755 target/release/kiln-polkit /usr/local/bin/
+sudo install -m644 resources/pam.d/kiln-lock /etc/pam.d/
 # The Bluetooth app, and its launcher entry:
-sudo install -m755 target/release/wayland-time-bluetooth /usr/local/bin/
-sudo install -m644 resources/wayland-time-bluetooth.desktop /usr/share/applications/
+sudo install -m755 target/release/kiln-bluetooth /usr/local/bin/
+sudo install -m644 resources/kiln-bluetooth.desktop /usr/share/applications/
 # The Sound app, and its launcher entry:
-sudo install -m755 target/release/wayland-time-sound /usr/local/bin/
-sudo install -m644 resources/wayland-time-sound.desktop /usr/share/applications/
+sudo install -m755 target/release/kiln-sound /usr/local/bin/
+sudo install -m644 resources/kiln-sound.desktop /usr/share/applications/
 # The image viewer, and its launcher entry (which also offers it for images in Open With):
-sudo install -m755 target/release/wayland-time-image-viewer /usr/local/bin/
-sudo install -m644 resources/wayland-time-image-viewer.desktop /usr/share/applications/
-# Make it the default for images inside a wayland-time session (your own choices still win):
-sudo install -m644 resources/wayland-time-mimeapps.list /usr/share/applications/
+sudo install -m755 target/release/kiln-image-viewer /usr/local/bin/
+sudo install -m644 resources/kiln-image-viewer.desktop /usr/share/applications/
+# Make it the default for images inside a kiln session (your own choices still win):
+sudo install -m644 resources/kiln-mimeapps.list /usr/share/applications/
 ```
 
 ## Default keys
@@ -221,7 +221,7 @@ see-through accent) are built from them, so changing `surface` or `accent` updat
 that uses it. A section can override colors for itself alone with
 its own table, e.g. `[bar.colors]`.
 
-Themes can be saved and switched. A saved theme is a file in `~/.config/wayland-time/themes/`
+Themes can be saved and switched. A saved theme is a file in `~/.config/kiln/themes/`
 holding the same keys as `[theme]` (`font`, `font_size`, `radius`, `icon_theme`, `wallpaper` and a `[colors]`
 table), and `[theme] name = "Nord"` uses `themes/Nord.toml`. Its values go on top of the built-in
 theme, and anything else set in `[theme]` goes on top of the saved theme. Editing the theme file
@@ -251,7 +251,7 @@ dunst) the built-in one stays out of the way; `enabled = false` turns it off for
 
 ### Launcher, overview and animations
 
-`wayland-time-launcher` (the `launcher` action) lists installed apps from their `.desktop`
+`kiln-launcher` (the `launcher` action) lists installed apps from their `.desktop`
 files. Type to search names, keywords and descriptions; apps you start often come first. It
 opens floating in the middle of the focused monitor and closes when you press Escape or click
 elsewhere.
@@ -269,13 +269,13 @@ duration = 220        # milliseconds
 
 ### Scripting
 
-`wayland-time msg <action>` runs any action from `[binds]` in the running compositor, e.g.
-`wayland-time msg "workspace 3"` or `wayland-time msg overview`. It talks to a socket in
-`$XDG_RUNTIME_DIR` (programs the compositor starts get its path in `$WAYLAND_TIME_SOCKET`).
+`kiln msg <action>` runs any action from `[binds]` in the running compositor, e.g.
+`kiln msg "workspace 3"` or `kiln msg overview`. It talks to a socket in
+`$XDG_RUNTIME_DIR` (programs the compositor starts get its path in `$KILN_SOCKET`).
 
 ### Task manager
 
-`wayland-time-tasks` (also `Ctrl+Shift+Escape`) lists your processes with their CPU and memory
+`kiln-tasks` (also `Ctrl+Shift+Escape`) lists your processes with their CPU and memory
 use; "All users and system" adds other users' processes and kernel threads. Click a column to
 sort by it, type to search by name, command line or PID, and select a process to end it ("End
 process" asks it to quit, like closing it; "Force quit" stops it at once). Delete ends the
@@ -285,7 +285,7 @@ swap, disk and network use. CPU is a share of the whole machine, so all processe
 
 ### Settings app
 
-`wayland-time-settings` edits the config file with a window instead of a text editor: general
+`kiln-settings` edits the config file with a window instead of a text editor: general
 behavior, appearance, animations and every theme color, tiling, gaps and workspace names, the
 bar and its widgets, notifications, each monitor (a map to drag them into place, plus mode,
 scale, rotation, bar and layout, picked from the monitors that are connected), keyboard layout
@@ -307,7 +307,7 @@ the next login (autostart, Xwayland, session restore) are marked as such. The ap
 
 ### Sessions
 
-Open windows are saved to `~/.local/state/wayland-time/session.toml` a few seconds after anything
+Open windows are saved to `~/.local/state/kiln/session.toml` a few seconds after anything
 changes, and right away when you quit. At the next start each app is launched again (from its
 `.desktop` file, or the command line it ran with) and its windows go back where they were, along
 with each workspace's layout and the workspace each monitor was showing. A change is only saved
@@ -328,11 +328,11 @@ Nested runs use `session-nested.toml`, so testing never touches the real session
 
 ### Screen lock and idle
 
-`wayland-time-lock` is the built-in lock screen: the time, the date, your name and a password
+`kiln-lock` is the built-in lock screen: the time, the date, your name and a password
 field, drawn in the theme's colors and font. It checks your password with PAM, like logging in
-(`install.sh` adds `/etc/pam.d/wayland-time-lock` for this; without it, the `login` rules are
+(`install.sh` adds `/etc/pam.d/kiln-lock` for this; without it, the `login` rules are
 used). Escape clears what you typed. `Mod+Escape` runs the `lock` action, which starts the
-locker set in `[general] locker`, or else the first one installed of `wayland-time-lock`,
+locker set in `[general] locker`, or else the first one installed of `kiln-lock`,
 hyprlock, swaylock, gtklock and waylock. Any locker that uses the standard lock protocol works.
 
 To lock after a while and before suspend, use `swayidle` (`-f` returns once the screen is
@@ -340,14 +340,14 @@ locked, so the machine doesn't sleep with the desktop showing):
 
 ```toml
 [general]
-autostart = ["swayidle -w timeout 300 'wayland-time-lock -f' before-sleep 'wayland-time-lock -f'"]
+autostart = ["swayidle -w timeout 300 'kiln-lock -f' before-sleep 'kiln-lock -f'"]
 ```
 
 While locked, only the locker is drawn and every key goes to it. No binds work, including
 Ctrl+Alt+Backspace (quitting would drop you into the shell that started the compositor), but
 Ctrl+Alt+F1..F12 still switch VTs. If the locker crashes, the screen stays locked and turns dark
 red; press any key to start the locker again. From another VT you can also start one yourself:
-`WAYLAND_DISPLAY=wayland-1 wayland-time-lock` (the socket name is in the log).
+`WAYLAND_DISPLAY=wayland-1 kiln-lock` (the socket name is in the log).
 
 To turn monitors off when idle, set `monitors_off_after` (seconds) under `[general]`, or bind
 the `power-off-monitors` action. Any key press, click or pointer movement turns them back on.
@@ -361,14 +361,14 @@ is on screen.
 ### File picker
 
 Apps that ask the desktop portal for a file (browsers, Flatpaks, most GTK and Qt apps) get
-`wayland-time-files`: places on the left (Recent, Home, your folders, bookmarks, drives), the
+`kiln-files`: places on the left (Recent, Home, your folders, bookmarks, drives), the
 path with back, forward and up, a sortable list, search below the folder, the app's file
 type filters and options, and a name field when saving (replacing a file asks first).
 Keys: arrows and Enter, Backspace or Alt+Up for the parent folder, Alt+Left/Right for back and
 forward, Ctrl+L to type a path, Ctrl+F or just typing to search, Ctrl+H for hidden files,
-Escape to cancel. `install.sh` registers it with the portal (`wayland-time-portals.conf` picks
+Escape to cancel. `install.sh` registers it with the portal (`kiln-portals.conf` picks
 it for `FileChooser`, with GTK's as the fallback); log in again to use it. Run by hand,
-`wayland-time-files [--open-many | --folder | --save NAME]` prints the paths picked.
+`kiln-files [--open-many | --folder | --save NAME]` prints the paths picked.
 
 Dialogs float rather than tile, and open over the window they belong to: windows with a parent,
 X11 dialogs, and anything a portal opens, including when the app couldn't link the dialog to
@@ -377,7 +377,7 @@ linked through xdg-foreign. A dialog bigger than the screen is asked to fit.
 
 ### File manager
 
-`wayland-time-file-manager [FOLDER]` ("Files" in the launcher) shows the same places, path bar,
+`kiln-file-manager [FOLDER]` ("Files" in the launcher) shows the same places, path bar,
 sortable list and search as the file picker, plus a Trash place. Double-click or Enter opens a
 folder in place and a file in its default app (from `mimeapps.list`); right-click a file for
 Open With, Cut, Copy, Rename, Move to Trash and Delete Permanently, or the empty space for New
@@ -389,7 +389,7 @@ text, and pasting accepts paths copied elsewhere. Keys: Enter, F2 rename, Delete
 Shift+Delete delete for good, Ctrl+C/X/V, Ctrl+Shift+N new folder, Ctrl+A, F5 reload, and the
 picker's navigation keys; the mouse's side buttons go back and forward. It doesn't take over
 opening folders from other apps unless you make it the default for `inode/directory`
-(`xdg-mime default wayland-time-file-manager.desktop inode/directory`).
+(`xdg-mime default kiln-file-manager.desktop inode/directory`).
 
 Files can be dragged in from other apps and out to them. Dropped on the list they're copied
 into the folder shown; on a folder row or a sidebar place they go into that folder (dragged
@@ -400,7 +400,7 @@ managers and file dialogs show them too.
 
 ### Bluetooth
 
-`wayland-time-bluetooth` ("Bluetooth" in the launcher, or click the bar's `bluetooth` widget)
+`kiln-bluetooth` ("Bluetooth" in the launcher, or click the bar's `bluetooth` widget)
 turns Bluetooth on and off, lists your devices (connect, disconnect, forget, battery level when
 the device reports it), and searches for new ones to pair; a search stops by itself after two
 minutes, as searching slows other Bluetooth traffic. Pairing asks to confirm a code or type a
@@ -410,7 +410,7 @@ Bluetooth on or off without opening the app. It talks to BlueZ (`bluetoothd`) on
 
 ### Sound
 
-`wayland-time-sound` ("Sound" in the launcher, or click the bar's `sound` widget) picks the
+`kiln-sound` ("Sound" in the launcher, or click the bar's `sound` widget) picks the
 output (speakers, headphones, HDMI) and input (microphone) and sets their volumes, lists the
 apps playing or recording with a volume and mute button for each, and sends an app to a
 different output from its ⋯ menu ("Default" makes it follow the default again). Sound cards
@@ -421,12 +421,12 @@ state from `pw-dump` and makes changes with `wpctl` and `pw-metadata`.
 
 ### Image viewer
 
-It's the default app for images in a wayland-time session (`resources/wayland-time-mimeapps.list`,
+It's the default app for images in a kiln session (`resources/kiln-mimeapps.list`,
 installed to `/usr/share/applications/`). A default you set yourself, in
 `~/.config/mimeapps.list` or with Files' Open With, takes precedence; to pick our viewer over one
-of those just inside wayland-time, copy the list to `~/.config/wayland-time-mimeapps.list`.
+of those just inside kiln, copy the list to `~/.config/kiln-mimeapps.list`.
 
-`wayland-time-image-viewer <file>` (or open an image from Files) shows the picture fitted to the window, never blown up past
+`kiln-image-viewer <file>` (or open an image from Files) shows the picture fitted to the window, never blown up past
 its own size, and the others in its folder in name order. Left/Right (or Space, or the mouse's
 back and forward buttons) flip through them, wrapping round at the ends; scroll or pinch zooms
 around the pointer, `+`/`-` zoom, `0` fits and `1` (or a double-click) shows actual size, and a
@@ -440,8 +440,8 @@ pictures sit on a checkerboard, and huge ones are scaled to what the graphics ca
 When an app needs admin rights (installing software, mounting a disk, `pkexec`), polkit asks
 the session's authentication agent for a password. The compositor starts one at login:
 `[general] polkit_agent`, or when that's empty the first one installed of
-`wayland-time-polkit` (our own), polkit-gnome, polkit-kde, polkit-mate and lxpolkit; `"none"`
-starts none. `wayland-time-polkit` dims the screen and shows what is being asked, whose password
+`kiln-polkit` (our own), polkit-gnome, polkit-kde, polkit-mate and lxpolkit; `"none"`
+starts none. `kiln-polkit` dims the screen and shows what is being asked, whose password
 it wants (Tab or "Switch user" when several people could answer) and a password field, in the
 theme's colors. The password goes to polkit's own `polkit-agent-helper-1`, which checks it, so
 the prompt never decides anything itself. Nested and headless runs don't start an agent.
@@ -452,22 +452,22 @@ The repository is a Cargo workspace:
 
 | Directory | Purpose |
 |---|---|
-| `src/` | the compositor (`wayland-time`) |
-| `crates/wt-config/` | the config file and theme, shared by the compositor and the apps: defaults, parsing, validation, keybind and action parsing, color palette, font lookup (unit tested) |
-| `crates/wt-ui/` | the shared look for apps: turns `[theme]` into egui styling and fonts, and opens app windows |
-| `crates/wt-draw/` | CPU text and shape drawing (hinted, subpixel text): the bar, menus and the lock screen |
-| `crates/wt-icons/` | icons from the icon themes: app icons via .desktop files, symbolic icons tinted one color, PNG/SVG loading |
-| `apps/settings/` | the settings app (`wayland-time-settings`) |
-| `apps/launcher/` | the app launcher (`wayland-time-launcher`) |
-| `apps/files/` | the file picker (`wayland-time-files`): desktop portal FileChooser backend on the session bus, and the egui picker window it runs per request; and the file manager (`wayland-time-file-manager`, in `src/bin/`), sharing its listing, places, icons and drawing (`src/lib.rs`) |
-| `apps/bluetooth/` | the Bluetooth app (`wayland-time-bluetooth`): BlueZ on the system bus, and its pairing agent |
-| `apps/images/` | the image viewer (`wayland-time-image-viewer`): decodes on a worker thread (`image`, `resvg`), uses the file manager's library for the trash |
-| `apps/sound/` | the Sound app (`wayland-time-sound`) |
-| `crates/wt-pipewire/` | sound devices, app streams and volumes from PipeWire (`pw-dump --monitor`), and changing them (`wpctl`, `pw-metadata`): the Sound app and the bar's sound widget |
-| `apps/polkit/` | the password prompt (`wayland-time-polkit`): polkit agent on the system bus, talks to `polkit-agent-helper-1`, drawn with `wt-draw` on a layer surface |
-| `apps/lock/` | the lock screen (`wayland-time-lock`): session lock protocol, PAM, drawn with `wt-draw` since egui can't make lock surfaces |
+| `src/` | the compositor (`kiln`) |
+| `crates/kiln-config/` | the config file and theme, shared by the compositor and the apps: defaults, parsing, validation, keybind and action parsing, color palette, font lookup (unit tested) |
+| `crates/kiln-ui/` | the shared look for apps: turns `[theme]` into egui styling and fonts, and opens app windows |
+| `crates/kiln-draw/` | CPU text and shape drawing (hinted, subpixel text): the bar, menus and the lock screen |
+| `crates/kiln-icons/` | icons from the icon themes: app icons via .desktop files, symbolic icons tinted one color, PNG/SVG loading |
+| `apps/settings/` | the settings app (`kiln-settings`) |
+| `apps/launcher/` | the app launcher (`kiln-launcher`) |
+| `apps/files/` | the file picker (`kiln-files`): desktop portal FileChooser backend on the session bus, and the egui picker window it runs per request; and the file manager (`kiln-file-manager`, in `src/bin/`), sharing its listing, places, icons and drawing (`src/lib.rs`) |
+| `apps/bluetooth/` | the Bluetooth app (`kiln-bluetooth`): BlueZ on the system bus, and its pairing agent |
+| `apps/images/` | the image viewer (`kiln-image-viewer`): decodes on a worker thread (`image`, `resvg`), uses the file manager's library for the trash |
+| `apps/sound/` | the Sound app (`kiln-sound`) |
+| `crates/kiln-pipewire/` | sound devices, app streams and volumes from PipeWire (`pw-dump --monitor`), and changing them (`wpctl`, `pw-metadata`): the Sound app and the bar's sound widget |
+| `apps/polkit/` | the password prompt (`kiln-polkit`): polkit agent on the system bus, talks to `polkit-agent-helper-1`, drawn with `kiln-draw` on a layer surface |
+| `apps/lock/` | the lock screen (`kiln-lock`): session lock protocol, PAM, drawn with `kiln-draw` since egui can't make lock surfaces |
 
-New apps go in `apps/`, use `wt-ui` for their window and look, and `wt-config` for anything
+New apps go in `apps/`, use `kiln-ui` for their window and look, and `kiln-config` for anything
 in the config file.
 
 | File | Purpose |
@@ -478,9 +478,9 @@ in the config file.
 | `src/bar.rs` | the built-in bar: layout, painting, hit testing, clicks |
 | `src/layout.rs` | pure tiling math (unit tested); add new layouts here |
 | `src/workspace.rs` | per-workspace window order, focus, floating (unit tested) |
-| `src/config.rs` | re-exports `wt-config`, plus conversions to smithay types |
-| `crates/wt-config/src/config.rs` | TOML parsing, validation, keybind/action parsing (unit tested) |
-| `crates/wt-config/src/theme.rs` | shared color palette; resolves color names and `mix(...)` |
+| `src/config.rs` | re-exports `kiln-config`, plus conversions to smithay types |
+| `crates/kiln-config/src/config.rs` | TOML parsing, validation, keybind/action parsing (unit tested) |
+| `crates/kiln-config/src/theme.rs` | shared color palette; resolves color names and `mix(...)` |
 | `apps/settings/src/doc.rs` | the config file as an editable document: comment-keeping edits, checking, saving |
 | `apps/settings/src/pages/` | the settings pages; plain settings are listed as data in `fields.rs` |
 | `src/handlers/xwayland.rs` | Xwayland: starting it, managing X11 windows, sharing the clipboard with X11 |
@@ -490,7 +490,7 @@ in the config file.
 | `src/notifications.rs` | notification pop-ups, their timeouts and clicks, do not disturb, the bell's list |
 | `src/status.rs` | battery, network and backlight from sysfs, for the bar |
 | `src/dbus/` | the session bus thread: notification daemon, tray watcher and items, media players |
-| `src/ipc.rs` | `wayland-time msg`: the command socket |
+| `src/ipc.rs` | `kiln msg`: the command socket |
 | `src/input.rs` | keyboard binds, pointer focus, Mod+drag |
 | `src/grabs.rs` | interactive move/resize |
 | `src/render.rs` | builds the frame: layers, windows, borders, lock screen |
@@ -509,11 +509,11 @@ in the config file.
 `cargo test --workspace` runs the unit tests.
 
 To try multi-monitor behaviour without extra screens, split the nested window into several fake
-monitors: `WAYLAND_TIME_NESTED_OUTPUTS=2 cargo run -- -b winit`.
+monitors: `KILN_NESTED_OUTPUTS=2 cargo run -- -b winit`.
 
 For tests that shouldn't need a visible window, `-b headless` (with
-`WAYLAND_TIME_HEADLESS_OUTPUTS=N`) draws offscreen; take screenshots with `grim` and drive it
-with `wayland-time msg`, which also has fake input for this: `test-pointer X Y`, `test-click
+`KILN_HEADLESS_OUTPUTS=N`) draws offscreen; take screenshots with `grim` and drive it
+with `kiln msg`, which also has fake input for this: `test-pointer X Y`, `test-click
 [BUTTON]`, `test-key CODE` and `test-bar` (where each part of the bar is).
 
 ## Roadmap

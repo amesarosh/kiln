@@ -1,8 +1,8 @@
 //! Building blocks shared by the settings pages: cards, setting rows, a toggle switch and
 //! small editors. Colors come from the theme palette only.
 
-use wt_config::theme::Palette;
-use wt_ui::{
+use kiln_config::theme::Palette;
+use kiln_ui::{
     color,
     egui::{self, Align, Color32, Layout, Rect, Response, RichText, Sense, StrokeKind, TextStyle, Ui, UiBuilder, vec2},
 };
@@ -89,7 +89,7 @@ pub fn row_with(
     control: impl FnOnce(&mut Ui),
 ) -> bool {
     let mut clicked = false;
-    let control_h = wt_ui::field_height(ui.style());
+    let control_h = kiln_ui::field_height(ui.style());
     let gap = ui.spacing().item_spacing.x;
     let top_left = ui.cursor().min;
     let total = ui.available_width();
@@ -231,8 +231,8 @@ pub fn toggle(ui: &mut Ui, p: &Palette, on: &mut bool) -> Response {
     if ui.is_rect_visible(rect) {
         let t = ui.ctx().animate_bool_responsive(response.id, *on);
         let off_track = if response.hovered() { p.hover } else { p.selected };
-        let track = wt_config::theme::mix(off_track, p.accent, t);
-        let knob = wt_config::theme::mix(p.muted, p.on_accent, t);
+        let track = kiln_config::theme::mix(off_track, p.accent, t);
+        let knob = kiln_config::theme::mix(p.muted, p.on_accent, t);
         let radius = rect.height() / 2.0;
         ui.painter()
             .rect(rect, radius, color(track), egui::Stroke::NONE, StrokeKind::Inside);
@@ -256,7 +256,7 @@ pub fn choice(
         .find(|(v, _)| *v == value.as_str())
         .map_or(value.clone(), |(_, l)| l.to_string());
     let before = value.clone();
-    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt(id)
+    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt(id)
         .selected_text(current)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
@@ -295,7 +295,7 @@ pub fn draft_text(ui: &mut Ui, id: impl std::hash::Hash + std::fmt::Debug, value
 
 /// A text field as tall as the other controls, with its text clear of the rounded ends.
 pub fn padded<'t>(ui: &Ui, edit: egui::TextEdit<'t>) -> egui::TextEdit<'t> {
-    wt_ui::field(ui, edit)
+    kiln_ui::field(ui, edit)
 }
 
 /// A color chip that opens a color picker when clicked. `changed()` when a color was picked.

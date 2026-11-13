@@ -1,6 +1,0 @@
-[Desktop Entry]
-Name=wayland-time
-Comment=Lightweight tiling Wayland compositor
-Exec=wayland-time
-Type=Application
-DesktopNames=wayland-time

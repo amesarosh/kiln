@@ -1,0 +1,11 @@
+[package]
+name = "kiln-ui"
+version = "0.1.0"
+edition = "2024"
+description = "The shared look and window setup for kiln's apps"
+license = "MIT"
+
+[dependencies]
+kiln-config = { path = "../kiln-config" }
+eframe = { version = "0.35", default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }
+tracing = "0.1"

@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use toml_edit::{Item, Key, Table};
-use wt_config::{ACTIONS, check_bind, parse_combo, theme::Palette};
-use wt_ui::{
+use kiln_config::{ACTIONS, check_bind, parse_combo, theme::Palette};
+use kiln_ui::{
     color,
     egui::{self, Align, Layout, RichText, Ui},
 };
@@ -202,7 +202,7 @@ fn action_editor(ui: &mut Ui, id: &str, action: &mut String) -> bool {
     let mut new_name = name.clone();
     let mut new_arg = arg.clone();
     let known = ACTIONS.iter().find(|(n, _, _)| *n == name);
-    wt_ui::select(ui, |ui| egui::ComboBox::from_id_salt(("action", id))
+    kiln_ui::select(ui, |ui| egui::ComboBox::from_id_salt(("action", id))
         .selected_text(if name.is_empty() {
             "Pick an action"
         } else {

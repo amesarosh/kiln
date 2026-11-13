@@ -790,7 +790,7 @@ mod tests {
             text,
             theme,
             vec![
-                Entry::Heading("uaio@host: ~/git/wayland-time".into()),
+                Entry::Heading("uaio@host: ~/git/kiln".into()),
                 Entry::Item {
                     label: "Float".into(),
                     action: MenuAction::ToggleFloating,

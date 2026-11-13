@@ -400,9 +400,9 @@ mod tests {
         let config = crate::config::Config::default();
         let bar = crate::bar::Bar::new(&config.bar);
         let rows: Vec<Row> = [
-            ("uaio@host: ~/git/wayland-time", "Alacritty", "DP-4 · 1"),
+            ("uaio@host: ~/git/kiln", "Alacritty", "DP-4 · 1"),
             ("Start Page - Vivaldi", "vivaldi-stable", "DP-5 · 1"),
-            ("switcher.rs - wayland-time - Visual Studio Code", "code", "DP-4 · 2"),
+            ("switcher.rs - kiln - Visual Studio Code", "code", "DP-4 · 2"),
             ("Steam", "steam", "HDMI-A-5 · 1"),
             (
                 "A window with a very long title that has to be cut short somewhere",

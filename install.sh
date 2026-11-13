@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build wayland-time, its settings app, task manager, launcher, lock screen, password prompt, file picker,
+# Build kiln, its settings app, task manager, launcher, lock screen, password prompt, file picker,
 # file manager, Bluetooth and Sound apps and image viewer from this checkout, then install them system-wide.
 #
 #   ./install.sh            build and install
@@ -7,7 +7,7 @@
 #   PROFILE=release ./install.sh  fully optimized build (slower to build) instead of the fast profile
 #
 # The build runs as you; only the copy into system folders uses sudo. Installing while
-# wayland-time is running is safe, but the new version only takes effect after you log
+# kiln is running is safe, but the new version only takes effect after you log
 # out and back in (the settings app: after you reopen it).
 set -euo pipefail
 
@@ -26,69 +26,69 @@ echo "==> Building ($PROFILE)"
 cargo build --profile "$PROFILE" --workspace
 
 echo "==> Installing (needs sudo)"
-sudo install -Dm755 target/$PROFILE/wayland-time "$BIN_DIR/wayland-time"
-sudo install -Dm755 target/$PROFILE/wayland-time-settings "$BIN_DIR/wayland-time-settings"
-sudo install -Dm755 target/$PROFILE/wayland-time-tasks "$BIN_DIR/wayland-time-tasks"
-sudo install -Dm755 target/$PROFILE/wayland-time-launcher "$BIN_DIR/wayland-time-launcher"
-sudo install -Dm755 target/$PROFILE/wayland-time-lock "$BIN_DIR/wayland-time-lock"
-sudo install -Dm755 target/$PROFILE/wayland-time-polkit "$BIN_DIR/wayland-time-polkit"
-sudo install -Dm755 target/$PROFILE/wayland-time-files "$BIN_DIR/wayland-time-files"
-sudo install -Dm755 target/$PROFILE/wayland-time-file-manager "$BIN_DIR/wayland-time-file-manager"
-sudo install -Dm755 target/$PROFILE/wayland-time-bluetooth "$BIN_DIR/wayland-time-bluetooth"
-sudo install -Dm755 target/$PROFILE/wayland-time-sound "$BIN_DIR/wayland-time-sound"
-sudo install -Dm755 target/$PROFILE/wayland-time-image-viewer "$BIN_DIR/wayland-time-image-viewer"
+sudo install -Dm755 target/$PROFILE/kiln "$BIN_DIR/kiln"
+sudo install -Dm755 target/$PROFILE/kiln-settings "$BIN_DIR/kiln-settings"
+sudo install -Dm755 target/$PROFILE/kiln-tasks "$BIN_DIR/kiln-tasks"
+sudo install -Dm755 target/$PROFILE/kiln-launcher "$BIN_DIR/kiln-launcher"
+sudo install -Dm755 target/$PROFILE/kiln-lock "$BIN_DIR/kiln-lock"
+sudo install -Dm755 target/$PROFILE/kiln-polkit "$BIN_DIR/kiln-polkit"
+sudo install -Dm755 target/$PROFILE/kiln-files "$BIN_DIR/kiln-files"
+sudo install -Dm755 target/$PROFILE/kiln-file-manager "$BIN_DIR/kiln-file-manager"
+sudo install -Dm755 target/$PROFILE/kiln-bluetooth "$BIN_DIR/kiln-bluetooth"
+sudo install -Dm755 target/$PROFILE/kiln-sound "$BIN_DIR/kiln-sound"
+sudo install -Dm755 target/$PROFILE/kiln-image-viewer "$BIN_DIR/kiln-image-viewer"
 # The file picker is a desktop portal backend: the portal finds it through these files, and
 # D-Bus starts it when an app first asks for a file.
-sudo install -Dm644 resources/portal/wayland-time.portal "$PORTALS_DIR/portals/wayland-time.portal"
-sudo install -Dm644 resources/portal/wayland-time-portals.conf "$PORTALS_DIR/wayland-time-portals.conf"
+sudo install -Dm644 resources/portal/kiln.portal "$PORTALS_DIR/portals/kiln.portal"
+sudo install -Dm644 resources/portal/kiln-portals.conf "$PORTALS_DIR/kiln-portals.conf"
 sudo mkdir -p "$DBUS_DIR"
-printf '[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.wayland-time\nExec=%s --portal\n' \
-    "$BIN_DIR/wayland-time-files" |
-    sudo tee "$DBUS_DIR/org.freedesktop.impl.portal.desktop.wayland-time.service" >/dev/null
+printf '[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.kiln\nExec=%s --portal\n' \
+    "$BIN_DIR/kiln-files" |
+    sudo tee "$DBUS_DIR/org.freedesktop.impl.portal.desktop.kiln.service" >/dev/null
 # A portal config of your own overrides the one above; make sure it picks our file picker.
-USER_PORTALS="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal/wayland-time-portals.conf"
+USER_PORTALS="${XDG_CONFIG_HOME:-$HOME/.config}/xdg-desktop-portal/kiln-portals.conf"
 if [ -f "$USER_PORTALS" ] && ! grep -q 'FileChooser' "$USER_PORTALS"; then
-    echo 'org.freedesktop.impl.portal.FileChooser=wayland-time;gtk' >>"$USER_PORTALS"
+    echo 'org.freedesktop.impl.portal.FileChooser=kiln;gtk' >>"$USER_PORTALS"
     echo "==> Added the file picker to $USER_PORTALS"
 fi
 # The lock screen checks passwords with these PAM rules.
-sudo install -Dm644 resources/pam.d/wayland-time-lock /etc/pam.d/wayland-time-lock
-sudo install -Dm644 resources/wayland-time.desktop "$SESSIONS_DIR/wayland-time.desktop"
-sudo install -Dm644 resources/wayland-time-settings.desktop "$APPS_DIR/wayland-time-settings.desktop"
-sudo install -Dm644 resources/wayland-time-tasks.desktop "$APPS_DIR/wayland-time-tasks.desktop"
-sudo install -Dm644 resources/wayland-time-file-manager.desktop "$APPS_DIR/wayland-time-file-manager.desktop"
-sudo install -Dm644 resources/wayland-time-bluetooth.desktop "$APPS_DIR/wayland-time-bluetooth.desktop"
-sudo install -Dm644 resources/wayland-time-sound.desktop "$APPS_DIR/wayland-time-sound.desktop"
-sudo install -Dm644 resources/wayland-time-image-viewer.desktop "$APPS_DIR/wayland-time-image-viewer.desktop"
-# Default apps for a wayland-time session (images open in our viewer).
-sudo install -Dm644 resources/wayland-time-mimeapps.list "$APPS_DIR/wayland-time-mimeapps.list"
+sudo install -Dm644 resources/pam.d/kiln-lock /etc/pam.d/kiln-lock
+sudo install -Dm644 resources/kiln.desktop "$SESSIONS_DIR/kiln.desktop"
+sudo install -Dm644 resources/kiln-settings.desktop "$APPS_DIR/kiln-settings.desktop"
+sudo install -Dm644 resources/kiln-tasks.desktop "$APPS_DIR/kiln-tasks.desktop"
+sudo install -Dm644 resources/kiln-file-manager.desktop "$APPS_DIR/kiln-file-manager.desktop"
+sudo install -Dm644 resources/kiln-bluetooth.desktop "$APPS_DIR/kiln-bluetooth.desktop"
+sudo install -Dm644 resources/kiln-sound.desktop "$APPS_DIR/kiln-sound.desktop"
+sudo install -Dm644 resources/kiln-image-viewer.desktop "$APPS_DIR/kiln-image-viewer.desktop"
+# Default apps for a kiln session (images open in our viewer).
+sudo install -Dm644 resources/kiln-mimeapps.list "$APPS_DIR/kiln-mimeapps.list"
 
 commit="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 dirty="$(git status --porcelain 2>/dev/null | head -1)"
 echo "==> Installed $commit${dirty:+ (plus uncommitted changes)}:"
-echo "    $BIN_DIR/wayland-time"
-echo "    $BIN_DIR/wayland-time-settings"
-echo "    $BIN_DIR/wayland-time-tasks"
-echo "    $BIN_DIR/wayland-time-launcher"
-echo "    $BIN_DIR/wayland-time-lock"
-echo "    $BIN_DIR/wayland-time-polkit"
-echo "    $BIN_DIR/wayland-time-files"
-echo "    $BIN_DIR/wayland-time-file-manager"
-echo "    $BIN_DIR/wayland-time-bluetooth"
-echo "    $BIN_DIR/wayland-time-sound"
-echo "    $BIN_DIR/wayland-time-image-viewer"
-echo "    $PORTALS_DIR/portals/wayland-time.portal"
-echo "    $PORTALS_DIR/wayland-time-portals.conf"
-echo "    $DBUS_DIR/org.freedesktop.impl.portal.desktop.wayland-time.service"
-echo "    /etc/pam.d/wayland-time-lock"
-echo "    $SESSIONS_DIR/wayland-time.desktop"
-echo "    $APPS_DIR/wayland-time-settings.desktop"
-echo "    $APPS_DIR/wayland-time-tasks.desktop"
-echo "    $APPS_DIR/wayland-time-file-manager.desktop"
-echo "    $APPS_DIR/wayland-time-bluetooth.desktop"
-echo "    $APPS_DIR/wayland-time-sound.desktop"
-echo "    $APPS_DIR/wayland-time-image-viewer.desktop"
-echo "    $APPS_DIR/wayland-time-mimeapps.list"
-if pgrep -x wayland-time >/dev/null; then
-    echo "==> wayland-time is running: log out and back in to use the new version."
+echo "    $BIN_DIR/kiln"
+echo "    $BIN_DIR/kiln-settings"
+echo "    $BIN_DIR/kiln-tasks"
+echo "    $BIN_DIR/kiln-launcher"
+echo "    $BIN_DIR/kiln-lock"
+echo "    $BIN_DIR/kiln-polkit"
+echo "    $BIN_DIR/kiln-files"
+echo "    $BIN_DIR/kiln-file-manager"
+echo "    $BIN_DIR/kiln-bluetooth"
+echo "    $BIN_DIR/kiln-sound"
+echo "    $BIN_DIR/kiln-image-viewer"
+echo "    $PORTALS_DIR/portals/kiln.portal"
+echo "    $PORTALS_DIR/kiln-portals.conf"
+echo "    $DBUS_DIR/org.freedesktop.impl.portal.desktop.kiln.service"
+echo "    /etc/pam.d/kiln-lock"
+echo "    $SESSIONS_DIR/kiln.desktop"
+echo "    $APPS_DIR/kiln-settings.desktop"
+echo "    $APPS_DIR/kiln-tasks.desktop"
+echo "    $APPS_DIR/kiln-file-manager.desktop"
+echo "    $APPS_DIR/kiln-bluetooth.desktop"
+echo "    $APPS_DIR/kiln-sound.desktop"
+echo "    $APPS_DIR/kiln-image-viewer.desktop"
+echo "    $APPS_DIR/kiln-mimeapps.list"
+if pgrep -x kiln >/dev/null; then
+    echo "==> kiln is running: log out and back in to use the new version."
 fi

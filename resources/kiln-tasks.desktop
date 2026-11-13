@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Task Manager
+Comment=See what's running and how busy the computer is, and end processes
+Exec=kiln-tasks
+Icon=utilities-system-monitor
+Categories=System;Monitor;
+Keywords=process;kill;cpu;memory;system monitor;
+OnlyShowIn=kiln;
+StartupWMClass=kiln-tasks

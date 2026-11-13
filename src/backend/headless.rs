@@ -1,8 +1,8 @@
 //! Headless backend, for testing: no window and no screen. Outputs are drawn offscreen on the
 //! GPU's render node at a steady 60 Hz, so clients get frame callbacks and screenshots (grim)
-//! work even when nothing is visible. Pair it with `wayland-time msg` to drive it.
+//! work even when nothing is visible. Pair it with `kiln msg` to drive it.
 //!
-//! `WAYLAND_TIME_HEADLESS_OUTPUTS=N` makes N outputs of 1280x800, named headless-1..N.
+//! `KILN_HEADLESS_OUTPUTS=N` makes N outputs of 1280x800, named headless-1..N.
 
 use std::time::Duration;
 
@@ -64,7 +64,7 @@ impl HeadlessData {
                 let loc = state.space.output_geometry(o).map(|g| g.loc).unwrap_or_default();
                 HeadInfo {
                     name: o.name(),
-                    description: "wayland-time headless output".into(),
+                    description: "kiln headless output".into(),
                     physical_size: (0, 0),
                     modes: vec![mode],
                     enabled: true,
@@ -120,7 +120,7 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
         state.dmabuf_global = Some(global);
     }
 
-    let count = std::env::var("WAYLAND_TIME_HEADLESS_OUTPUTS")
+    let count = std::env::var("KILN_HEADLESS_OUTPUTS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1usize)
@@ -132,7 +132,7 @@ pub fn init(state: &mut State, handle: &LoopHandle<'static, State>) -> Result<()
             PhysicalProperties {
                 size: (0, 0).into(),
                 subpixel: Subpixel::Unknown,
-                make: "wayland-time".into(),
+                make: "kiln".into(),
                 model: "headless".into(),
             },
         );

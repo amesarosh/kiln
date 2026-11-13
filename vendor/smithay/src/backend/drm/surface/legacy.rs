@@ -337,7 +337,7 @@ impl LegacyDrmSurface {
         self.page_flip_with(framebuffer, event, false)
     }
 
-    /// wayland-time: a page flip that may happen right away instead of at vblank (tearing).
+    /// kiln: a page flip that may happen right away instead of at vblank (tearing).
     pub fn page_flip_with(&self, framebuffer: framebuffer::Handle, event: bool, tearing: bool) -> Result<(), Error> {
         trace!("Queueing Page flip");
 

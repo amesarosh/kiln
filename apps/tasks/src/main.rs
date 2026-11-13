@@ -1,14 +1,14 @@
-//! wayland-time-tasks: see what's running and how busy the machine is, and stop processes.
+//! kiln-tasks: see what's running and how busy the machine is, and stop processes.
 
 mod app;
 mod graph;
 mod sample;
 
 const HELP: &str = "\
-wayland-time-tasks — task manager for the wayland-time compositor
+kiln-tasks — task manager for the kiln compositor
 
 USAGE:
-    wayland-time-tasks [-p PAGE]
+    kiln-tasks [-p PAGE]
 
 OPTIONS:
     -p, --page <NAME>     Open at a page: processes or performance
@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    wt_ui::run("wayland-time-tasks", "Task Manager", [960.0, 680.0], move |cc| {
+    kiln_ui::run("kiln-tasks", "Task Manager", [960.0, 680.0], move |cc| {
         app::TasksApp::new(cc, page)
     })?;
     Ok(())

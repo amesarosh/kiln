@@ -1,6 +1,6 @@
 //! Checking the password with PAM, the same way logging in does.
 //!
-//! Uses the PAM service `wayland-time-lock` (installed to /etc/pam.d by install.sh), or
+//! Uses the PAM service `kiln-lock` (installed to /etc/pam.d by install.sh), or
 //! `login` when that file is missing. A wrong password usually takes a couple of seconds to
 //! be turned down (PAM's failure delay), so this runs on its own thread.
 
@@ -12,7 +12,7 @@ use std::{
 
 use crate::password::Password;
 
-const SERVICE: &str = "wayland-time-lock";
+const SERVICE: &str = "kiln-lock";
 
 const PAM_SUCCESS: c_int = 0;
 const PAM_PROMPT_ECHO_OFF: c_int = 1;

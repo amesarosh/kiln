@@ -1062,9 +1062,9 @@ where
     primary_plane_damage_bag: DamageBag<i32, BufferCoords>,
     supports_fencing: bool,
     reset_pending: bool,
-    /// wayland-time: try tearing (async) page flips.
+    /// kiln: try tearing (async) page flips.
     tearing: bool,
-    /// wayland-time: the last queued frame was flipped without waiting for vblank.
+    /// kiln: the last queued frame was flipped without waiting for vblank.
     last_flip_torn: bool,
     signaled_fence: Option<Arc<OwnedFd>>,
 
@@ -2549,7 +2549,7 @@ where
                 .frame
                 .commit(&self.surface, self.supports_fencing, allow_partial_update, true)
         } else {
-            // wayland-time: try a tearing flip first when asked to. The kernel only allows one
+            // kiln: try a tearing flip first when asked to. The kernel only allows one
             // when nothing but the primary plane's buffer changes (no cursor movement, say);
             // otherwise it says InvalidInput and this frame waits for vblank as usual.
             let torn = if self.tearing {
@@ -2653,14 +2653,14 @@ where
         }
     }
 
-    /// wayland-time: let frames reach the screen as soon as they're queued instead of at the next
+    /// kiln: let frames reach the screen as soon as they're queued instead of at the next
     /// vblank, at the cost of tearing. For fullscreen games that ask for it. Frames that change
     /// more than the primary plane's buffer still wait for vblank.
     pub fn set_tearing(&mut self, tearing: bool) {
         self.tearing = tearing;
     }
 
-    /// wayland-time: whether the last queued frame was flipped without waiting for vblank.
+    /// kiln: whether the last queued frame was flipped without waiting for vblank.
     pub fn last_flip_torn(&self) -> bool {
         self.last_flip_torn
     }

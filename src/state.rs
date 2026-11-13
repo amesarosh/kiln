@@ -1479,9 +1479,9 @@ impl State {
         }
     }
 
-    fn media_key(&mut self, change: wt_config::config::MediaChange) {
+    fn media_key(&mut self, change: kiln_config::config::MediaChange) {
         use crate::dbus::mpris::MediaCommand;
-        use wt_config::config::MediaChange;
+        use kiln_config::config::MediaChange;
         let cmd = match change {
             MediaChange::PlayPause => MediaCommand::PlayPause,
             MediaChange::Next => MediaCommand::Next,
@@ -1554,11 +1554,11 @@ impl State {
             .arg(cmd)
             .env("WAYLAND_DISPLAY", &self.socket_name)
             .env("XDG_SESSION_TYPE", "wayland")
-            .env("XDG_CURRENT_DESKTOP", "wayland-time")
+            .env("XDG_CURRENT_DESKTOP", "kiln")
             .env("XDG_DATA_DIRS", xdg_data_dirs())
             .stdin(Stdio::null());
         if let Some(sock) = crate::ipc::socket_path(&self.socket_name.to_string_lossy()) {
-            command.env("WAYLAND_TIME_SOCKET", sock);
+            command.env("KILN_SOCKET", sock);
         }
         // Never hand out the host's DISPLAY: X11 apps would open on another desktop.
         match self.xdisplay {
@@ -1713,7 +1713,7 @@ impl State {
         command
             .arg("--systemd")
             .env("WAYLAND_DISPLAY", &self.socket_name)
-            .env("XDG_CURRENT_DESKTOP", "wayland-time")
+            .env("XDG_CURRENT_DESKTOP", "kiln")
             .env("XDG_SESSION_TYPE", "wayland");
         match &display {
             Some(d) => {
@@ -1755,7 +1755,7 @@ impl State {
             return tracing::warn!("config hot reload disabled: cannot watch {}: {e}", dir.display());
         }
         // Saved themes: reload when the one in use changes. Created up front so it can be watched.
-        let themes = wt_config::themes_dir(&path);
+        let themes = kiln_config::themes_dir(&path);
         let _ = std::fs::create_dir_all(&themes);
         let themes_watch = match inotify.watches().add(&themes, mask) {
             Ok(w) => Some(w),
@@ -1805,8 +1805,8 @@ impl State {
         // Small utility apps of our own float at a comfortable size by default. User rules
         // below still override any of this.
         let size = match app_id {
-            Some("wayland-time-bluetooth") => Some([480, 600]),
-            Some("wayland-time-sound") => Some([520, 640]),
+            Some("kiln-bluetooth") => Some([480, 600]),
+            Some("kiln-sound") => Some([520, 640]),
             _ => None,
         };
         if size.is_some() {
@@ -1825,7 +1825,7 @@ impl State {
 }
 
 /// The launcher's app id (and program name).
-pub const LAUNCHER: &str = "wayland-time-launcher";
+pub const LAUNCHER: &str = "kiln-launcher";
 
 impl State {
     /// The `launcher` action: open it, or close it if it's open.
@@ -1875,7 +1875,7 @@ fn place_floating(
 /// Windows from desktop portal backends (xdg-desktop-portal-gtk, -gnome, -kde...).
 fn is_portal(app_id: Option<&str>) -> bool {
     app_id.is_some_and(|a| {
-        a.starts_with("xdg-desktop-portal") || a.starts_with("org.freedesktop.impl.portal") || a == "wayland-time-files"
+        a.starts_with("xdg-desktop-portal") || a.starts_with("org.freedesktop.impl.portal") || a == "kiln-files"
     })
 }
 
@@ -2065,7 +2065,7 @@ impl ClientData for ClientState {
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
 }
 
-pub use wt_icons::xdg_data_dirs;
+pub use kiln_icons::xdg_data_dirs;
 
 /// Portals that were already running (say, from an earlier login) keep the environment
 /// they started with, so a stale XDG_CURRENT_DESKTOP means no screen sharing. Restart the
