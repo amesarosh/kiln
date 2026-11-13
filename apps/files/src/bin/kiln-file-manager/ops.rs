@@ -178,43 +178,62 @@ fn copy_into(src: &Path, dest: &Path, ctx: &Ctx) -> Result<PathBuf, String> {
         return Err("can't copy a folder into itself".into());
     }
     let target = fs::free_name(dest, &name);
-    copy_tree(src, &target, ctx).inspect_err(|_| {
-        // Don't leave half a copy behind.
-        let _ = remove(&target);
-    })?;
+    copy_new(src, &target, ctx)?;
     Ok(target)
 }
 
-fn copy_tree(src: &Path, target: &Path, ctx: &Ctx) -> Result<(), String> {
+/// Copy `src` to `target`, which must not exist yet. A copy that fails part-way is removed
+/// again, so half a copy is never left behind.
+fn copy_new(src: &Path, target: &Path, ctx: &Ctx) -> Result<(), String> {
+    let mut made = false;
+    let result = copy_tree(src, target, ctx, &mut made);
+    // Only what we made ourselves: if making `target` failed because something took the name
+    // in the meantime, that something isn't ours to delete.
+    if result.is_err() && made {
+        let _ = remove(target);
+    }
+    result
+}
+
+/// Copy a file, symlink or whole folder. `made` is set once `target` itself exists.
+fn copy_tree(src: &Path, target: &Path, ctx: &Ctx, made: &mut bool) -> Result<(), String> {
     if ctx.cancelled() {
         return Err(CANCELLED.into());
     }
     let meta = src.symlink_metadata().map_err(|e| e.to_string())?;
     if meta.is_symlink() {
         let link = std::fs::read_link(src).map_err(|e| e.to_string())?;
-        return std::os::unix::fs::symlink(link, target).map_err(|e| e.to_string());
+        std::os::unix::fs::symlink(link, target).map_err(|e| e.to_string())?;
+        *made = true;
+        return Ok(());
     }
     if meta.is_dir() {
         std::fs::create_dir(target).map_err(|e| e.to_string())?;
-        for e in std::fs::read_dir(src).map_err(|e| e.to_string())?.flatten() {
-            copy_tree(&e.path(), &target.join(e.file_name()), ctx)?;
+        *made = true;
+        for e in std::fs::read_dir(src).map_err(|e| e.to_string())? {
+            // An entry that can't be read is an error, not something to skip: a move deletes
+            // the original once the copy is reported complete.
+            let e = e.map_err(|e| e.to_string())?;
+            copy_tree(&e.path(), &target.join(e.file_name()), ctx, &mut false)?;
         }
         let _ = std::fs::set_permissions(target, meta.permissions());
         return Ok(());
     }
-    copy_file(src, target, ctx)?;
+    copy_file(src, target, ctx, made)?;
     let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(meta.permissions().mode()));
     Ok(())
 }
 
-/// Copy one file in chunks, counting progress and stopping when cancelled.
-fn copy_file(src: &Path, target: &Path, ctx: &Ctx) -> Result<(), String> {
+/// Copy one file in chunks, counting progress and stopping when cancelled. `made` is set once
+/// `target` exists.
+fn copy_file(src: &Path, target: &Path, ctx: &Ctx, made: &mut bool) -> Result<(), String> {
     let mut from = std::fs::File::open(src).map_err(|e| e.to_string())?;
     let mut to = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(target)
         .map_err(|e| e.to_string())?;
+    *made = true;
     let mut buf = vec![0u8; 1 << 20];
     loop {
         if ctx.cancelled() {
@@ -249,9 +268,7 @@ fn move_into(src: &Path, dest: &Path, ctx: &Ctx) -> Result<Option<PathBuf>, Stri
         Ok(()) => Ok(Some(target)),
         Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {
             ctx.total.fetch_add(size_of(src), Ordering::Relaxed);
-            copy_tree(src, &target, ctx).inspect_err(|_| {
-                let _ = remove(&target);
-            })?;
+            copy_new(src, &target, ctx)?;
             remove(src).map_err(|e| format!("copied, but couldn't remove the original: {e}"))?;
             Ok(Some(target))
         }

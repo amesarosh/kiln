@@ -34,7 +34,9 @@ pub fn trash(path: &Path) -> Result<PathBuf, String> {
     let root = if home_dev == Some(meta.dev()) {
         home
     } else {
-        top_dir(path, meta.dev()).join(format!(".Trash-{}", unsafe { libc::getuid() }))
+        // SAFETY: getuid can't fail.
+        let uid = unsafe { libc::getuid() };
+        top_dir(path, meta.dev()).join(format!(".Trash-{uid}"))
     };
     for sub in ["files", "info"] {
         std::fs::DirBuilder::new()
@@ -257,6 +259,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // A private trash, so the test doesn't touch the real one.
+        // SAFETY: no other test in this crate reads or writes the environment's XDG_DATA_HOME.
         unsafe { std::env::set_var("XDG_DATA_HOME", dir.join("data")) };
         let file = dir.join("a b.txt");
         std::fs::write(&file, "x").unwrap();

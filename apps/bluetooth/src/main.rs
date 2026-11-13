@@ -25,7 +25,7 @@ fn main() {
     let viewport = kiln_ui::egui::ViewportBuilder::default()
         .with_inner_size([480.0, 600.0])
         .with_min_inner_size([380.0, 420.0]);
-    if let Err(e) = kiln_ui::run_viewport("kiln-bluetooth", "Bluetooth", viewport, |cc| app::BluetoothApp::new(cc)) {
+    if let Err(e) = kiln_ui::run_viewport("kiln-bluetooth", "Bluetooth", viewport, app::BluetoothApp::new) {
         eprintln!("kiln-bluetooth: {e}");
         std::process::exit(1);
     }

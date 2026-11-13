@@ -180,8 +180,8 @@ fn render_to_dmabuf(
             .map_err(|e| format!("copy: {e}"))?;
         drop((from, to));
         // A blit gives no sync point; finishing the GL queue covers it.
-        // SAFETY: plain GL call on the renderer's own current context.
         renderer
+            // SAFETY: plain GL call on the renderer's own current context.
             .with_context(|gl| unsafe { gl.Finish() })
             .map_err(|e| format!("finish: {e}"))?;
         smithay::backend::renderer::sync::SyncPoint::signaled()

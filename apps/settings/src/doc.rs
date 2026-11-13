@@ -439,11 +439,11 @@ impl ConfigDoc {
     }
 
     pub fn remove(&mut self, path: &[&str]) {
-        if let (Some((_, rest)), Some(t)) = (self.theme_route(path), &mut self.theme) {
-            if let Some(table) = table_mut(&mut t.doc, &rest[..rest.len() - 1]) {
-                table.remove(rest[rest.len() - 1]);
-            }
-            // Fall through: a value in the config file would still win.
+        // No early return after this: a value in the config file would still win.
+        if let (Some((_, rest)), Some(t)) = (self.theme_route(path), &mut self.theme)
+            && let Some(table) = table_mut(&mut t.doc, &rest[..rest.len() - 1])
+        {
+            table.remove(rest[rest.len() - 1]);
         }
         if let Some(table) = table_mut(&mut self.user, &path[..path.len() - 1]) {
             table.remove(path[path.len() - 1]);

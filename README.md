@@ -74,36 +74,17 @@ For X11 apps, install `xwayland` (turn it off with `xwayland = false` under `[ge
 
 When run from a TTY, logs go to `~/.local/state/kiln/kiln.log` (previous run: `.log.old`).
 
-To pick it from a login screen (GDM, SDDM…), install the binary and session file.
-`./install.sh` builds everything and does all of this for you (it asks for sudo); by hand:
+To pick it from a login screen (GDM, SDDM…), run `./install.sh`: it builds everything and
+installs the programs, the session file, the launcher entries, the file picker's portal files
+and the lock screen's PAM rules (it asks for sudo for the copying). `PREFIX=/usr ./install.sh`
+installs under `/usr/bin` instead of `/usr/local/bin`, and `PROFILE=release ./install.sh` makes
+the fully optimized build. The script is short and lists every file it installs.
+
+For just the compositor, by hand:
 
 ```sh
 sudo install -m755 target/release/kiln /usr/local/bin/
 sudo install -m644 resources/kiln.desktop /usr/share/wayland-sessions/
-# The settings app, and its launcher entry:
-sudo install -m755 target/release/kiln-settings /usr/local/bin/
-sudo install -m644 resources/kiln-settings.desktop /usr/share/applications/
-# The task manager, and its launcher entry:
-sudo install -m755 target/release/kiln-tasks /usr/local/bin/
-sudo install -m644 resources/kiln-tasks.desktop /usr/share/applications/
-# The app launcher:
-sudo install -m755 target/release/kiln-launcher /usr/local/bin/
-# The lock screen, and the PAM rules it checks passwords with:
-sudo install -m755 target/release/kiln-lock /usr/local/bin/
-# The password prompt for apps that need admin rights:
-sudo install -m755 target/release/kiln-polkit /usr/local/bin/
-sudo install -m644 resources/pam.d/kiln-lock /etc/pam.d/
-# The Bluetooth app, and its launcher entry:
-sudo install -m755 target/release/kiln-bluetooth /usr/local/bin/
-sudo install -m644 resources/kiln-bluetooth.desktop /usr/share/applications/
-# The Sound app, and its launcher entry:
-sudo install -m755 target/release/kiln-sound /usr/local/bin/
-sudo install -m644 resources/kiln-sound.desktop /usr/share/applications/
-# The image viewer, and its launcher entry (which also offers it for images in Open With):
-sudo install -m755 target/release/kiln-image-viewer /usr/local/bin/
-sudo install -m644 resources/kiln-image-viewer.desktop /usr/share/applications/
-# Make it the default for images inside a kiln session (your own choices still win):
-sudo install -m644 resources/kiln-mimeapps.list /usr/share/applications/
 ```
 
 ## Default keys
@@ -506,7 +487,8 @@ in the config file.
 | `src/backend/mod.rs` | backend switch, linux-dmabuf (GPU buffer sharing) |
 | `src/cursor.rs` | XCursor theme loading for the hardware backend |
 
-`cargo test --workspace` runs the unit tests.
+`cargo test --workspace` runs the unit tests. Before committing, `cargo fmt --all` and
+`cargo clippy --workspace --all-targets` should both come back clean.
 
 To try multi-monitor behaviour without extra screens, split the nested window into several fake
 monitors: `KILN_NESTED_OUTPUTS=2 cargo run -- -b winit`.
@@ -521,3 +503,7 @@ with `kiln msg`, which also has fake input for this: `test-pointer X Y`, `test-c
 1. 10-bit output, multi-GPU.
 2. Workspace and window state over the `msg` socket, for status bars and scripts.
 3. Window open and close animations; workspace swipes that follow your fingers.
+
+## License
+
+[MIT](LICENSE). `vendor/smithay` is Smithay, also MIT (`vendor/smithay/LICENSE.txt`).

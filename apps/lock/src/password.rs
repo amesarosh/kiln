@@ -56,10 +56,15 @@ impl Password {
 
     /// Zero bytes `from..to` of the buffer, which lie past the string's end.
     fn wipe_from(&mut self, from: usize, to: usize) {
-        let ptr = self.0.as_ptr() as *mut u8;
-        for i in from..to.min(self.0.capacity()) {
-            // SAFETY: inside our allocation; volatile so the writes aren't optimized away.
-            unsafe { ptr.add(i).write_volatile(0) };
+        let len = self.0.len();
+        debug_assert!(len <= from, "only bytes past the end are wiped");
+        // SAFETY: only the spare capacity is touched, so the string stays valid UTF-8.
+        let spare = unsafe { self.0.as_mut_vec() }.spare_capacity_mut();
+        let range = from.saturating_sub(len)..to.saturating_sub(len).min(spare.len());
+        for byte in &mut spare[range] {
+            // SAFETY: a valid, exclusive pointer into our allocation; volatile so the write
+            // isn't optimized away.
+            unsafe { byte.as_mut_ptr().write_volatile(0) };
         }
         compiler_fence(Ordering::SeqCst);
     }

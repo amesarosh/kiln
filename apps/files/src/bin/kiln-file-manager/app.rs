@@ -1101,13 +1101,10 @@ impl Manager {
                 Some(m) => m.display().to_string(),
                 None => "Not mounted: click to mount and open".into(),
             };
-            let button = d.mount.is_some().then(|| {
-                if d.ejectable {
-                    ("media-eject-symbolic", "Eject")
-                } else {
-                    ("media-eject-symbolic", "Unmount")
-                }
-            });
+            let button = d
+                .mount
+                .is_some()
+                .then_some(("media-eject-symbolic", if d.ejectable { "Eject" } else { "Unmount" }));
             let (r, b) = view::place_row_with(ui, p, &mut self.icons, &d.label, &d.icon, current, Some(&tip), button);
             if b.is_some_and(|b| b.clicked()) {
                 act = Some((

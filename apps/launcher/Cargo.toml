@@ -1,13 +1,16 @@
 [package]
 name = "kiln-launcher"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "App launcher for the kiln compositor"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 kiln-config = { path = "../../crates/kiln-config" }
 kiln-icons = { path = "../../crates/kiln-icons" }
 kiln-ui = { path = "../../crates/kiln-ui" }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

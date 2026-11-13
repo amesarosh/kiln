@@ -1,18 +1,21 @@
 [package]
 name = "kiln-bluetooth"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Bluetooth for the kiln compositor: turn it on and off, pair, connect and forget devices"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 kiln-config = { path = "../../crates/kiln-config" }
 kiln-ui = { path = "../../crates/kiln-ui" }
 kiln-icons = { path = "../../crates/kiln-icons" }
 # BlueZ, on the system bus.
-zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+zbus.workspace = true
 # Hands the pairing agent the user's answer.
-async-channel = "2"
-serde = "1"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-channel.workspace = true
+serde.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

@@ -510,6 +510,7 @@ mod tests {
             // SAFETY: test-only; the display and context live for the whole test.
             let display = unsafe { EGLDisplay::new(gbm).ok()? };
             let context = EGLContext::new(&display).ok()?;
+            // SAFETY: the context is only made current on the test's own thread.
             return unsafe { GlesRenderer::new(context).ok() };
         }
         None
@@ -551,7 +552,8 @@ mod tests {
                     uniforms,
                 )
                 .unwrap();
-            frame.finish().unwrap();
+            // Reading the pixels back below waits for the draw, so the sync point isn't needed.
+            let _ = frame.finish().unwrap();
         }
         let fb = r.bind(&mut dst).unwrap();
         let mapping = r

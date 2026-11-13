@@ -1367,7 +1367,7 @@ impl State {
         let tab_window =
             |state: &State, i: usize| -> Option<Window> { state.ws().entries.get(i).map(|e| e.window.clone()) };
         if button == BTN_LEFT && matches!(part, Part::Workspace(_) | Part::Tab(_)) {
-            let start = self.seat.get_pointer().unwrap().current_location();
+            let start = self.pointer().current_location();
             self.bar.drag = Some(BarDrag {
                 mon,
                 part,
@@ -1388,7 +1388,7 @@ impl State {
             }
             (Part::Tab(i), BTN_RIGHT) => {
                 if let Some(w) = tab_window(self, i) {
-                    let pos = self.seat.get_pointer().unwrap().current_location();
+                    let pos = self.pointer().current_location();
                     self.open_window_menu(w, pos);
                 }
             }
@@ -1401,7 +1401,7 @@ impl State {
                 let Some(item) = self.bus.tray.get(i).cloned() else {
                     return;
                 };
-                let pos = self.seat.get_pointer().unwrap().current_location();
+                let pos = self.pointer().current_location();
                 let (x, y) = (pos.x as i32, pos.y as i32);
                 let menu = item.has_menu && (button == BTN_RIGHT || (button == BTN_LEFT && item.item_is_menu));
                 if menu {
@@ -1420,7 +1420,7 @@ impl State {
                 self.bus_command(crate::dbus::Command::Media(crate::dbus::mpris::MediaCommand::Next))
             }
             (Part::Bell, BTN_LEFT) => {
-                let pos = self.seat.get_pointer().unwrap().current_location();
+                let pos = self.pointer().current_location();
                 self.open_notifications_menu(mon, pos);
             }
             (Part::Bell, BTN_RIGHT) => self.toggle_dnd(),
@@ -1432,7 +1432,7 @@ impl State {
             (Part::Bluetooth, BTN_LEFT) => self.open_app(BLUETOOTH_APP),
             (Part::Bluetooth, BTN_RIGHT) => self.toggle_bluetooth(),
             (Part::Power, BTN_LEFT | BTN_RIGHT) => {
-                let pos = self.seat.get_pointer().unwrap().current_location();
+                let pos = self.pointer().current_location();
                 self.open_power_menu(mon, pos);
             }
             _ => {}

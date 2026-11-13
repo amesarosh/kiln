@@ -304,10 +304,10 @@ fn read_meminfo() -> HashMap<String, u64> {
     let mut map = HashMap::new();
     if let Ok(s) = fs::read_to_string("/proc/meminfo") {
         for line in s.lines() {
-            if let Some((k, v)) = line.split_once(':') {
-                if let Some(n) = v.split_whitespace().next().and_then(|n| n.parse().ok()) {
-                    map.insert(k.to_string(), n);
-                }
+            if let Some((k, v)) = line.split_once(':')
+                && let Some(n) = v.split_whitespace().next().and_then(|n| n.parse().ok())
+            {
+                map.insert(k.to_string(), n);
             }
         }
     }

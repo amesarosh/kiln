@@ -560,7 +560,9 @@ pub fn date_text(t: SystemTime) -> String {
     let secs = t
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as libc::time_t);
-    let (then, now) = (local(secs), local(unsafe { libc::time(std::ptr::null_mut()) }));
+    // SAFETY: `time(NULL)` only returns the time.
+    let now = unsafe { libc::time(std::ptr::null_mut()) };
+    let (then, now) = (local(secs), local(now));
     let fmt = if then.tm_year == now.tm_year && then.tm_yday == now.tm_yday {
         c"%-I:%M %p"
     } else if then.tm_year == now.tm_year {

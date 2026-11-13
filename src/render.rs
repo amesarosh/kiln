@@ -104,7 +104,7 @@ where
     let scale = Scale::from(output.current_scale().fractional_scale());
 
     // The pointer is always on top.
-    let pointer = state.seat.get_pointer().unwrap().current_location();
+    let pointer = state.pointer().current_location();
     if output_geo.to_f64().contains(pointer) {
         let rel = pointer - output_geo.loc.to_f64();
         match (cursor, &state.cursor_status) {

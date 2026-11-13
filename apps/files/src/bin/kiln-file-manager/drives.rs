@@ -508,8 +508,10 @@ fn list(objects: &Objects) -> Vec<Drive> {
             .collect();
         let mount = if mounts.is_empty() {
             // Disk images: only ones this user attached (snaps' are the system's).
+            // SAFETY: getuid can't fail.
+            let me = unsafe { libc::getuid() };
             if let Some(lp) = iface(o, LOOP)
-                && get::<u32>(&lp, "SetupByUID") != Some(unsafe { libc::getuid() })
+                && get::<u32>(&lp, "SetupByUID") != Some(me)
             {
                 continue;
             }

@@ -48,7 +48,7 @@ impl State {
 
     /// The active constraint on the surface under the pointer, if it applies right here.
     pub fn pointer_constraint(&self) -> Constraint {
-        let pointer = self.seat.get_pointer().unwrap();
+        let pointer = self.pointer();
         let pos = pointer.current_location();
         let Some((surface, origin)) = self.surface_under(pos) else {
             return Constraint::None;
@@ -76,7 +76,7 @@ impl State {
 
     /// Turn on a waiting constraint once the pointer is inside it and its window has focus.
     pub fn maybe_activate_constraint(&mut self) {
-        let pointer = self.seat.get_pointer().unwrap();
+        let pointer = self.pointer();
         let pos = pointer.current_location();
         let Some((surface, origin)) = self.surface_under(pos) else {
             return;
@@ -101,7 +101,7 @@ impl State {
         if !std::mem::take(&mut self.keyboard_focus_moved) {
             return;
         }
-        let pointer = self.seat.get_pointer().unwrap();
+        let pointer = self.pointer();
         let Some(surface) = pointer.current_focus() else { return };
         if self.has_keyboard_focus(&surface) {
             // Focus came (back) to the window under the pointer.

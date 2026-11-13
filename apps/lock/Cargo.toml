@@ -1,17 +1,20 @@
 [package]
 name = "kiln-lock"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Screen locker for the kiln compositor"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 kiln-config = { path = "../../crates/kiln-config" }
 kiln-draw = { path = "../../crates/kiln-draw" }
 # Session lock, keyboard with key repeat, shared-memory buffers. Its calloop and protocols
 # are used through its re-exports, so the versions always match.
-smithay-client-toolkit = "0.20"
-wayland-client = "0.31"
-libc = "0.2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+smithay-client-toolkit.workspace = true
+wayland-client.workspace = true
+libc.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

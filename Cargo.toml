@@ -1,14 +1,40 @@
 [package]
 name = "kiln"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "A lightweight, fast, configurable tiling Wayland compositor"
-license = "MIT"
+license.workspace = true
 
 [workspace]
 members = ["crates/*", "apps/*"]
 # A plain `cargo build` builds the compositor and its apps.
 default-members = [".", "apps/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+# Versions and features shared by more than one crate, kept in one place.
+[workspace.dependencies]
+async-channel = "2"
+libc = "0.2"
+png = "0.18"
+resvg = { version = "0.45", default-features = false }
+serde = { version = "1", features = ["derive"] }
+smithay-client-toolkit = "0.20"
+toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+wayland-client = "0.31"
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+
+[workspace.lints.clippy]
+# Every `unsafe` block says why it's sound.
+undocumented_unsafe_blocks = "warn"
+
+[lints]
+workspace = true
 
 [dependencies]
 kiln-config = { path = "crates/kiln-config" }
@@ -19,23 +45,23 @@ bitflags = "2"
 inotify = { version = "0.11", default-features = false }
 smithay-drm-extras = { version = "0.1", default-features = false }
 xcursor = "0.3"
-serde = { version = "1", features = ["derive"] }
-toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
-tracing = "0.1"
+serde.workspace = true
+toml.workspace = true
+tracing.workspace = true
 # Our own Xwayland connection, for window properties smithay doesn't set.
 x11rb = "0.13"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-resvg = { version = "0.45", default-features = false }
+tracing-subscriber.workspace = true
+resvg.workspace = true
 rustix = { version = "1", features = ["pipe", "fs"] }
-libc = "0.2"
+libc.workspace = true
 # The session bus: notifications, tray icons, media players. Blocking API on our own thread.
-zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+zbus.workspace = true
 # Wallpapers.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
 [dev-dependencies]
 # Writes preview images in tests.
-png = "0.18"
+png.workspace = true
 # Reads back half-float pixels in the HDR shader tests.
 half = "2"
 

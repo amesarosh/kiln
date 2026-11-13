@@ -78,7 +78,7 @@ impl State {
             InputEvent::PointerMotion { event } => {
                 let delta = event.delta();
                 let relative = (delta, event.delta_unaccel(), event.time());
-                let pos = self.clamp_to_output(self.seat.get_pointer().unwrap().current_location() + delta);
+                let pos = self.clamp_to_output(self.pointer().current_location() + delta);
                 match self.pointer_constraint() {
                     // The app gets the movement, but the cursor stays put.
                     Constraint::Locked => return self.send_relative_only(relative),
@@ -122,7 +122,7 @@ impl State {
             InputEvent::GestureSwipeUpdate { event } => self.on_swipe_update(event.delta(), event.time_msec()),
             InputEvent::GestureSwipeEnd { event } => self.on_swipe_end(event.cancelled(), event.time_msec()),
             InputEvent::GesturePinchBegin { event } => {
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer();
                 pointer.gesture_pinch_begin(
                     self,
                     &gestures::GesturePinchBeginEvent {
@@ -133,7 +133,7 @@ impl State {
                 );
             }
             InputEvent::GesturePinchUpdate { event } => {
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer();
                 pointer.gesture_pinch_update(
                     self,
                     &gestures::GesturePinchUpdateEvent {
@@ -145,7 +145,7 @@ impl State {
                 );
             }
             InputEvent::GesturePinchEnd { event } => {
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer();
                 pointer.gesture_pinch_end(
                     self,
                     &gestures::GesturePinchEndEvent {
@@ -156,7 +156,7 @@ impl State {
                 );
             }
             InputEvent::GestureHoldBegin { event } => {
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer();
                 pointer.gesture_hold_begin(
                     self,
                     &gestures::GestureHoldBeginEvent {
@@ -167,7 +167,7 @@ impl State {
                 );
             }
             InputEvent::GestureHoldEnd { event } => {
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer();
                 pointer.gesture_hold_end(
                     self,
                     &gestures::GestureHoldEndEvent {
@@ -326,7 +326,7 @@ impl State {
     }
 
     pub fn on_pointer_moved(&mut self, pos: Point<f64, Logical>, time: u32, relative: Option<Relative>) {
-        let pointer = self.seat.get_pointer().unwrap();
+        let pointer = self.pointer();
         let under = self.surface_under(pos);
         let serial = SERIAL_COUNTER.next_serial();
         // The hardware backend draws the pointer, so moving it is a visible change. So does a
@@ -433,7 +433,7 @@ impl State {
 
     /// Movement for an app that has locked or confined the pointer, without moving it.
     fn send_relative_only(&mut self, (delta, delta_unaccel, utime): Relative) {
-        let pointer = self.seat.get_pointer().unwrap();
+        let pointer = self.pointer();
         let focus = self.surface_under(pointer.current_location());
         pointer.relative_motion(
             self,
@@ -453,7 +453,7 @@ impl State {
 
     /// A pointer button went down or up (also used by `msg test-press`).
     pub fn on_button_raw(&mut self, button: u32, button_state: ButtonState, time: u32) {
-        let pointer = self.seat.get_pointer().unwrap();
+        let pointer = self.pointer();
         let serial = SERIAL_COUNTER.next_serial();
         let pos = pointer.current_location();
         // Mod+click (move/resize) shouldn't count as a Mod tap.
@@ -614,7 +614,7 @@ impl State {
                 .amount(axis)
                 .unwrap_or_else(|| event.amount_v120(axis).unwrap_or(0.0) * 15.0 / 120.0)
         };
-        let pointer = self.seat.get_pointer().unwrap();
+        let pointer = self.pointer();
         let pos = pointer.current_location();
         if self.overview_open() {
             return;
@@ -653,7 +653,7 @@ impl State {
             delta: (0.0, 0.0).into(),
         });
         if !ours {
-            let pointer = self.seat.get_pointer().unwrap();
+            let pointer = self.pointer();
             pointer.gesture_swipe_begin(
                 self,
                 &gestures::GestureSwipeBeginEvent {
@@ -669,7 +669,7 @@ impl State {
         let Some(swipe) = &mut self.swipe else { return };
         swipe.delta += delta;
         if !swipe.ours {
-            let pointer = self.seat.get_pointer().unwrap();
+            let pointer = self.pointer();
             pointer.gesture_swipe_update(self, &gestures::GestureSwipeUpdateEvent { time, delta });
         }
     }
@@ -678,7 +678,7 @@ impl State {
     fn on_swipe_end(&mut self, cancelled: bool, time: u32) {
         let Some(swipe) = self.swipe.take() else { return };
         if !swipe.ours {
-            let pointer = self.seat.get_pointer().unwrap();
+            let pointer = self.pointer();
             pointer.gesture_swipe_end(
                 self,
                 &gestures::GestureSwipeEndEvent {

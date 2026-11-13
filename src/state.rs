@@ -12,7 +12,7 @@ use smithay::{
     input::{
         Seat, SeatState,
         keyboard::{KeyboardHandle, Keycode, XkbConfig},
-        pointer::CursorImageStatus,
+        pointer::{CursorImageStatus, PointerHandle},
     },
     output::Output,
     reexports::{
@@ -432,6 +432,10 @@ impl State {
         self.seat.get_keyboard().expect("seat has a keyboard")
     }
 
+    pub fn pointer(&self) -> PointerHandle<State> {
+        self.seat.get_pointer().expect("seat has a pointer")
+    }
+
     pub fn mod_key(&self) -> ModKey {
         match self.config.general.mod_key {
             ModKey::Auto if self.nested => ModKey::Alt,
@@ -628,7 +632,7 @@ impl State {
         }
         self.sort_monitors();
         // The pointer may now be off every monitor.
-        let pos = self.seat.get_pointer().unwrap().current_location();
+        let pos = self.pointer().current_location();
         if self.monitor_at(pos).is_none()
             && let Some(geo) = self.output().and_then(|o| self.space.output_geometry(&o))
         {
@@ -653,7 +657,7 @@ impl State {
 
     /// Put the pointer at `pos` and tell whatever surface is now under it.
     pub fn move_pointer(&mut self, pos: Point<f64, Logical>) {
-        let pointer = self.seat.get_pointer().unwrap();
+        let pointer = self.pointer();
         let under = self.surface_under(pos);
         let time = self.start_time.elapsed().as_millis() as u32;
         pointer.motion(
@@ -670,7 +674,7 @@ impl State {
 
     /// What's under the pointer changed without it moving (e.g. the screen locked).
     pub fn refresh_pointer_focus(&mut self) {
-        let pos = self.seat.get_pointer().unwrap().current_location();
+        let pos = self.pointer().current_location();
         self.move_pointer(pos);
     }
 

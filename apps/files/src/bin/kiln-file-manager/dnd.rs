@@ -108,7 +108,7 @@ impl Dnd {
         let RawWindowHandle::Wayland(window) = cc.window_handle().ok()?.as_raw() else {
             return None;
         };
-        // Safety: the display lives as long as the window, and we stop before it goes (Drop).
+        // SAFETY: the display lives as long as the window, and we stop before it goes (Drop).
         let backend = unsafe { Backend::from_foreign_display(display.display.as_ptr().cast()) };
         let conn = Connection::from_backend(backend);
         let (globals, mut queue) = registry_queue_init::<State>(&conn)
@@ -124,7 +124,7 @@ impl Dnd {
         // Version 4 at most: from 5 a buffer's offset can't be given when attaching it.
         let compositor: Option<WlCompositor> = globals.bind(&qh, 1..=4, ()).ok();
         let shm: Option<WlShm> = globals.bind(&qh, 1..=1, ()).ok();
-        // Safety: winit's surface, alive as long as the window (we stop first, see Drop).
+        // SAFETY: winit's surface, alive as long as the window (we stop first, see Drop).
         let window_id = unsafe { ObjectId::from_ptr(WlSurface::interface(), window.surface.as_ptr().cast()) }.ok()?;
         let window_surface = WlSurface::from_id(&conn, window_id).ok()?;
 
@@ -213,11 +213,12 @@ impl Dnd {
         for px in icon.rgba.chunks_exact(4) {
             bgra.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
         }
+        // SAFETY: the name is a valid C string; memfd_create has no other preconditions.
         let fd = unsafe { libc::memfd_create(c"drag-icon".as_ptr(), libc::MFD_CLOEXEC) };
         if fd < 0 {
             return None;
         }
-        // Safety: memfd_create just made it.
+        // SAFETY: memfd_create just made it.
         let mut file = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
         file.write_all(&bgra).ok()?;
         let pool = shm.create_pool(file.as_fd(), len as i32, &self.wake, ());
@@ -285,7 +286,7 @@ struct Outgoing {
     text: String,
 }
 
-// Safety: `surface` is only compared, never used through.
+// SAFETY: `surface` is only compared, never used through.
 unsafe impl Send for State {}
 
 impl State {
@@ -334,10 +335,11 @@ impl State {
 
     fn receive(&self, offer: &WlDataOffer) -> Option<String> {
         let mut fds = [0; 2];
+        // SAFETY: pipe2 writes two fds into our array.
         if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
             return None;
         }
-        // Safety: pipe2 just made these and nothing else owns them.
+        // SAFETY: pipe2 just made these and nothing else owns them.
         let (read, write) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
         offer.receive(URI_LIST.into(), write.as_fd());
         drop(write);
@@ -352,6 +354,7 @@ impl State {
                 events: libc::POLLIN,
                 revents: 0,
             };
+            // SAFETY: one valid pollfd, for a file we own.
             if unsafe { libc::poll(&mut pfd, 1, 5000) } <= 0 {
                 tracing::warn!("a dropped file list never arrived");
                 return None;

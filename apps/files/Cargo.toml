@@ -1,25 +1,28 @@
 [package]
 name = "kiln-files"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "File picker for the kiln compositor, offered to apps through the desktop portal"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 kiln-config = { path = "../../crates/kiln-config" }
 kiln-ui = { path = "../../crates/kiln-ui" }
 kiln-icons = { path = "../../crates/kiln-icons" }
 # The session bus: xdg-desktop-portal forwards apps' file chooser requests to us.
-zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+zbus.workspace = true
 # Hands each D-Bus call its answer once the picker window closes.
-async-channel = "2"
-libc = "0.2"
+async-channel.workspace = true
+libc.workspace = true
 # Decoding GVfs's device lists (records too long for plain tuples).
-serde = { version = "1", features = ["derive"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 # Files dragged in from other apps (winit doesn't take Wayland drops): a listener of our own
 # on the window's connection.
 raw-window-handle = "0.6"
-wayland-client = "0.31"
+wayland-client.workspace = true
 wayland-backend = { version = "0.3", features = ["client_system"] }
+
+[lints]
+workspace = true

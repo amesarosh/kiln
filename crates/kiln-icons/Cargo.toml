@@ -1,11 +1,14 @@
 [package]
 name = "kiln-icons"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "App and symbolic icons from the freedesktop icon themes, for kiln and its apps"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
-png = "0.18"
-resvg = { version = "0.45", default-features = false }
-tracing = "0.1"
+png.workspace = true
+resvg.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

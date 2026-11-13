@@ -1,14 +1,17 @@
 [package]
 name = "kiln-tasks"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Task manager for the kiln compositor: processes, CPU, memory, disk and network"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 kiln-config = { path = "../../crates/kiln-config" }
 kiln-ui = { path = "../../crates/kiln-ui" }
 kiln-icons = { path = "../../crates/kiln-icons" }
-libc = "0.2"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+libc.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

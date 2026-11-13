@@ -196,7 +196,7 @@ impl State {
             .set_focus(self, None, smithay::utils::SERIAL_COUNTER.next_serial());
         self.cursor_status = smithay::input::pointer::CursorImageStatus::default_named();
         self.keep_animating(duration);
-        let pos = self.seat.get_pointer().unwrap().current_location();
+        let pos = self.pointer().current_location();
         self.overview_motion(pos);
         self.needs_redraw = true;
     }

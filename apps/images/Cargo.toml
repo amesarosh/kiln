@@ -1,9 +1,9 @@
 [package]
 name = "kiln-image-viewer"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Image viewer for the kiln compositor"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 kiln-config = { path = "../../crates/kiln-config" }
@@ -13,6 +13,9 @@ kiln-files = { path = "../files" }
 image = { version = "0.25", default-features = false, features = [
     "png", "jpeg", "webp", "gif", "bmp", "tiff", "ico", "tga", "qoi", "pnm",
 ] }
-resvg = { version = "0.45", default-features = false }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+resvg.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
